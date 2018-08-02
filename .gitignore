@@ -1,0 +1,11 @@
+*.swp
+*.bak
+*.old
+*~
+*.DS_Store
+*.iml
+.idea/
+.vscode
+.bash_history
+
+LocalSettings.php
