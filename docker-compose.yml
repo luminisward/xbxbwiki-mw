@@ -18,11 +18,13 @@ services:
       - "./mediawiki:/var/www/html"
 
   mysql:
-    image: mysql:5.7
+    image: mysql:5.7.23
     volumes:
       - "mysql:/var/lib/mysql"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --init-connect='SET NAMES utf8mb4'
     environment:
       - MYSQL_ROOT_PASSWORD=MjqVXTUhDgp4xsakiwT5
+      - TZ=Asia/Shanghai
 
   parsoid:
     image: rlewkowicz/parsoid:latest
