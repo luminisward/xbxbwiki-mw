@@ -89,7 +89,8 @@ body {
 	box-shadow: none;
 	background: transparent;
 	width: 100%;
-	min-height: 0;
+  min-height: 0;
+  color: @text;
 }
 #searchButton,
 #mw-searchButton {
@@ -249,11 +250,11 @@ div.suggestions {
 
 a {
 	text-decoration: none;
-	color: @blue;
+	color: @link;
 
 	&:hover,
 	&:visited {
-		color: @blue-dark;
+		color: @link;
 	}
 }
 a.new,

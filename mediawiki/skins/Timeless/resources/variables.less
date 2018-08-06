@@ -2,17 +2,22 @@
 
 // Colours
 
-@text: #013;
-@background: #fff;
-@background2: #f3f3f3;
-@background3: #fcfcfc;
+.mw-notification-area {
+  color: #000;
+}
 
-@background-dark: #777;
-@background-dark2: #555;
-@text-inverse: #fff;
+@text: @grey-bright;
+@background: rgba(9, 24, 49, .5);
+@background2: url(images/bg_new.jpg);
+@background3: rgba(0,0,0,0.5);
+@header-background: #000;
 
-@link: @blue;
-@link-red: @red;
+@background-dark: #000;
+@background-dark2: #000;
+@text-inverse: @grey;
+
+@link: #0ce3ac;
+@link-red: @red-bright;
 
 @grey: #ccc;
 @grey-bright: #eee;
@@ -30,8 +35,6 @@
 @blue-bright: #2af;
 @blue-dark: #069;
 
-@link: @blue;
-@link-red: @red;
 
 // Flair
 
@@ -42,7 +45,7 @@
 // Based on information on https://wiki.archlinux.org/index.php/Metric-compatible_fonts
 @fonts-monospace: 'Consolas', 'Courier', 'Nimbus Mono', 'Liberation Mono', 'Courier New', monospace;
 
-@border: 0.2em;
+@border: 1px;
 @radius: 0.2em;
 
 @font-size: 0.95em;
@@ -136,6 +139,9 @@
 }
 
 .column-right() {
+  a {
+    color: #ffeb3b;
+  }
 	width: @column-right-size;
 	float: right;
 	clear: right;
@@ -147,6 +153,9 @@
 	}
 }
 .column-left() {
+  a {
+    color: #d33;
+  }
 	width: @column-left-size;
 	float: left;
 	clear: left;
