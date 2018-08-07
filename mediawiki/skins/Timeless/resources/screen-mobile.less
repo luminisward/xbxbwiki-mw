@@ -105,9 +105,15 @@
 		left: 23px;
 	}
 }
-#user-tools h2 {
-	right: @content-padding + 0.5em;
-	.background-image-svg( 'images/user-large-grey.svg', 'images/user-large-grey.png' );
+#user-tools  {
+  h2 {
+    top: 4em;
+    right: @content-padding + 0.5em;
+    .background-image-svg( 'images/user-large-grey.svg', 'images/user-large-grey.png' );
+  }
+  .sidebar-inner, .dropdown {
+    top: 7.25em;
+  }
 }
 #site-navigation {
 	h2 {
@@ -119,9 +125,15 @@
 		right: auto;
 	}
 }
-#site-tools h2 {
-	right: 7em;
-	.background-image-svg( 'images/gear-large-grey.svg', 'images/gear-large-grey.png' );
+#site-tools {
+  h2 {
+    top: 4em;
+    right: 7em;
+    .background-image-svg( 'images/gear-large-grey.svg', 'images/gear-large-grey.png' );
+  }
+  .sidebar-inner, .dropdown {
+    top: 7.25em;
+  }
 }
 
 /* Logo */
@@ -243,4 +255,8 @@ div.thumb {
 
 .nomobile {
 	display: none;
+}
+
+#p-search {
+  padding-right: 8em;
 }
