@@ -18,6 +18,7 @@
 @text-inverse: @grey;
 
 @link: #0ce3ac;
+@link-dark: #0ba881;
 @link-red: @red-bright;
 
 @grey: #ccc;
@@ -49,7 +50,7 @@
 @border: 1px;
 @radius: 0.2em;
 
-@font-size: 0.95em;
+@font-size: 1em;
 
 // Widths
 
@@ -227,4 +228,90 @@
       color: @text;
     }
   }
+}
+
+h1#firstHeading {
+  min-width: 300px;
+  margin-right: 100px;
+  margin-left: 18px;
+  margin-top: 0px !important;
+  padding-left: 20px;
+  height: 52px;
+  line-height: 52px;
+
+  background-image: linear-gradient(to right, #fff 50%, transparent 100%);
+  background-position: bottom right;
+  background-size: 100% 1px;
+  background-repeat: no-repeat;
+
+  &::before {
+    float: left;
+    content: "";
+    margin-left: -72px;
+    width: 59px !important;
+    height: 66px;
+    background-image: url(images/h1.png);
+    background-repeat: no-repeat;
+  }
+}
+
+#mw-content-text {
+    h2, h3, h4, h5, h6,
+  .h2, .h3, .h4, .h5, .h6 {
+    font-weight: bold;
+    font-style: oblique;
+  }
+
+  .mw-parser-output {
+    > h2 {
+      text-align: center;
+      margin-left: 14px;
+      margin-right: 14px;
+      height: 52px;
+      line-height: 52px;
+      background: url(images/h2-2.png) repeat-x;
+      &::before {
+        float: left;
+        margin-left: -24px;
+        width: 24px;
+        height: 52px;
+        content: "";
+        background-image: url(images/h2-1.png);
+      }
+      &::after {
+        float: right;
+        margin-right: -25px;
+        width: 25px;
+        height: 52px;
+        content: "";
+        background-image: url(images/h2-3.png);
+      }
+    }
+  
+    > h3 {
+      padding-left: 5px;
+      margin-left: 14px !important;
+      background-image: linear-gradient(to right, #0d0d0d 50%, transparent 100%);
+      border-bottom: 2px solid #0ce3ac;
+      height: 33px;
+      line-height: 33px;
+      &::before {
+        float: left;
+        content: "";
+        margin-left: -25px;
+        width: 20px;
+        height: 33px;
+        background-color: #0d0d0d;
+        clip-path: polygon(0 62%, 200% -62%, 200% 200%);
+        border-bottom: 2px solid #0ce3ac;
+      }
+    }
+  
+    > h4 { 
+      border-bottom: 1px solid #a2a9b1;
+      height: 2em;
+      line-height: 2em;
+      padding-left: 0.5em;
+    }
+  } 
 }
