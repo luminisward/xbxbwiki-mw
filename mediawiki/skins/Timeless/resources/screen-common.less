@@ -10,7 +10,7 @@ body {
 body {
 	font-family: @fonts;
 	color: @text;
-	background: @background-dark;
+	background: linear-gradient(to right,#6f6316,#a59c58,#6f6316);
 	font-size: @font-size;
 	line-height: 1.4;
 }
@@ -22,16 +22,17 @@ body {
 	position: relative;
 }
 #mw-content-container {
+  border-bottom: solid 4px @grey;
 	background: @background2;
 	word-wrap: break-word;
 }
 #mw-footer-container {
-	border-top: solid 1px @background-dark2;
+  border-top: solid 1px @grey;
 	box-shadow: inset 0 7px 2px -4px rgba( 0, 0, 0, 0.1 );
-	color: @text-inverse;
+	color: @text-footer;
 
 	a {
-		color: @text-inverse;
+		color: @link;
 	}
 	ul {
 		margin: 0;
@@ -194,9 +195,6 @@ div.suggestions {
 
 /* Content */
 
-#mw-content-container {
-	border-bottom: solid 4px @blue-dark;
-}
 #mw-page-header-links {
 	div,
 	ul,
