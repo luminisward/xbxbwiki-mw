@@ -2,14 +2,6 @@
 
 // Colours
 
-.mw-notification-area {
-  color: #000;
-}
-#bodyContent .mw-number-text {
-	h3, p {
-		color: @grey;
-	}
-}
 
 @text: @grey-bright;
 @background: rgba(9, 24, 49, .5);
@@ -320,4 +312,24 @@ h1#firstHeading {
       padding-left: 0.5em;
     }
   } 
+}
+
+// 暗色调修正
+
+.mw-notification-area {
+  color: #000;
+}
+#bodyContent .mw-number-text {
+	h3, p {
+		color: @grey;
+	}
+}
+.mw-datatable {
+	th, td {
+		background: none;
+	}
+	
+	tr:hover td {
+		background-color: rgba(24,54,81,0.9);
+	}
 }
