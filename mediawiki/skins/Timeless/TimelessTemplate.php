@@ -383,15 +383,6 @@ class TimelessTemplate extends BaseTemplate {
 			Html::element( 'div', [ 'class' => 'color-left' ] ) .
 			Html::element( 'div', [ 'class' => 'color-right' ] )
 		);
-		$html .= Html::rawElement( 'div', [ 'id' => 'mw-header-nav-hack' ],
-			Html::rawElement( 'div', [ 'class' => 'color-bar' ],
-				Html::rawElement( 'div', [ 'class' => 'color-middle-container' ],
-					Html::element( 'div', [ 'class' => 'color-middle' ] )
-				) .
-				Html::element( 'div', [ 'class' => 'color-left' ] ) .
-				Html::element( 'div', [ 'class' => 'color-right' ] )
-			)
-		);
 
 		return $html;
 	}
