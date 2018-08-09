@@ -10,7 +10,7 @@ body {
 body {
 	font-family: @fonts;
 	color: @text;
-	background: linear-gradient(to right,#6f6316,#a59c58,#6f6316);
+	background: url(images/bg_new.jpg) black;;
 	font-size: @font-size;
 	line-height: 1.4;
 }
@@ -18,17 +18,17 @@ body {
 #mw-content {
 	.box;
 	background: @background;
-	padding: 1em @content-padding 3em;
-	position: relative;
+	padding: 0.5em @content-padding 1em;
+  position: relative;
+  margin-bottom: 1em;
 }
 #mw-content-container {
-  border-bottom: solid 4px @grey;
+  border-bottom: solid 2px @grey;
 	background: @background2;
 	word-wrap: break-word;
 }
 #mw-footer-container {
-  border-top: solid 1px @grey;
-	box-shadow: inset 0 7px 2px -4px rgba( 0, 0, 0, 0.1 );
+  background-color: rgba(53, 2, 84, 0.3);
 	color: @text-footer;
 
 	a {
@@ -340,7 +340,7 @@ pre,
 
 
 	h1 {
-    font-size: 2em;
+    font-size: 2.5em;
 	}
 	h2 {
 		font-size: 1.5em;

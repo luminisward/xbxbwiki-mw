@@ -5,10 +5,10 @@
 
 @text: @grey-bright;
 @background: rgba(9, 24, 49, .5);
-@background2: url(images/bg_new.jpg) black;
+@background2: none;
 // @background2: url(https://xenobladechronicles2.nintendo.com/assets/img/global/bg-pattern-gray-diamond.gif);
 @background3: rgba(0,0,0,0.5);
-@header-background: linear-gradient(to right,#000142,#44004e,#000142);
+@header-background: rgba(0,0,0,0.6);
 
 @background-dark: #000;
 @background-dark2: #000;
@@ -200,13 +200,10 @@
 
 	#catlinks {
 		margin: 0 @content-padding;
-		padding: 1.5em 0 0.5em;
+		padding: 0.5em 0 0.5em;
 
 		li {
 			border-left: 0;
-		}
-		div {
-			margin: 0 0 0.35em;
 		}
 	}
 }
@@ -356,4 +353,15 @@ code {
 
 .smw-callout {
   background: none;
+}
+
+#mw-wrapper {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+
+  #mw-content-container {
+    flex: 1 0 auto;
+  }
+
 }
