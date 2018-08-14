@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     opcache \
     intl \
     && pecl install apcu \
-    && docker-php-ext-enable apcu
+    && docker-php-ext-enable apcu \
+    && pear install Net_SMTP
     # && pecl install xdebug \
     # && docker-php-ext-enable xdebug 
