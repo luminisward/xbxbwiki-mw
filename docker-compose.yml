@@ -4,7 +4,7 @@ services:
     build: ./php
     volumes:
       - "./php/php-fpm.d/www.conf:/usr/local/etc/php-fpm.d/www.conf"
-      # - "./php/php.ini:/usr/local/etc/php/php.ini"
+      - "./php/php.ini:/usr/local/etc/php/php.ini"
       - "./mediawiki:/var/www/html"
     # Xdebug
     # extra_hosts:
