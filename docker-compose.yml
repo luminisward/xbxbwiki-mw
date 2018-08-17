@@ -1,7 +1,7 @@
 version: '3'
 services:
   phpfpm:
-    build: ./php
+    image: luminisward/mw-php
     volumes:
       - "./php/php-fpm.d/www.conf:/usr/local/etc/php-fpm.d/www.conf"
       - "./php/php.ini:/usr/local/etc/php/php.ini"
