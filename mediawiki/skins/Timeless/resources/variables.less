@@ -379,3 +379,13 @@ code {
 .search-types .current a {
   color: @grey-bright;
 }
+
+.group {
+  &:before, &:after {
+    content: "";
+    display: table;
+  }
+  &:after {
+    clear: both;
+  }
+}
