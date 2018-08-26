@@ -25,6 +25,8 @@ services:
     environment:
       - MYSQL_ROOT_PASSWORD=MjqVXTUhDgp4xsakiwT5
       - TZ=Asia/Shanghai
+    ports:
+      - "127.0.0.1:3306:3306"
 
   parsoid:
     image: rlewkowicz/parsoid:latest
