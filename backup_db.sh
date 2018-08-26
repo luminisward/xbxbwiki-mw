@@ -6,3 +6,4 @@ backupFile="xbxbwiki`date +%y%m%d_%H%M%S`.sql"
 
 docker-compose exec mysql mysqldump -u$DBuser -p$DBpassword $DBname > $backupFile
 sed -i "/mysqldump/d" $backupFile
+gzip $backupFile
