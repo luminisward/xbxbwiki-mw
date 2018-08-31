@@ -37,7 +37,7 @@ class TimelessTemplate extends BaseTemplate {
 		$html .= Html::rawElement( 'div', [ 'id' => 'mw-content-container', 'class' => 'ts-container' ],
 			Html::rawElement( 'div', [ 'id' => 'mw-content-block', 'class' => 'ts-inner' ],
 				Html::rawElement( 'div', [ 'id' => 'mw-site-navigation' ],
-					$this->getLogo( 'p-logo', 'image' ) .
+					// $this->getLogo( 'p-logo', 'image' ) .
 					$this->getMainNavigation() .
 					$this->getSidebarChunk(
 						'site-tools',

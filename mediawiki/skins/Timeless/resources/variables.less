@@ -67,7 +67,7 @@
 @content-padding: 2em;
 
 @column-left-size: 14em;
-@column-right-size: 16em;
+@column-right-size: 14em;
 
 @fixed-header-height: 3.125em;
 @color-height: 0.35em;
@@ -144,21 +144,29 @@
 	box-sizing: border-box;
 
 	.sidebar-chunk {
-    background-color: rgba(128, 128, 0, 0.4);
-		.nav-block();
-	}
+        background-color: rgba(128, 0, 0, 0.4);
+        .nav-block();
+    }
+    background-repeat: no-repeat;
+    background-size: @column-right-size;
+    padding-top: 215px;
+    background-image: url('images/bg-homura.png');
 }
 .column-left() {
-	width: @column-left-size;
+    width: @column-left-size;
 	float: left;
 	clear: left;
 	padding-right: 1em;
 	box-sizing: border-box;
-
+    
 	.sidebar-chunk {
-    background-color: rgba(128, 0, 0, 0.4);
+        background-color: rgba(128, 128, 0, 0.4);
 		.nav-block();
-	}
+    }
+    background-repeat: no-repeat;
+    background-size: @column-left-size;
+    padding-top: 215px;
+    background-image: url('images/bg-hikari.png');
 }
 
 // Dropdowns
