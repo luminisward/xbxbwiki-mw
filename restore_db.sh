@@ -1,6 +1,9 @@
 DBname=`grep '$wgDBname' mediawiki/LocalSettings.php | awk -F "[\"\"]" '{print $2}'`
+echo 'DBname:'$DBname
 DBuser=`grep '$wgDBuser' mediawiki/LocalSettings.php | awk -F "[\"\"]" '{print $2}'`
-DBpassword=`grep '$wgDBpassword' mediawiki/LocalSettings.php | awk -F "[\"\"]" '{print $2}'`
+echo 'DBuser:'$DBuser
+DBpassword=`docker run --rm -it -v "$PWD":/var/www/html php:7-fpm php scripts/getDBPassword.php`
+echo 'DBpassword:'$DBpassword
 
 MYSQL_CONTAINER=`docker ps | grep mysql | awk '{print $NF}'`
 
