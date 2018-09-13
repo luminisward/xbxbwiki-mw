@@ -31,6 +31,10 @@
     background: #f8f8f8;
 }
 
+.comment-preview p {
+  color: #333;
+}
+
 .comment-toolbar {
     position: relative;
     height: 32px;
