@@ -29,11 +29,11 @@ services:
       - "127.0.0.1:3306:3306"
 
   parsoid:
-    image: rlewkowicz/parsoid:latest
+    image: thenets/parsoid:0.9.0
+    environment:
+      - PARSOID_DOMAIN_api=http://nginx/api.php
     # ports:
     #   - "8000:8000"
-    volumes:
-      - "./parsoid/config.yaml:/usr/local/lib/node_modules/parsoid/config.yaml"
     hostname: parsoid
       
   restbase:
