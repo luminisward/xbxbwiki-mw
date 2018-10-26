@@ -12,3 +12,5 @@ mediawiki/images
 sitemap*
 mediawiki/composer.lock
 mediawiki/vendor/
+mediawiki/extensions/SemanticMediaWiki/
+mediawiki/extensions/SemanticScribunto/
