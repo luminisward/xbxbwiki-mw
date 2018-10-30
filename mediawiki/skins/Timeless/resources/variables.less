@@ -437,3 +437,25 @@ code {
 .not-patrolled {
 	background-color: rgba(28, 3, 220, 0.5);
 }
+
+.borderless-table {
+  width: 100%;
+  margin-bottom: 1rem;
+  background-color: transparent;
+  
+  tr:first-child {
+    td, th {
+      border-top: none;
+    }
+  } 
+
+  th {
+    vertical-align: bottom;
+    border-bottom: 2px solid #cccccc;
+  }
+  td, th {
+    padding: .5rem;
+    vertical-align: top;
+    border-top: 1px solid #cccccc;
+  }
+}
