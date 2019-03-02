@@ -1,0 +1,20 @@
+{
+	"@metadata": {
+		"authors": [
+			"JNF"
+		]
+	},
+	"msu-desc": "מאפשר העלאת קבצים בקלות. כולל אפשרות לקבצים מרובים וממשק גרירת קבצים",
+	"msu-button-title": "בחרו קבצים",
+	"msu-insert-link": "הכנס קישור",
+	"msu-insert-gallery": "הפוך תמונות לגלריה",
+	"msu-insert-image": "הכנס תמונה",
+	"msu-insert-video": "הכנס סרטון",
+	"msu-cancel-upload": "בטל העלאה",
+	"msu-clean-all": "נקה רשימה",
+	"msu-ext-not-allowed": "רק סוגי הקבצים הבאים מורשים:",
+	"msu-upload-this": "לחצו כאן להעלאת קובץ זה",
+	"msu-upload-all": "לחצו כאן להעלאת כל הקבצים",
+	"msu-dropzone": "גררו קבצים לכאן",
+	"msu-comment": "MsUpload"
+}
