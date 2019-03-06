@@ -203,22 +203,23 @@ Paginator.prototype.repaint = function() {
 }
 
 var pager = new Paginator();
-
-$('#bodyContent').after('<div class="comment-container-top" disabled></div>', '<div class="comment-container"></div>', pager.object, function () {
-  var userPreference = getUserCommentPreference();
-  if (canpost && userPreference) return createReplyBox('');
+if (mw.user.getId() !== 0) {
+  $('#bodyContent').after('<div class="comment-container-top" disabled></div>', '<div class="comment-container"></div>', pager.object, function () {
+    var userPreference = getUserCommentPreference();
+    if (canpost && userPreference) return createReplyBox('');
+    
+    var noticeContainer = $('<div>').addClass('comment-bannotice');
+    
+    if (!userPreference) {
+      noticeContainer.html(config.UserOptOutNotice);
+    } else {
+      noticeContainer.html(config.CantPostNotice);
+    }
+    
+    return noticeContainer;
+  }());
+}
   
-  var noticeContainer = $('<div>').addClass('comment-bannotice');
-  
-  if (!userPreference) {
-    noticeContainer.html(config.UserOptOutNotice);
-  } else {
-    noticeContainer.html(config.CantPostNotice);
-  }
-  
-  return noticeContainer;
-}());
-
 if (mw.util.getParamValue('flowthread-page')) {
   reloadComments((parseInt(mw.util.getParamValue('flowthread-page')) - 1) * 10);
 } else {

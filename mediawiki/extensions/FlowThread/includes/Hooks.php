@@ -40,7 +40,7 @@ class Hooks {
 
 		// No commenting on main page
 		if ($title->isMainPage()) {
-			// return true;
+			return true;
 		}
 
 		// Do not display when printing
