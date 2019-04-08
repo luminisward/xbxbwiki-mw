@@ -2,6 +2,7 @@ version: '3'
 services:
   phpfpm:
     image: luminisward/mw-php
+    # build: ./php
     volumes:
       - "./php/php-fpm.d/www.conf:/usr/local/etc/php-fpm.d/www.conf"
       - "./php/php.ini:/usr/local/etc/php/php.ini"
@@ -9,6 +10,7 @@ services:
     # Xdebug
     # extra_hosts:
     #   docker_host: 192.168.66.10 
+
   nginx:
     image: nginx:latest
     ports:
@@ -18,7 +20,7 @@ services:
       - "./mediawiki:/var/www/html"
 
   mysql:
-    image: mysql:5.7.23
+    image: mysql:5.7
     volumes:
       - "mysql:/var/lib/mysql"
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --init-connect='SET NAMES utf8mb4'
@@ -26,10 +28,10 @@ services:
       - MYSQL_ROOT_PASSWORD=MjqVXTUhDgp4xsakiwT5
       - TZ=Asia/Shanghai
     ports:
-      - "127.0.0.1:3306:3306"
+      - "3306:3306"
 
   parsoid:
-    image: thenets/parsoid:0.9.0
+    image: thenets/parsoid:0.10.0
     environment:
       - PARSOID_DOMAIN_api=http://nginx/api.php
     # ports:
@@ -43,15 +45,15 @@ services:
     volumes:
       - "./restbase/config.yaml:/opt/config.yaml:ro"
 
-  myadmin:
-    image: phpmyadmin/phpmyadmin
-    ports:
-      - "8080:80"
-    environment:
-      - PMA_HOST=mysql
-
   memcached:
     image: memcached
+
+  # myadmin:
+  #   image: phpmyadmin/phpmyadmin
+  #   ports:
+  #     - "8080:80"
+  #   environment:
+  #     - PMA_HOST=mysql
 
 volumes:
   mysql:
