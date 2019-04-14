@@ -31,29 +31,23 @@ services:
       - "3306:3306"
 
   parsoid:
-    image: thenets/parsoid:0.10.0
-    environment:
-      - PARSOID_DOMAIN_api=http://nginx/api.php
+    image: luminisward/parsoid
+    # build: ./parsoid
     # ports:
     #   - "8000:8000"
-    hostname: parsoid
+    volumes:
+      - "./parsoid/config.yaml:/parsoid/config.yaml:ro"
       
   restbase:
-    image: wikitolearn/restbase
+    image: luminisward/restbase
+    # build: ./restbase
     # ports:
     #   - "7231:7231"
     volumes:
-      - "./restbase/config.yaml:/opt/config.yaml:ro"
+      - "./restbase/config.yaml:/restbase/config.yaml:ro"
 
   memcached:
     image: memcached
-
-  # myadmin:
-  #   image: phpmyadmin/phpmyadmin
-  #   ports:
-  #     - "8080:80"
-  #   environment:
-  #     - PMA_HOST=mysql
 
 volumes:
   mysql:
