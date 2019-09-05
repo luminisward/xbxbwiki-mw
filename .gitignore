@@ -8,6 +8,7 @@
 .vscode
 .bash_history
 LocalSettings.php
+LocalSettings_*.php
 mediawiki/images
 sitemap*
 mediawiki/composer.lock
