@@ -69,5 +69,5 @@ services:
         # Configure Parsoid to point to your MediaWiki instances.
         mwApis:
           -
-            uri: 'http://nginx/api.php'
+            uri: 'http://xbxb_nginx:8080/api.php'
             domain: 'api'

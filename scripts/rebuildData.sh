@@ -1,1 +1,1 @@
-docker-compose exec phpfpm php extensions/SemanticMediaWiki/maintenance/rebuildData.php -v
+docker-compose exec xbxb_phpfpm php extensions/SemanticMediaWiki/maintenance/rebuildData.php -v

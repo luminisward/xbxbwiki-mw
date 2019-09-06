@@ -9,7 +9,7 @@
 .bash_history
 LocalSettings.php
 LocalSettings_*.php
-mediawiki/images
+images/*
 sitemap*
 mediawiki/composer.lock
 mediawiki/vendor/

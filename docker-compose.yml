@@ -1,24 +1,6 @@
 version: '3'
 services:
-  phpfpm:
-    image: luminisward/mw-php
-    # build: ./php
-    volumes:
-      - "./php/php-fpm.d/www.conf:/usr/local/etc/php-fpm.d/www.conf"
-      - "./php/php.ini:/usr/local/etc/php/php.ini"
-      - "./mediawiki:/var/www/html"
-    # Xdebug
-    # extra_hosts:
-    #   docker_host: 192.168.66.10 
-
-  nginx:
-    image: nginx:latest
-    ports:
-      - "80:80"
-    volumes:
-      - "./nginx/conf.d:/etc/nginx/conf.d"
-      - "./mediawiki:/var/www/html"
-
+  # common
   mysql:
     image: mysql:5.7
     volumes:
@@ -29,25 +11,90 @@ services:
       - TZ=Asia/Shanghai
     ports:
       - "3306:3306"
+  memcached:
+    image: memcached
+  reverse_proxy_nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - "./reverse_proxy_nginx/conf.d:/etc/nginx/conf.d"
 
-  parsoid:
+
+  # xbxbwiki
+  xbxb_phpfpm:
+    image: luminisward/mw-php
+    # build: ./php
+    volumes:
+      - "./php/php-fpm.d/www.conf:/usr/local/etc/php-fpm.d/www.conf"
+      - "./php/php.ini:/usr/local/etc/php/php.ini"
+      - "./mediawiki:/var/www/html"
+      - "./xbxb/LocalSettings.php:/var/www/html/LocalSettings.php"
+      - "./xbxb/images:/var/www/html/images"
+    # Xdebug
+    # extra_hosts:
+    #   docker_host: 192.168.66.10 
+  xbxb_nginx:
+    image: nginx:latest
+    # ports:
+    #   - "8080:8080"
+    volumes:
+      - "./xbxb/nginx/conf.d:/etc/nginx/conf.d"
+      - "./mediawiki:/var/www/html"
+      - "./xbxb/LocalSettings.php:/var/www/html/LocalSettings.php"
+      - "./xbxb/images:/var/www/html/images"
+  xbxb_parsoid:
     image: luminisward/parsoid
     # build: ./parsoid
     # ports:
     #   - "8000:8000"
     volumes:
-      - "./parsoid/config.yaml:/parsoid/config.yaml:ro"
-      
-  restbase:
+      - "./xbxb/parsoid/config.yaml:/parsoid/config.yaml:ro"
+  xbxb_restbase:
     image: luminisward/restbase
     # build: ./restbase
     # ports:
     #   - "7231:7231"
     volumes:
-      - "./restbase/config.yaml:/restbase/config.yaml:ro"
+      - "./xbxb/restbase/config.yaml:/restbase/config.yaml:ro"
 
-  memcached:
-    image: memcached
+  # # xbdwiki
+  xbd_phpfpm:
+    image: luminisward/mw-php
+    # build: ./php
+    volumes:
+      - "./php/php-fpm.d/www.conf:/usr/local/etc/php-fpm.d/www.conf"
+      - "./php/php.ini:/usr/local/etc/php/php.ini"
+      - "./mediawiki:/var/www/html"
+      - "./xbd/LocalSettings.php:/var/www/html/LocalSettings.php"
+      - "./xbd/images:/var/www/html/images"
+    # Xdebug
+    # extra_hosts:
+    #   docker_host: 192.168.66.10 
+  xbd_nginx:
+    image: nginx:latest
+    # ports:
+    #   - "8080:8080"
+    volumes:
+      - "./xbd/nginx/conf.d:/etc/nginx/conf.d"
+      - "./mediawiki:/var/www/html"
+      - "./xbd/LocalSettings.php:/var/www/html/LocalSettings.php"
+      - "./xbd/images:/var/www/html/images"
+  xbd_parsoid:
+    image: luminisward/parsoid
+    # build: ./parsoid
+    # ports:
+    #   - "8000:8000"
+    volumes:
+      - "./xbd/parsoid/config.yaml:/parsoid/config.yaml:ro"
+  xbd_restbase:
+    image: luminisward/restbase
+    # build: ./restbase
+    # ports:
+    #   - "7231:7231"
+    volumes:
+      - "./xbd/restbase/config.yaml:/restbase/config.yaml:ro"
+
 
 volumes:
   mysql:

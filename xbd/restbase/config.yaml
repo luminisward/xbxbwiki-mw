@@ -35,9 +35,9 @@ services:
             name: http
             options:
             allow:
-              - pattern: http://nginx/api.php
+              - pattern: http://xbd_nginx/api.php
                 forward_headers: true
-              - pattern: http://parsoid:8000
+              - pattern: http://xbd_parsoid:8000
                 forward_headers: true
               - pattern: /^https?:\/\//
         paths:
@@ -47,12 +47,12 @@ services:
                 options:
                   action:
                     # XXX Check API URL!
-                    apiUriTemplate: http://nginx/api.php
+                    apiUriTemplate: http://xbd_nginx:8080/api.php
                     # XXX Check the base RESTBase URI
-                    baseUriTemplate: "{{'http://restbase:7231/{domain}/v1'}}"
+                    baseUriTemplate: "{{'http://xbd_restbase:7231/{domain}/v1'}}"
                   parsoid:
                     # XXX Check Parsoid URL!
-                    host: http://parsoid:8000
+                    host: http://xbd_parsoid:8000
                   table:
                     backend: sqlite
                     dbname: db.sqlite3
