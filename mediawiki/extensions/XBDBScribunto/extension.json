@@ -1,0 +1,28 @@
+{
+	"name": "XBDBScribunto",
+	"version": "0.0.1",
+	"author": [
+		"Monado"
+	],
+	"descriptionmsg": "xbdb-scribunto-desc",
+	"type": "other",
+	"requires": {
+    "MediaWiki": ">= 1.27",
+    "extensions": {
+      "Scribunto": "*"
+    }
+	},
+  "manifest_version": 1,
+  "AutoloadClasses": {
+    "XBDBScribunto": "XBDBScribunto.php",
+    "XBDBScribuntoLuaLibrary": "XBDBScribuntoLuaLibrary.php"
+  },
+  "ExtensionFunctions": [
+		"XBDBScribunto::onExtensionFunction"
+  ],
+  "MessagesDirs": {
+    "ExtensionName": [
+      "i18n"
+    ]
+  }
+}
