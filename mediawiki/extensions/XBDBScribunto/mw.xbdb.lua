@@ -19,8 +19,9 @@ function xbdb.setupInterface( options )
     package.loaded['mw.xbdb'] = xbdb
 end
 
-function xbdb.test(parameters)
-  return php.t()
+function xbdb.select(tablename, fields)
+  fields = fields or '*'
+  return php.select(tablename, fields)
 end
 
 return xbdb
