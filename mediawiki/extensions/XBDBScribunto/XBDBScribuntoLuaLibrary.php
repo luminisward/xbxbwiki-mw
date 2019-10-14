@@ -9,67 +9,48 @@ class XBDBScribuntoLuaLibrary extends Scribunto_LuaLibraryBase
     {
         parent::__construct($engine);
 
-        $servername = "mysql";
-        $username = "root";
-        $password = "MjqVXTUhDgp4xsakiwT5";
-        $dbname = 'mysql';
+        global $wgXBDBScribuntoConnection;
+        $servername = $wgXBDBScribuntoConnection["servername"];
+        $username   = $wgXBDBScribuntoConnection["username"];
+        $password   = $wgXBDBScribuntoConnection["password"];
+        $dbname     = $wgXBDBScribuntoConnection["dbname"];
 
-        $this->conn = new mysqli($servername, $username, $password, $dbname);
-        if ($this->conn->connect_error) {
+        $e = function_exists(pg_connect);
+
+        $this->conn = new PDO("pgsql:host=$servername;dbname=$dbname;user=$username;password=$password");
+        if (!$this->conn) {
             throw new Exception("连接失败: " . $this->conn->connect_error);
         }
-
-        $result = $this->conn->query("SHOW TABLES")->fetch_all();
-        $this->tables = array_column($result, 0);
     }
 
-    public function __destruct()
-    {
-        $this->conn->close();
-    }
+    // public function __destruct()
+    // {
+    //     $this->conn = null;
+    // }
 
     public function register()
     {
         $lib = [
-            'select' => [$this, 'select'],
+            'query' => [$this, 'query'],
         ];
         $this->getEngine()->registerInterface(__DIR__ . '/' . 'mw.xbdb.lua', $lib, []);
     }
 
-    public function select($table, $fields, $conds = '')
+    public function query($sql, $schema)
     {
-        if (!in_array($table, $this->tables)) {
-            throw new Exception('Can\'t find table.');
-        }
-
-        $result = $this->conn->query("SHOW COLUMNS FROM $table")->fetch_all();
-        $columns = array_column($result, 0);
-        $columns[] = '*';
-
-        if (is_string($fields) && !is_array($fields)) {
-            $fields = array_map('trim', explode(',', $fields));
-        }
-        foreach ($fields as $field) {
-            if (!in_array($field, $columns)) {
-                throw new Exception("Can't find column: $field.");
+        $this->conn->exec("SET search_path TO $schema");
+        $stocks = [];
+        if ($stmt = $this->conn->query($sql)) {
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $stocks[] = $row;
             }
+        } else {
+            throw new Exception("Wrong SQL:\n $sql");
         }
-        $fields = join(',', $fields);
 
+        array_unshift($stocks, '');
+        unset($stocks[0]);
 
-        $data = [];
-        $stmt = $this->conn->stmt_init();
-        if ($stmt->prepare("SELECT $fields FROM $table")) {
-            $stmt->execute();
-
-            $result = $stmt->get_result();
-
-            while ($row = $result->fetch_assoc()) {
-                $data[] = $row;
-            }
-
-            $stmt->close();
-        }
-        return [$data];
+        return [$stocks];
     }
 }
