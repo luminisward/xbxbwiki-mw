@@ -515,3 +515,54 @@ pre,
 .mw-json th {
 	background: none!important;
 }
+
+// tabs OOui
+.xbxbtabs {
+  table.wikitable {
+    margin: 0;
+  }
+  .oo-ui-panelLayout-expanded {
+    position: static !important;
+  }
+  // .oo-ui-menuLayout-content {
+  //   border: 1px solid #3e3e3e;
+  // }
+  .oo-ui-menuLayout-expanded,
+  .oo-ui-menuLayout-expanded > .oo-ui-menuLayout-menu,
+  .oo-ui-menuLayout-expanded > .oo-ui-menuLayout-content {
+    position: static !important;
+  }
+  .oo-ui-indexLayout-stackLayout > .oo-ui-panelLayout {
+    padding: 0;
+  }
+  .oo-ui-tabSelectWidget {
+    background: none;
+  }
+  .oo-ui-menuLayout-menu {
+    height: inherit !important;
+  }
+  .oo-ui-optionWidget {
+    background: none;
+  }
+  .oo-ui-tabOptionWidget {
+    color: #0ce3ac;
+    font-weight: normal;
+    margin: 0;
+  }
+  .oo-ui-tabOptionWidget.oo-ui-optionWidget-selected {
+    color: #eeeeee;
+    background: none;
+    border: 1px solid #3e3e3e;
+    border-radius: 4px 4px 0 0;
+    margin-bottom: -1px;
+  }
+  .oo-ui-tabOptionWidget.oo-ui-widget-enabled.oo-ui-optionWidget-selected {
+    cursor: initial;
+  }
+  .oo-ui-tabOptionWidget.oo-ui-widget-enabled.oo-ui-optionWidget-selected:hover{
+    background: none;
+  }
+  .oo-ui-tabOptionWidget.oo-ui-widget-enabled:active {
+    background-color: rgba(255,255,255,0.5);
+  }
+}
