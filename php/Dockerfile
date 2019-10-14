@@ -1,5 +1,5 @@
 FROM php:7.1-fpm
-RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
+# RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
 RUN apt-get update && apt-get install -y \
     git \
     zlib1g-dev libicu-dev g++ \
