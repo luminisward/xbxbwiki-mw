@@ -4,7 +4,7 @@ services:
   mysql:
     image: mysql:5.7
     volumes:
-      - "mysql:/var/lib/mysql"
+      - "./mysql/data:/var/lib/mysql"
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --init-connect='SET NAMES utf8mb4'
     environment:
       - MYSQL_ROOT_PASSWORD=MjqVXTUhDgp4xsakiwT5
@@ -94,7 +94,3 @@ services:
     #   - "7231:7231"
     volumes:
       - "./xbd/restbase/config.yaml:/restbase/config.yaml:ro"
-
-
-volumes:
-  mysql:

@@ -7,11 +7,12 @@
 .idea/
 .vscode
 .bash_history
-LocalSettings.php
-LocalSettings_*.php
-images/
+
+xb*/LocalSettings.php
+xb*/images/
 sitemap*
 mediawiki/composer.lock
 mediawiki/vendor/
 mediawiki/extensions/SemanticMediaWiki/
 mediawiki/extensions/SemanticScribunto/
+mysql/data/
