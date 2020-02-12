@@ -17,8 +17,10 @@ services:
     image: nginx:latest
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - "./reverse_proxy_nginx/conf.d:/etc/nginx/conf.d"
+      - "./reverse_proxy_nginx/cert:/cert"
 
 
   # xbxbwiki
@@ -33,7 +35,7 @@ services:
       - "./xbxb/images:/var/www/html/images"
     # Xdebug
     # extra_hosts:
-    #   docker_host: 192.168.66.10 
+    #   docker_host: 192.168.66.12
   xbxb_nginx:
     image: nginx:latest
     # ports:
