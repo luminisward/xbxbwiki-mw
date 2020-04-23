@@ -70,8 +70,9 @@ $wgConfigRegistry = [
 /**
  * MediaWiki version number
  * @since 1.2
+ * @deprecated since 1.35; use the MW_VERSION constant instead
  */
-$wgVersion = '1.31.3';
+$wgVersion = MW_VERSION;
 
 /**
  * Name of the site. It must be changed in LocalSettings.php
@@ -4472,7 +4473,8 @@ $wgCentralIdLookupProvider = 'local';
  * Statements:
  *	- MinimalPasswordLength - minimum length a user can set
  *	- MinimumPasswordLengthToLogin - passwords shorter than this will
- *		not be allowed to login, regardless if it is correct.
+ *		not be allowed to login, or offered a chance to reset their password
+ *		as part of the login workflow, regardless if it is correct.
  *	- MaximalPasswordLength - maximum length password a user is allowed
  *		to attempt. Prevents DoS attacks with pbkdf2.
  *	- PasswordCannotMatchUsername - Password cannot match username to
