@@ -16,3 +16,4 @@ mediawiki/vendor/
 mediawiki/extensions/SemanticMediaWiki/
 mediawiki/extensions/SemanticScribunto/
 mysql/data/
+reverse_proxy_nginx/cert
