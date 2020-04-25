@@ -1,4 +1,7 @@
 <?php
+
+use MediaWiki\MediaWikiServices;
+
 /**
  * Image gallery.
  *
@@ -35,7 +38,7 @@ class TraditionalImageGallery extends ImageGalleryBase {
 	function toHTML() {
 		if ( $this->mPerRow > 0 ) {
 			$maxwidth = $this->mPerRow * ( $this->mWidths + $this->getAllPadding() );
-			$oldStyle = isset( $this->mAttribs['style'] ) ? $this->mAttribs['style'] : '';
+			$oldStyle = $this->mAttribs['style'] ?? '';
 			# _width is ignored by any sane browser. IE6 doesn't know max-width
 			# so it uses _width instead
 			$this->mAttribs['style'] = "max-width: {$maxwidth}px;_width: {$maxwidth}px;" .
@@ -72,11 +75,9 @@ class TraditionalImageGallery extends ImageGalleryBase {
 		$lang = $this->getRenderLang();
 		# Output each image...
 		foreach ( $this->mImages as $pair ) {
+			// "text" means "caption" here
 			/** @var Title $nt */
-			$nt = $pair[0];
-			$text = $pair[1]; # "text" means "caption" here
-			$alt = $pair[2];
-			$link = $pair[3];
+			list( $nt, $text, $alt, $link ) = $pair;
 
 			$descQuery = false;
 			if ( $nt->getNamespace() === NS_FILE ) {
@@ -89,7 +90,7 @@ class TraditionalImageGallery extends ImageGalleryBase {
 					# Fetch and register the file (file title may be different via hooks)
 					list( $img, $nt ) = $this->mParser->fetchFileAndTitle( $nt, $options );
 				} else {
-					$img = wfFindFile( $nt );
+					$img = MediaWikiServices::getInstance()->getRepoGroup()->findFile( $nt );
 				}
 			} else {
 				$img = false;
@@ -110,8 +111,8 @@ class TraditionalImageGallery extends ImageGalleryBase {
 				if ( $this->mParser instanceof Parser ) {
 					$this->mParser->addTrackingCategory( 'broken-file-category' );
 				}
-			} elseif ( $this->mHideBadImages
-				&& wfIsBadImage( $nt->getDBkey(), $this->getContextTitle() )
+			} elseif ( $this->mHideBadImages && MediaWikiServices::getInstance()->getBadFileLookup()
+				->isBadFile( $nt->getDBkey(), $this->getContextTitle() )
 			) {
 				# The image is blacklisted, just show it as a text link.
 				$thumbhtml = "\n\t\t\t" . '<div class="thumb" style="height: ' .
@@ -170,8 +171,9 @@ class TraditionalImageGallery extends ImageGalleryBase {
 			}
 
 			// @todo Code is incomplete.
-			// $linkTarget = Title::newFromText( $wgContLang->getNsText( MWNamespace::getUser() ) .
-			// ":{$ut}" );
+			// $linkTarget = Title::newFromText( MediaWikiServices::getInstance()->
+			// getContentLanguage()->getNsText( MediaWikiServices::getInstance()->
+			// getNamespaceInfo()->getUser() ) . ":{$ut}" );
 			// $ul = Linker::link( $linkTarget, $ut );
 
 			$meta = [];
@@ -191,19 +193,7 @@ class TraditionalImageGallery extends ImageGalleryBase {
 			}
 
 			$textlink = $this->mShowFilename ?
-				// Preloaded into LinkCache above
-				Linker::linkKnown(
-					$nt,
-					htmlspecialchars(
-						is_int( $this->getCaptionLength() ) ?
-							$lang->truncate( $nt->getText(), $this->getCaptionLength() ) :
-							$nt->getText()
-					),
-					[
-						'class' => 'galleryfilename' .
-							( $this->getCaptionLength() === true ? ' galleryfilename-truncate' : '' )
-					]
-				) . "\n" :
+				$this->getCaptionHtml( $nt, $lang ) :
 				'';
 
 			$galleryText = $textlink . $text . $meta;
@@ -225,6 +215,27 @@ class TraditionalImageGallery extends ImageGalleryBase {
 		$output .= "\n</ul>";
 
 		return $output;
+	}
+
+	/**
+	 * @param Title $nt
+	 * @param Language $lang
+	 * @return string HTML
+	 */
+	protected function getCaptionHtml( Title $nt, Language $lang ) {
+		// Preloaded into LinkCache in toHTML
+		return Linker::linkKnown(
+			$nt,
+			htmlspecialchars(
+				is_int( $this->getCaptionLength() ) ?
+					$lang->truncateForVisual( $nt->getText(), $this->getCaptionLength() ) :
+					$nt->getText()
+			),
+			[
+				'class' => 'galleryfilename' .
+					( $this->getCaptionLength() === true ? ' galleryfilename-truncate' : '' )
+			]
+		) . "\n";
 	}
 
 	/**
@@ -277,7 +288,7 @@ class TraditionalImageGallery extends ImageGalleryBase {
 	}
 
 	/**
-	 * Length to truncate filename to in caption when using "showfilename" (if int).
+	 * Length (in characters) to truncate filename to in caption when using "showfilename" (if int).
 	 * A value of 'true' will truncate the filename to one line using CSS, while
 	 * 'false' will disable truncating.
 	 *

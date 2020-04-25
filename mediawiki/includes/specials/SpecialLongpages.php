@@ -25,7 +25,7 @@
  *
  * @ingroup SpecialPage
  */
-class LongPagesPage extends ShortPagesPage {
+class SpecialLongPages extends SpecialShortPages {
 	function __construct( $name = 'Longpages' ) {
 		parent::__construct( $name );
 	}

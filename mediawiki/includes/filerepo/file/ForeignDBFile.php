@@ -21,39 +21,16 @@
  * @ingroup FileAbstraction
  */
 
+use MediaWiki\MediaWikiServices;
 use Wikimedia\Rdbms\DBUnexpectedError;
 
+// @phan-file-suppress PhanTypeMissingReturn false positives
 /**
  * Foreign file with an accessible MediaWiki database
  *
  * @ingroup FileAbstraction
  */
 class ForeignDBFile extends LocalFile {
-	/**
-	 * @param Title $title
-	 * @param FileRepo $repo
-	 * @param null $unused
-	 * @return ForeignDBFile
-	 */
-	static function newFromTitle( $title, $repo, $unused = null ) {
-		return new self( $title, $repo );
-	}
-
-	/**
-	 * Create a ForeignDBFile from a title
-	 * Do not call this except from inside a repo class.
-	 *
-	 * @param stdClass $row
-	 * @param FileRepo $repo
-	 * @return ForeignDBFile
-	 */
-	static function newFromRow( $row, $repo ) {
-		$title = Title::makeTitle( NS_FILE, $row->img_name );
-		$file = new self( $title, $repo );
-		$file->loadFromRow( $row );
-
-		return $file;
-	}
 
 	/**
 	 * @param string $srcPath
@@ -125,14 +102,14 @@ class ForeignDBFile extends LocalFile {
 	 * @param Language|null $lang Optional language to fetch description in.
 	 * @return string|false
 	 */
-	function getDescriptionText( $lang = null ) {
+	function getDescriptionText( Language $lang = null ) {
 		global $wgLang;
 
 		if ( !$this->repo->fetchDescription ) {
 			return false;
 		}
 
-		$lang = $lang ?: $wgLang;
+		$lang = $lang ?? $wgLang;
 		$renderUrl = $this->repo->getDescriptionRenderUrl( $this->getName(), $lang->getCode() );
 		if ( !$renderUrl ) {
 			return false;
@@ -150,20 +127,21 @@ class ForeignDBFile extends LocalFile {
 			return false; // no description page
 		}
 
-		$cache = ObjectCache::getMainWANInstance();
+		$cache = MediaWikiServices::getInstance()->getMainWANObjectCache();
+		$fname = __METHOD__;
 
 		return $cache->getWithSetCallback(
 			$this->repo->getLocalCacheKey(
-				'RemoteFileDescription',
-				'url',
+				'ForeignFileDescription',
 				$lang->getCode(),
-				$this->getName(),
+				md5( $this->getName() ),
 				$touched
 			),
 			$this->repo->descriptionCacheExpiry ?: $cache::TTL_UNCACHEABLE,
-			function ( $oldValue, &$ttl, array &$setOpts ) use ( $renderUrl ) {
+			function ( $oldValue, &$ttl, array &$setOpts ) use ( $renderUrl, $fname ) {
 				wfDebug( "Fetching shared description from $renderUrl\n" );
-				$res = Http::get( $renderUrl, [], __METHOD__ );
+				$res = MediaWikiServices::getInstance()->getHttpRequestFactory()->
+					get( $renderUrl, [], $fname );
 				if ( !$res ) {
 					$ttl = WANObjectCache::TTL_UNCACHEABLE;
 				}

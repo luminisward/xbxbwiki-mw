@@ -71,7 +71,6 @@ class PostgresUpdater extends DatabaseUpdater {
 			[ 'addSequence', 'externallinks', false, 'externallinks_el_id_seq' ],
 			[ 'addSequence', 'watchlist', false, 'watchlist_wl_id_seq' ],
 			[ 'addSequence', 'change_tag', false, 'change_tag_ct_id_seq' ],
-			[ 'addSequence', 'tag_summary', false, 'tag_summary_ts_id_seq' ],
 
 			# new tables
 			[ 'addTable', 'category', 'patch-category.sql' ],
@@ -84,8 +83,6 @@ class PostgresUpdater extends DatabaseUpdater {
 			[ 'addTable', 'redirect', 'patch-redirect.sql' ],
 			[ 'addTable', 'updatelog', 'patch-updatelog.sql' ],
 			[ 'addTable', 'change_tag', 'patch-change_tag.sql' ],
-			[ 'addTable', 'tag_summary', 'patch-tag_summary.sql' ],
-			[ 'addTable', 'valid_tag', 'patch-valid_tag.sql' ],
 			[ 'addTable', 'user_properties', 'patch-user_properties.sql' ],
 			[ 'addTable', 'log_search', 'patch-log_search.sql' ],
 			[ 'addTable', 'l10n_cache', 'patch-l10n_cache.sql' ],
@@ -113,7 +110,7 @@ class PostgresUpdater extends DatabaseUpdater {
 			[ 'addPgField', 'image', 'img_sha1', "TEXT NOT NULL DEFAULT ''" ],
 			[ 'addPgField', 'ipblocks', 'ipb_allow_usertalk', 'SMALLINT NOT NULL DEFAULT 0' ],
 			[ 'addPgField', 'ipblocks', 'ipb_anon_only', 'SMALLINT NOT NULL DEFAULT 0' ],
-			[ 'addPgField', 'ipblocks', 'ipb_by_text', "TEXT NOT NULL DEFAULT ''" ],
+			[ 'ifNoActorTable', 'addPgField', 'ipblocks', 'ipb_by_text', "TEXT NOT NULL DEFAULT ''" ],
 			[ 'addPgField', 'ipblocks', 'ipb_block_email', 'SMALLINT NOT NULL DEFAULT 0' ],
 			[ 'addPgField', 'ipblocks', 'ipb_create_account', 'SMALLINT NOT NULL DEFAULT 1' ],
 			[ 'addPgField', 'ipblocks', 'ipb_deleted', 'SMALLINT NOT NULL DEFAULT 0' ],
@@ -155,7 +152,7 @@ class PostgresUpdater extends DatabaseUpdater {
 			[ 'addPgField', 'revision', 'rev_content_format', 'TEXT' ],
 			[ 'addPgField', 'site_stats', 'ss_active_users', "INTEGER DEFAULT '-1'" ],
 			[ 'addPgField', 'user_newtalk', 'user_last_timestamp', 'TIMESTAMPTZ' ],
-			[ 'addPgField', 'logging', 'log_user_text', "TEXT NOT NULL DEFAULT ''" ],
+			[ 'ifNoActorTable', 'addPgField', 'logging', 'log_user_text', "TEXT NOT NULL DEFAULT ''" ],
 			[ 'addPgField', 'logging', 'log_page', 'INTEGER' ],
 			[ 'addPgField', 'interwiki', 'iw_api', "TEXT NOT NULL DEFAULT ''" ],
 			[ 'addPgField', 'interwiki', 'iw_wikiid', "TEXT NOT NULL DEFAULT ''" ],
@@ -243,7 +240,7 @@ class PostgresUpdater extends DatabaseUpdater {
 			[ 'checkOiDeleted' ],
 
 			# New indexes
-			[ 'addPgIndex', 'archive', 'archive_user_text', '(ar_user_text)' ],
+			[ 'ifNoActorTable', 'addPgIndex', 'archive', 'archive_user_text', '(ar_user_text)' ],
 			[ 'addPgIndex', 'image', 'img_sha1', '(img_sha1)' ],
 			[ 'addPgIndex', 'ipblocks', 'ipb_parent_block_id', '(ipb_parent_block_id)' ],
 			[ 'addPgIndex', 'oldimage', 'oi_sha1', '(oi_sha1)' ],
@@ -256,7 +253,7 @@ class PostgresUpdater extends DatabaseUpdater {
 			[ 'addPgIndex', 'watchlist', 'wl_user', '(wl_user)' ],
 			[ 'addPgIndex', 'watchlist', 'wl_user_notificationtimestamp',
 				'(wl_user, wl_notificationtimestamp)' ],
-			[ 'addPgIndex', 'logging', 'logging_user_type_time',
+			[ 'ifNoActorTable', 'addPgIndex', 'logging', 'logging_user_type_time',
 				'(log_user, log_type, log_timestamp)' ],
 			[ 'addPgIndex', 'logging', 'logging_page_id_time', '(log_page,log_timestamp)' ],
 			[ 'addPgIndex', 'iwlinks', 'iwl_prefix_from_title', '(iwl_prefix, iwl_from, iwl_title)' ],
@@ -266,9 +263,10 @@ class PostgresUpdater extends DatabaseUpdater {
 			[ 'addPgIndex', 'job', 'job_cmd_token', '(job_cmd, job_token, job_random)' ],
 			[ 'addPgIndex', 'job', 'job_cmd_token_id', '(job_cmd, job_token, job_id)' ],
 			[ 'addPgIndex', 'filearchive', 'fa_sha1', '(fa_sha1)' ],
-			[ 'addPgIndex', 'logging', 'logging_user_text_type_time',
+			[ 'ifNoActorTable', 'addPgIndex', 'logging', 'logging_user_text_type_time',
 				'(log_user_text, log_type, log_timestamp)' ],
-			[ 'addPgIndex', 'logging', 'logging_user_text_time', '(log_user_text, log_timestamp)' ],
+			[ 'ifNoActorTable', 'addPgIndex', 'logging', 'logging_user_text_time',
+				'(log_user_text, log_timestamp)' ],
 
 			[ 'checkIndex', 'pagelink_unique', [
 				[ 'pl_from', 'int4_ops', 'btree', 0 ],
@@ -366,30 +364,36 @@ class PostgresUpdater extends DatabaseUpdater {
 			[ 'checkIwlPrefix' ],
 
 			# All FK columns should be deferred
-			[ 'changeFkeyDeferrable', 'archive', 'ar_user', 'mwuser(user_id) ON DELETE SET NULL' ],
+			[ 'ifNoActorTable', 'changeFkeyDeferrable', 'archive', 'ar_user',
+				'mwuser(user_id) ON DELETE SET NULL' ],
 			[ 'changeFkeyDeferrable', 'categorylinks', 'cl_from', 'page(page_id) ON DELETE CASCADE' ],
 			[ 'changeFkeyDeferrable', 'externallinks', 'el_from', 'page(page_id) ON DELETE CASCADE' ],
 			[ 'changeFkeyDeferrable', 'filearchive', 'fa_deleted_user',
 				'mwuser(user_id) ON DELETE SET NULL' ],
-			[ 'changeFkeyDeferrable', 'filearchive', 'fa_user', 'mwuser(user_id) ON DELETE SET NULL' ],
-			[ 'changeFkeyDeferrable', 'image', 'img_user', 'mwuser(user_id) ON DELETE SET NULL' ],
+			[ 'ifNoActorTable', 'changeFkeyDeferrable', 'filearchive', 'fa_user',
+				'mwuser(user_id) ON DELETE SET NULL' ],
+			[ 'ifNoActorTable', 'changeFkeyDeferrable', 'image', 'img_user',
+				'mwuser(user_id) ON DELETE SET NULL' ],
 			[ 'changeFkeyDeferrable', 'imagelinks', 'il_from', 'page(page_id) ON DELETE CASCADE' ],
-			[ 'changeFkeyDeferrable', 'ipblocks', 'ipb_by', 'mwuser(user_id) ON DELETE CASCADE' ],
+			[ 'ifNoActorTable', 'changeFkeyDeferrable', 'ipblocks', 'ipb_by',
+				'mwuser(user_id) ON DELETE CASCADE' ],
 			[ 'changeFkeyDeferrable', 'ipblocks', 'ipb_user', 'mwuser(user_id) ON DELETE SET NULL' ],
 			[ 'changeFkeyDeferrable', 'ipblocks', 'ipb_parent_block_id',
 				'ipblocks(ipb_id) ON DELETE SET NULL' ],
 			[ 'changeFkeyDeferrable', 'langlinks', 'll_from', 'page(page_id) ON DELETE CASCADE' ],
-			[ 'changeFkeyDeferrable', 'logging', 'log_user', 'mwuser(user_id) ON DELETE SET NULL' ],
+			[ 'ifNoActorTable', 'changeFkeyDeferrable', 'logging', 'log_user',
+				'mwuser(user_id) ON DELETE SET NULL' ],
 			[ 'changeFkeyDeferrable', 'oldimage', 'oi_name',
 				'image(img_name) ON DELETE CASCADE ON UPDATE CASCADE' ],
-			[ 'changeFkeyDeferrable', 'oldimage', 'oi_user', 'mwuser(user_id) ON DELETE SET NULL' ],
+			[ 'ifNoActorTable', 'changeFkeyDeferrable', 'oldimage', 'oi_user',
+				'mwuser(user_id) ON DELETE SET NULL' ],
 			[ 'changeFkeyDeferrable', 'pagelinks', 'pl_from', 'page(page_id) ON DELETE CASCADE' ],
 			[ 'changeFkeyDeferrable', 'page_props', 'pp_page', 'page (page_id) ON DELETE CASCADE' ],
 			[ 'changeFkeyDeferrable', 'page_restrictions', 'pr_page',
 				'page(page_id) ON DELETE CASCADE' ],
 			[ 'changeFkeyDeferrable', 'protected_titles', 'pt_user',
 				'mwuser(user_id) ON DELETE SET NULL' ],
-			[ 'changeFkeyDeferrable', 'recentchanges', 'rc_user',
+			[ 'ifNoActorTable', 'changeFkeyDeferrable', 'recentchanges', 'rc_user',
 				'mwuser(user_id) ON DELETE SET NULL' ],
 			[ 'changeFkeyDeferrable', 'redirect', 'rd_from', 'page(page_id) ON DELETE CASCADE' ],
 			[ 'changeFkeyDeferrable', 'revision', 'rev_page', 'page (page_id) ON DELETE CASCADE' ],
@@ -443,8 +447,6 @@ class PostgresUpdater extends DatabaseUpdater {
 				'( rc_namespace, rc_type, rc_patrolled, rc_timestamp )' ],
 			[ 'addPgField', 'change_tag', 'ct_id',
 				"INTEGER NOT NULL PRIMARY KEY DEFAULT nextval('change_tag_ct_id_seq')" ],
-			[ 'addPgField', 'tag_summary', 'ts_id',
-				"INTEGER NOT NULL PRIMARY KEY DEFAULT nextval('tag_summary_ts_id_seq')" ],
 
 			// 1.29
 			[ 'addPgField', 'externallinks', 'el_index_60', "BYTEA NOT NULL DEFAULT ''" ],
@@ -573,8 +575,90 @@ class PostgresUpdater extends DatabaseUpdater {
 			[ 'setSequenceOwner', 'job', 'job_id', 'job_job_id_seq' ],
 			[ 'setSequenceOwner', 'category', 'cat_id', 'category_cat_id_seq' ],
 			[ 'setSequenceOwner', 'change_tag', 'ct_id', 'change_tag_ct_id_seq' ],
-			[ 'setSequenceOwner', 'tag_summary', 'ts_id', 'tag_summary_ts_id_seq' ],
 			[ 'setSequenceOwner', 'sites', 'site_id', 'sites_site_id_seq' ],
+
+			// 1.32
+			[ 'addTable', 'change_tag_def', 'patch-change_tag_def.sql' ],
+			[ 'populateExternallinksIndex60' ],
+			[ 'dropDefault', 'externallinks', 'el_index_60' ],
+			[ 'runMaintenance', DeduplicateArchiveRevId::class, 'maintenance/deduplicateArchiveRevId.php' ],
+			[ 'addPgField', 'change_tag', 'ct_tag_id', 'INTEGER NULL' ],
+			[
+				'addPgIndex',
+				'change_tag',
+				'change_tag_tag_id_id',
+				'( ct_tag_id, ct_rc_id, ct_rev_id, ct_log_id )'
+			],
+			[ 'addPgIndex', 'archive', 'ar_revid_uniq', '(ar_rev_id)', 'unique' ],
+			[ 'dropPgIndex', 'archive', 'ar_revid' ], // Probably doesn't exist, but do it anyway.
+			[ 'populateContentTables' ],
+			[ 'addPgIndex', 'logging', 'log_type_action', '( log_type, log_action, log_timestamp )' ],
+			[ 'dropPgIndex', 'page_props', 'page_props_propname' ],
+			[ 'addIndex', 'interwiki', 'interwiki_pkey', 'patch-interwiki-pk.sql' ],
+			[ 'addIndex', 'protected_titles', 'protected_titles_pkey', 'patch-protected_titles-pk.sql' ],
+			[ 'addIndex', 'site_identifiers', 'site_identifiers_pkey', 'patch-site_identifiers-pk.sql' ],
+			[ 'addPgIndex', 'recentchanges', 'rc_this_oldid', '(rc_this_oldid)' ],
+			[ 'dropTable', 'transcache' ],
+			[ 'runMaintenance', PopulateChangeTagDef::class, 'maintenance/populateChangeTagDef.php' ],
+			[ 'addIndex', 'change_tag', 'change_tag_rc_tag_id',
+				'patch-change_tag-change_tag_rc_tag_id.sql' ],
+			[ 'addPgField', 'ipblocks', 'ipb_sitewide', 'SMALLINT NOT NULL DEFAULT 1' ],
+			[ 'addTable', 'ipblocks_restrictions', 'patch-ipblocks_restrictions-table.sql' ],
+			[ 'migrateImageCommentTemp' ],
+			[ 'dropPgField', 'category', 'cat_hidden' ],
+			[ 'dropPgField', 'site_stats', 'ss_admins' ],
+			[ 'dropPgField', 'recentchanges', 'rc_cur_time' ],
+
+			// 1.33
+			[ 'dropField', 'change_tag', 'ct_tag', 'patch-drop-ct_tag.sql' ],
+			[ 'dropTable', 'valid_tag' ],
+			[ 'dropTable', 'tag_summary' ],
+			[ 'dropPgField', 'archive', 'ar_comment' ],
+			[ 'dropDefault', 'archive', 'ar_comment_id' ],
+			[ 'dropPgField', 'ipblocks', 'ipb_reason' ],
+			[ 'dropDefault', 'ipblocks', 'ipb_reason_id' ],
+			[ 'dropPgField', 'image', 'img_description' ],
+			[ 'dropDefault', 'image', 'img_description_id' ],
+			[ 'dropPgField', 'oldimage', 'oi_description' ],
+			[ 'dropDefault', 'oldimage', 'oi_description_id' ],
+			[ 'dropPgField', 'filearchive', 'fa_deleted_reason' ],
+			[ 'dropDefault', 'filearchive', 'fa_deleted_reason_id' ],
+			[ 'dropPgField', 'filearchive', 'fa_description' ],
+			[ 'dropDefault', 'filearchive', 'fa_description_id' ],
+			[ 'dropPgField', 'recentchanges', 'rc_comment' ],
+			[ 'dropDefault', 'recentchanges', 'rc_comment_id' ],
+			[ 'dropPgField', 'logging', 'log_comment' ],
+			[ 'dropDefault', 'logging', 'log_comment_id' ],
+			[ 'dropPgField', 'protected_titles', 'pt_reason' ],
+			[ 'dropDefault', 'protected_titles', 'pt_reason_id' ],
+
+			// 1.34
+			[ 'dropPgIndex', 'archive', 'archive_user_text' ],
+			[ 'dropPgField', 'archive', 'ar_user' ],
+			[ 'dropPgField', 'archive', 'ar_user_text' ],
+			[ 'dropDefault', 'archive', 'ar_actor' ],
+			[ 'dropPgField', 'ipblocks', 'ipb_by' ],
+			[ 'dropPgField', 'ipblocks', 'ipb_by_text' ],
+			[ 'dropDefault', 'ipblocks', 'ipb_by_actor' ],
+			[ 'dropPgField', 'image', 'img_user' ],
+			[ 'dropPgField', 'image', 'img_user_text' ],
+			[ 'dropDefault', 'image', 'img_actor' ],
+			[ 'dropPgField', 'oldimage', 'oi_user' ],
+			[ 'dropPgField', 'oldimage', 'oi_user_text' ],
+			[ 'dropDefault', 'oldimage', 'oi_actor' ],
+			[ 'dropPgField', 'filearchive', 'fa_user' ],
+			[ 'dropPgField', 'filearchive', 'fa_user_text' ],
+			[ 'dropDefault', 'filearchive', 'fa_actor' ],
+			[ 'dropPgField', 'recentchanges', 'rc_user' ],
+			[ 'dropPgField', 'recentchanges', 'rc_user_text' ],
+			[ 'dropDefault', 'recentchanges', 'rc_actor' ],
+			[ 'dropPgIndex', 'logging', 'logging_user_time' ],
+			[ 'dropPgIndex', 'logging', 'logging_user_type_time' ],
+			[ 'dropPgIndex', 'logging', 'logging_user_text_type_time' ],
+			[ 'dropPgIndex', 'logging', 'logging_user_text_time' ],
+			[ 'dropPgField', 'logging', 'log_user' ],
+			[ 'dropPgField', 'logging', 'log_user_text' ],
+			[ 'dropDefault', 'logging', 'log_actor' ],
 		];
 	}
 
@@ -796,7 +880,7 @@ END;
 		if ( !$this->db->tableExists( $table, __METHOD__ ) ) {
 			$this->output( "...skipping: '$table' table doesn't exist yet.\n" );
 
-			return;
+			return true;
 		}
 
 		// Second requirement: the new index must be missing
@@ -810,17 +894,18 @@ END;
 					"            $old should be manually removed if not needed anymore.\n" );
 			}
 
-			return;
+			return true;
 		}
 
 		// Third requirement: the old index must exist
 		if ( !$this->db->indexExists( $table, $old, __METHOD__ ) ) {
 			$this->output( "...skipping: index $old doesn't exist.\n" );
 
-			return;
+			return true;
 		}
 
 		$this->db->query( "ALTER INDEX $old RENAME TO $new" );
+		return true;
 	}
 
 	protected function dropPgField( $table, $field ) {
@@ -903,22 +988,35 @@ END;
 
 	protected function setDefault( $table, $field, $default ) {
 		$info = $this->db->fieldInfo( $table, $field );
-		if ( $info->defaultValue() !== $default ) {
+		if ( $info && $info->defaultValue() !== $default ) {
 			$this->output( "Changing '$table.$field' default value\n" );
 			$this->db->query( "ALTER TABLE $table ALTER $field SET DEFAULT "
 				. $this->db->addQuotes( $default ) );
 		}
 	}
 
+	/**
+	 * Drop a default value from a field
+	 * @since 1.32
+	 * @param string $table
+	 * @param string $field
+	 */
+	protected function dropDefault( $table, $field ) {
+		$info = $this->db->fieldInfo( $table, $field );
+		if ( $info->defaultValue() !== false ) {
+			$this->output( "Removing '$table.$field' default value\n" );
+			$this->db->query( "ALTER TABLE $table ALTER $field DROP DEFAULT" );
+		}
+	}
+
 	protected function changeNullableField( $table, $field, $null, $update = false ) {
 		$fi = $this->db->fieldInfo( $table, $field );
 		if ( is_null( $fi ) ) {
-			$this->output( "...ERROR: expected column $table.$field to exist\n" );
-			exit( 1 );
+			return;
 		}
 		if ( $fi->isNullable() ) {
 			# # It's NULL - does it need to be NOT NULL?
-			if ( 'NOT NULL' === $null ) {
+			if ( $null === 'NOT NULL' ) {
 				$this->output( "Changing '$table.$field' to not allow NULLs\n" );
 				if ( $update ) {
 					$this->db->query( "UPDATE $table SET $field = DEFAULT WHERE $field IS NULL" );
@@ -929,7 +1027,7 @@ END;
 			}
 		} else {
 			# # It's NOT NULL - does it need to be NULL?
-			if ( 'NULL' === $null ) {
+			if ( $null === 'NULL' ) {
 				$this->output( "Changing '$table.$field' to allow NULLs\n" );
 				$this->db->query( "ALTER TABLE $table ALTER $field DROP NOT NULL" );
 			} else {
@@ -938,25 +1036,24 @@ END;
 		}
 	}
 
-	public function addPgIndex( $table, $index, $type ) {
+	public function addPgIndex( $table, $index, $type, $unique = false ) {
 		if ( $this->db->indexExists( $table, $index ) ) {
 			$this->output( "...index '$index' on table '$table' already exists\n" );
 		} else {
 			$this->output( "Creating index '$index' on table '$table' $type\n" );
-			$this->db->query( "CREATE INDEX $index ON $table $type" );
+			$unique = $unique ? 'UNIQUE' : '';
+			$this->db->query( "CREATE $unique INDEX $index ON $table $type" );
 		}
 	}
 
 	public function addPgExtIndex( $table, $index, $type ) {
 		if ( $this->db->indexExists( $table, $index ) ) {
 			$this->output( "...index '$index' on table '$table' already exists\n" );
+		} elseif ( preg_match( '/^\(/', $type ) ) {
+			$this->output( "Creating index '$index' on table '$table'\n" );
+			$this->db->query( "CREATE INDEX $index ON $table $type" );
 		} else {
-			if ( preg_match( '/^\(/', $type ) ) {
-				$this->output( "Creating index '$index' on table '$table'\n" );
-				$this->db->query( "CREATE INDEX $index ON $table $type" );
-			} else {
-				$this->applyPatch( $type, true, "Creating index '$index' on table '$table'" );
-			}
+			$this->applyPatch( $type, true, "Creating index '$index' on table '$table'" );
 		}
 	}
 
@@ -1015,7 +1112,7 @@ END;
 			$this->db->query( $command );
 		} else {
 			$this->output( "...foreign key constraint on '$table.$field' already does not exist\n" );
-		};
+		}
 	}
 
 	protected function changeFkeyDeferrable( $table, $field, $clause ) {
@@ -1179,7 +1276,7 @@ END;
 		if ( $this->updateRowExists( 'patch-textsearch_bug66650.sql' ) ) {
 			$this->output( "...T68650 already fixed or not applicable.\n" );
 			return;
-		};
+		}
 		$this->applyPatch( 'patch-textsearch_bug66650.sql', false,
 			'Rebuilding text search for T68650' );
 	}

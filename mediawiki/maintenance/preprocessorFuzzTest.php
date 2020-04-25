@@ -21,6 +21,10 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+
+use Wikimedia\TestingAccessWrapper;
+
 $optionsWithoutArgs = [ 'verbose' ];
 require_once __DIR__ . '/commandLine.inc';
 
@@ -44,7 +48,7 @@ class PPFuzzTester {
 	public $maxLength = 20;
 	public $maxTemplates = 5;
 	// public $outputTypes = [ 'OT_HTML', 'OT_WIKI', 'OT_PREPROCESS' ];
-	public $entryPoints = [ 'testSrvus', 'testPst', 'testPreprocess' ];
+	public $entryPoints = [ 'fuzzTestSrvus', 'fuzzTestPst', 'fuzzTestPreprocess' ];
 	public $verbose = false;
 
 	/**
@@ -70,7 +74,7 @@ class PPFuzzTester {
 				$passed = 'passed';
 			} catch ( Exception $e ) {
 				$testReport = self::$currentTest->getReport();
-				$exceptionReport = $e->getText();
+				$exceptionReport = $e instanceof MWException ? $e->getText() : (string)$e;
 				$hash = md5( $testReport );
 				file_put_contents( "results/ppft-$hash.in", serialize( self::$currentTest ) );
 				file_put_contents( "results/ppft-$hash.fail",
@@ -123,8 +127,7 @@ class PPFuzzTester {
 		// This resolves a few differences between the old preprocessor and the
 		// XML-based one, which doesn't like illegals and converts line endings.
 		// It's done by the MW UI, so it's a reasonably legitimate thing to do.
-		global $wgContLang;
-		$s = $wgContLang->normalize( $s );
+		$s = MediaWikiServices::getInstance()->getContentLanguage()->normalize( $s );
 
 		return $s;
 	}
@@ -149,6 +152,16 @@ class PPFuzzTester {
 class PPFuzzTest {
 	public $templates, $mainText, $title, $entryPoint, $output;
 
+	/** @var PPFuzzTester */
+	private $parent;
+	/** @var string */
+	public $nickname;
+	/** @var bool */
+	public $fancySig;
+
+	/**
+	 * @param PPFuzzTester $tester
+	 */
 	function __construct( $tester ) {
 		global $wgMaxSigChars;
 		$this->parent = $tester;
@@ -194,7 +207,7 @@ class PPFuzzTest {
 	}
 
 	function execute() {
-		global $wgParser, $wgUser;
+		global $wgUser;
 
 		$wgUser = new PPFuzzUser;
 		$wgUser->mName = 'Fuzz';
@@ -205,7 +218,9 @@ class PPFuzzTest {
 		$options->setTemplateCallback( [ $this, 'templateHook' ] );
 		$options->setTimestamp( wfTimestampNow() );
 		$this->output = call_user_func(
-			[ $wgParser, $this->entryPoint ],
+			[ TestingAccessWrapper::newFromObject(
+				MediaWikiServices::getInstance()->getParser()
+			), $this->entryPoint ],
 			$this->mainText,
 			$this->title,
 			$options
@@ -238,7 +253,7 @@ class PPFuzzTest {
 class PPFuzzUser extends User {
 	public $ppfz_test, $mDataLoaded;
 
-	function load() {
+	function load( $flags = null ) {
 		if ( $this->mDataLoaded ) {
 			return;
 		}

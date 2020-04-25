@@ -7,6 +7,8 @@
  * @author Antoine Musso
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * @group Database
  * @covers QueryPage<extended>
@@ -20,7 +22,7 @@ class QueryAllSpecialPagesTest extends MediaWikiTestCase {
 
 	/** List query pages that can not be tested automatically */
 	protected $manualTest = [
-		LinkSearchPage::class
+		SpecialLinkSearch::class
 	];
 
 	/**
@@ -40,10 +42,10 @@ class QueryAllSpecialPagesTest extends MediaWikiTestCase {
 		parent::__construct();
 
 		foreach ( QueryPage::getPages() as $page ) {
-			$class = $page[0];
-			$name = $page[1];
+			list( $class, $name ) = $page;
 			if ( !in_array( $class, $this->manualTest ) ) {
-				$this->queryPages[$class] = SpecialPageFactory::getPage( $name );
+				$this->queryPages[$class] =
+					MediaWikiServices::getInstance()->getSpecialPageFactory()->getPage( $name );
 			}
 		}
 	}

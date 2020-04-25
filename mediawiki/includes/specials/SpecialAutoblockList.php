@@ -21,6 +21,8 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * A special page that lists autoblocks
  *
@@ -34,15 +36,12 @@ class SpecialAutoblockList extends SpecialPage {
 	}
 
 	/**
-	 * Main execution point
-	 *
-	 * @param string $par Title fragment
+	 * @param string|null $par Title fragment
 	 */
 	public function execute( $par ) {
 		$this->setHeaders();
 		$this->outputHeader();
 		$out = $this->getOutput();
-		$lang = $this->getLanguage();
 		$out->setPageTitle( $this->msg( 'autoblocklist' ) );
 		$this->addHelpLink( 'Autoblock' );
 		$out->addModuleStyles( [ 'mediawiki.special' ] );
@@ -55,13 +54,7 @@ class SpecialAutoblockList extends SpecialPage {
 			'Limit' => [
 				'type' => 'limitselect',
 				'label-message' => 'table_pager_limit_label',
-				'options' => [
-					$lang->formatNum( 20 ) => 20,
-					$lang->formatNum( 50 ) => 50,
-					$lang->formatNum( 100 ) => 100,
-					$lang->formatNum( 250 ) => 250,
-					$lang->formatNum( 500 ) => 500,
-				],
+				'options' => $pager->getLimitSelectList(),
 				'name' => 'limit',
 				'default' => $pager->getLimit(),
 			]
@@ -74,7 +67,6 @@ class SpecialAutoblockList extends SpecialPage {
 			->setFormIdentifier( 'blocklist' )
 			->setWrapperLegendMsg( 'autoblocklist-legend' )
 			->setSubmitTextMsg( 'autoblocklist-submit' )
-			->setSubmitProgressive()
 			->prepareForm()
 			->displayForm( false );
 
@@ -91,7 +83,10 @@ class SpecialAutoblockList extends SpecialPage {
 			'ipb_parent_block_id IS NOT NULL'
 		];
 		# Is the user allowed to see hidden blocks?
-		if ( !$this->getUser()->isAllowed( 'hideuser' ) ) {
+		if ( !MediaWikiServices::getInstance()
+			->getPermissionManager()
+			->userHasRight( $this->getUser(), 'hideuser' )
+		) {
 			$conds['ipb_deleted'] = 0;
 		}
 
@@ -106,7 +101,7 @@ class SpecialAutoblockList extends SpecialPage {
 	protected function showTotal( BlockListPager $pager ) {
 		$out = $this->getOutput();
 		$out->addHTML(
-			Html::element( 'div', [ 'style' => 'font-weight: bold;' ],
+			Html::rawElement( 'div', [ 'style' => 'font-weight: bold;' ],
 				$this->msg( 'autoblocklist-total-autoblocks', $pager->getTotalAutoblocks() )->parse() )
 			. "\n"
 		);
@@ -127,7 +122,7 @@ class SpecialAutoblockList extends SpecialPage {
 		# Not necessary in a standard installation without such extensions enabled
 		if ( count( $otherAutoblockLink ) ) {
 			$out->addHTML(
-				Html::element( 'h2', [], $this->msg( 'autoblocklist-localblocks',
+				Html::rawElement( 'h2', [], $this->msg( 'autoblocklist-localblocks',
 					$pager->getNumRows() )->parse() )
 				. "\n"
 			);

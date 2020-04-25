@@ -21,6 +21,8 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * This is to display changes made to all articles linked in an article.
  *
@@ -91,7 +93,10 @@ class SpecialRecentChangesLinked extends SpecialRecentChanges {
 
 		// left join with watchlist table to highlight watched rows
 		$uid = $this->getUser()->getId();
-		if ( $uid && $this->getUser()->isAllowed( 'viewmywatchlist' ) ) {
+		if ( $uid && MediaWikiServices::getInstance()
+				->getPermissionManager()
+				->userHasRight( $this->getUser(), 'viewmywatchlist' )
+		) {
 			$tables[] = 'watchlist';
 			$select[] = 'wl_user';
 			$join_conds['watchlist'] = [ 'LEFT JOIN', [
@@ -207,7 +212,7 @@ class SpecialRecentChangesLinked extends SpecialRecentChanges {
 				$conds + $subconds,
 				__METHOD__,
 				$order + $query_options,
-				$join_conds + [ $link_table => [ 'INNER JOIN', $subjoin ] ]
+				$join_conds + [ $link_table => [ 'JOIN', $subjoin ] ]
 			);
 
 			if ( $dbr->unionSupportsOrderAndLimit() ) {
@@ -224,17 +229,12 @@ class SpecialRecentChangesLinked extends SpecialRecentChanges {
 			$sql = $subsql[0];
 		} else {
 			// need to resort and relimit after union
-			$sql = $dbr->unionQueries( $subsql, false ) . ' ORDER BY rc_timestamp DESC';
+			$sql = $dbr->unionQueries( $subsql, $dbr::UNION_DISTINCT ) .
+				' ORDER BY rc_timestamp DESC';
 			$sql = $dbr->limitResult( $sql, $limit, false );
 		}
 
-		$res = $dbr->query( $sql, __METHOD__ );
-
-		if ( $res->numRows() == 0 ) {
-			$this->mResultEmpty = true;
-		}
-
-		return $res;
+		return $dbr->query( $sql, __METHOD__ );
 	}
 
 	function setTopText( FormOptions $opts ) {
@@ -297,15 +297,19 @@ class SpecialRecentChangesLinked extends SpecialRecentChanges {
 		$targetTitle = $this->getTargetTitle();
 		if ( $targetTitle === false ) {
 			$this->getOutput()->addHTML(
-				'<div class="mw-changeslist-empty mw-changeslist-notargetpage">' .
-				$this->msg( 'recentchanges-notargetpage' )->parse() .
-				'</div>'
+				Html::rawElement(
+					'div',
+					[ 'class' => 'mw-changeslist-empty mw-changeslist-notargetpage' ],
+					$this->msg( 'recentchanges-notargetpage' )->parse()
+				)
 			);
 		} elseif ( !$targetTitle || $targetTitle->isExternal() ) {
 			$this->getOutput()->addHTML(
-				'<div class="mw-changeslist-empty mw-changeslist-invalidtargetpage">' .
-				$this->msg( 'allpagesbadtitle' )->parse() .
-				'</div>'
+				Html::rawElement(
+					'div',
+					[ 'class' => 'mw-changeslist-empty mw-changeslist-invalidtargetpage' ],
+					$this->msg( 'allpagesbadtitle' )->parse()
+				)
 			);
 		} else {
 			parent::outputNoResults();

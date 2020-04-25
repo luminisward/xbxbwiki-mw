@@ -1,6 +1,17 @@
 <?php
 /**
- * Show profiling data.
+ * Simple interface for displaying request profile data stored in
+ * the wikis' primary database.
+ *
+ * See also https://www.mediawiki.org/wiki/Manual:Profiling.
+ *
+ * To add profiling information to the database:
+ *
+ * - set $wgProfiler['class'] in LocalSetings.php to a Profiler class other than ProfilerStub.
+ * - set $wgProfiler['output'] to 'db' to force the profiler to save its the
+ *   information in the database.
+ * - apply the maintenance/archives/patch-profiling.sql patch to the database.
+ * - set $wgEnableProfileInfo to true.
  *
  * Copyright 2005 Kate Turner.
  *
@@ -26,13 +37,13 @@
  */
 
 // This endpoint is supposed to be independent of request cookies and other
-// details of the session. Log warnings for violations of the no-session
-// constraint.
-define( 'MW_NO_SESSION', 'warn' );
+// details of the session. Enforce this constraint with respect to session use.
+define( 'MW_NO_SESSION', 1 );
+
+define( 'MW_ENTRY_POINT', 'profileinfo' );
 
 ini_set( 'zlib.output_compression', 'off' );
 
-$wgEnableProfileInfo = false;
 require __DIR__ . '/includes/WebStart.php';
 
 header( 'Content-Type: text/html; charset=utf-8' );
@@ -155,7 +166,7 @@ $dbr = wfGetDB( DB_REPLICA );
 if ( !$dbr->tableExists( 'profiling' ) ) {
 	echo '<p>No <code>profiling</code> table exists, so we can\'t show you anything.</p>'
 		. '<p>If you want to log profiling data, enable <code>$wgProfiler[\'output\'] = \'db\'</code>'
-		. ' in your StartProfiler.php and run <code>maintenance/update.php</code> to'
+		. ' in LocalSettings.php and run <code>maintenance/update.php</code> to'
 		. ' create the profiling table.'
 		. '</body></html>';
 	exit( 1 );
@@ -167,6 +178,7 @@ if ( isset( $_REQUEST['expand'] ) ) {
 		$expand[$f] = true;
 	}
 }
+wfDeprecated( 'profileinfo.php', '1.34' );
 
 // phpcs:ignore Squiz.Classes.ValidClassName.NotCamelCaps
 class profile_point {
@@ -284,31 +296,33 @@ class profile_point {
 	public function fmttime() {
 		return sprintf( '%5.02f', $this->time );
 	}
-};
+}
 
 function compare_point( profile_point $a, profile_point $b ) {
 	// phpcs:ignore MediaWiki.NamingConventions.ValidGlobalName.wgPrefix
 	global $sort;
 
 	switch ( $sort ) {
+		// Sorted ascending:
 		case 'name':
 			return strcmp( $a->name(), $b->name() );
+		// Sorted descending:
 		case 'time':
-			return $a->time() > $b->time() ? -1 : 1;
+			return $b->time() <=> $a->time();
 		case 'memory':
-			return $a->memory() > $b->memory() ? -1 : 1;
+			return $b->memory() <=> $a->memory();
 		case 'count':
-			return $a->count() > $b->count() ? -1 : 1;
+			return $b->count() <=> $a->count();
 		case 'time_per_call':
-			return $a->timePerCall() > $b->timePerCall() ? -1 : 1;
+			return $b->timePerCall() <=> $a->timePerCall();
 		case 'memory_per_call':
-			return $a->memoryPerCall() > $b->memoryPerCall() ? -1 : 1;
+			return $b->memoryPerCall() <=> $a->memoryPerCall();
 		case 'calls_per_req':
-			return $a->callsPerRequest() > $b->callsPerRequest() ? -1 : 1;
+			return $b->callsPerRequest() <=> $a->callsPerRequest();
 		case 'time_per_req':
-			return $a->timePerRequest() > $b->timePerRequest() ? -1 : 1;
+			return $b->timePerRequest() <=> $a->timePerRequest();
 		case 'memory_per_req':
-			return $a->memoryPerRequest() > $b->memoryPerRequest() ? -1 : 1;
+			return $b->memoryPerRequest() <=> $a->memoryPerRequest();
 	}
 }
 
@@ -327,11 +341,7 @@ $res = $dbr->select(
 	[ 'ORDER BY' => 'pf_name ASC' ]
 );
 
-if ( isset( $_REQUEST['filter'] ) ) {
-	$filter = $_REQUEST['filter'];
-} else {
-	$filter = '';
-}
+$filter = $_REQUEST['filter'] ?? '';
 
 ?>
 <form method="get" action="profileinfo.php">
@@ -394,8 +404,8 @@ if ( isset( $_REQUEST['filter'] ) ) {
 		return htmlspecialchars(
 			'?' .
 				wfArrayToCgi( [
-					'filter' => $_filter ? $_filter : $filter,
-					'sort' => $_sort ? $_sort : $sort,
+					'filter' => $_filter ?: $filter,
+					'sort' => $_sort ?: $sort,
 					'expand' => implode( ',', array_keys( $_expand ) )
 				] )
 		);
@@ -405,6 +415,7 @@ if ( isset( $_REQUEST['filter'] ) ) {
 	$queries = [];
 	$sqltotal = 0.0;
 
+	/** @var profile_point|false $last */
 	$last = false;
 	foreach ( $res as $o ) {
 		$next = new profile_point( $o->pf_name, $o->pf_count, $o->pf_time, $o->pf_memory );
@@ -428,7 +439,7 @@ if ( isset( $_REQUEST['filter'] ) ) {
 		}
 	}
 
-	$s = new profile_point( 'SQL Queries', 0, $sqltotal, 0, 0 );
+	$s = new profile_point( 'SQL Queries', 0, $sqltotal, 0 );
 	foreach ( $queries as $q ) {
 		$s->add_child( $q );
 	}

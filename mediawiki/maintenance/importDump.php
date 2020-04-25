@@ -24,6 +24,8 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+
 require_once __DIR__ . '/Maintenance.php';
 
 /**
@@ -39,7 +41,18 @@ class BackupReader extends Maintenance {
 	public $uploads = false;
 	protected $uploadCount = 0;
 	public $imageBasePath = false;
+	/** @var array|false */
 	public $nsFilter = false;
+	/** @var bool|resource */
+	public $stderr;
+	/** @var callable|null */
+	protected $importCallback;
+	/** @var callable|null */
+	protected $logItemCallback;
+	/** @var callable|null */
+	protected $uploadCallback;
+	/** @var int */
+	protected $startTime;
 
 	function __construct() {
 		parent::__construct();
@@ -82,7 +95,7 @@ TEXT
 		);
 		$this->addOption( 'image-base-path', 'Import files from a specified path', false, true );
 		$this->addOption( 'skip-to', 'Start from nth page by skipping first n-1 pages', false, true );
-		$this->addOption( 'username-interwiki', 'Use interwiki usernames with this prefix', false, true );
+		$this->addOption( 'username-prefix', 'Prefix for interwiki usernames', false, true );
 		$this->addOption( 'no-local-users',
 			'Treat all usernames as interwiki. ' .
 			'The default is to assign edits to local users where they exist.',
@@ -110,8 +123,8 @@ TEXT
 			$this->setNsfilter( explode( '|', $this->getOption( 'namespaces' ) ) );
 		}
 
-		if ( $this->hasArg() ) {
-			$this->importFromFile( $this->getArg() );
+		if ( $this->hasArg( 0 ) ) {
+			$this->importFromFile( $this->getArg( 0 ) );
 		} else {
 			$this->importFromStdin();
 		}
@@ -131,13 +144,13 @@ TEXT
 	}
 
 	private function getNsIndex( $namespace ) {
-		global $wgContLang;
-		$result = $wgContLang->getNsIndex( $namespace );
+		$contLang = MediaWikiServices::getInstance()->getContentLanguage();
+		$result = $contLang->getNsIndex( $namespace );
 		if ( $result !== false ) {
 			return $result;
 		}
 		$ns = intval( $namespace );
-		if ( strval( $ns ) === $namespace && $wgContLang->getNsText( $ns ) !== false ) {
+		if ( strval( $ns ) === $namespace && $contLang->getNsText( $ns ) !== false ) {
 			return $ns;
 		}
 		$this->fatalError( "Unknown namespace text / index specified: $namespace" );
@@ -208,6 +221,7 @@ TEXT
 			}
 			$this->uploadCount++;
 			// $this->report();
+			// @phan-suppress-next-line PhanUndeclaredMethod
 			$this->progress( "upload: " . $revision->getFilename() );
 
 			if ( !$this->dryRun ) {
@@ -312,7 +326,7 @@ TEXT
 			$statusRootPage = $importer->setTargetRootPage( $this->getOption( 'rootpage' ) );
 			if ( !$statusRootPage->isGood() ) {
 				// Die here so that it doesn't print "Done!"
-				$this->fatalError( $statusRootPage->getMessage()->text() );
+				$this->fatalError( $statusRootPage->getMessage( false, false, 'en' )->text() );
 				return false;
 			}
 		}

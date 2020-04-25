@@ -20,10 +20,12 @@
  * @file
  */
 
+use MediaWiki\Block\DatabaseBlock;
 use MediaWiki\EditPage\TextboxBuilder;
 use MediaWiki\EditPage\TextConflictHelper;
 use MediaWiki\Logger\LoggerFactory;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Revision\RevisionRecord;
 use Wikimedia\ScopedCallback;
 
 /**
@@ -235,7 +237,10 @@ class EditPage {
 	/** @var string */
 	public $action = 'submit';
 
-	/** @var bool */
+	/** @var bool Whether an edit conflict needs to be resolved. Detected based on whether
+	 * $editRevId is different than the latest revision. When a conflict has successfully
+	 * been resolved by a 3-way-merge, this field is set to false.
+	 */
 	public $isConflict = false;
 
 	/** @var bool New page or new section */
@@ -247,7 +252,10 @@ class EditPage {
 	/** @var string */
 	public $formtype;
 
-	/** @var bool */
+	/** @var bool
+	 * True the first time the edit form is rendered, false after re-rendering
+	 * with diff, save prompts, etc.
+	 */
 	public $firsttime;
 
 	/** @var bool|stdClass */
@@ -301,7 +309,7 @@ class EditPage {
 	/** @var bool Has a summary been preset using GET parameter &summary= ? */
 	public $hasPresetSummary = false;
 
-	/** @var Revision|bool|null */
+	/** @var Revision|bool|null A revision object corresponding to $this->editRevId. */
 	public $mBaseRevision = false;
 
 	/** @var bool */
@@ -327,7 +335,9 @@ class EditPage {
 	/** @var bool */
 	public $recreate = false;
 
-	/** @var string */
+	/** @var string
+	 * Page content input field.
+	 */
 	public $textbox1 = '';
 
 	/** @var string */
@@ -336,13 +346,28 @@ class EditPage {
 	/** @var string */
 	public $summary = '';
 
-	/** @var bool */
+	/** @var bool
+	 * If true, hide the summary field.
+	 */
 	public $nosummary = false;
 
-	/** @var string */
+	/** @var string
+	 * Timestamp of the latest revision of the page when editing was initiated
+	 * on the client.
+	 */
 	public $edittime = '';
 
-	/** @var int */
+	/** @var int Revision ID of the latest revision of the page when editing
+	 * was initiated on the client.  This is used to detect and resolve edit
+	 * conflicts.
+	 *
+	 * @note 0 if the page did not exist at that time.
+	 * @note When starting an edit from an old revision, this still records the current
+	 * revision at the time, not the one the edit is based on.
+	 *
+	 * @see $oldid
+	 * @see getBaseRevision()
+	 */
 	private $editRevId = null;
 
 	/** @var string */
@@ -351,13 +376,23 @@ class EditPage {
 	/** @var string */
 	public $sectiontitle = '';
 
-	/** @var string */
+	/** @var string
+	 * Timestamp from the first time the edit form was rendered.
+	 */
 	public $starttime = '';
 
-	/** @var int */
+	/** @var int Revision ID the edit is based on, or 0 if it's the current revision.
+	 * FIXME: This isn't used in conflict resolution--provide a better
+	 * justification or merge with parentRevId.
+	 * @see $editRevId
+	 */
 	public $oldid = 0;
 
-	/** @var int */
+	/** @var int Revision ID the edit is based on, adjusted when an edit conflict is resolved.
+	 * @see $editRevId
+	 * @see $oldid
+	 * @see getparentRevId()
+	 */
 	public $parentRevId = 0;
 
 	/** @var string */
@@ -443,7 +478,15 @@ class EditPage {
 		$this->mArticle = $article;
 		$this->page = $article->getPage(); // model object
 		$this->mTitle = $article->getTitle();
-		$this->context = $article->getContext();
+
+		// Make sure the local context is in sync with other member variables.
+		// Particularly make sure everything is using the same WikiPage instance.
+		// This should probably be the case in Article as well, but it's
+		// particularly important for EditPage, to make use of the in-place caching
+		// facility in WikiPage::prepareContentForEdit.
+		$this->context = new DerivativeContext( $article->getContext() );
+		$this->context->setWikiPage( $this->page );
+		$this->context->setTitle( $this->mTitle );
 
 		$this->contentModel = $this->mTitle->getContentModel();
 
@@ -486,32 +529,20 @@ class EditPage {
 
 	/**
 	 * Get the context title object.
-	 * If not set, $wgTitle will be returned. This behavior might change in
-	 * the future to return $this->mTitle instead.
+	 *
+	 * If not set, $wgTitle will be returned, but this is deprecated. This will
+	 * throw an exception.
 	 *
 	 * @return Title
 	 */
 	public function getContextTitle() {
 		if ( is_null( $this->mContextTitle ) ) {
-			wfDebugLog(
-				'GlobalTitleFail',
-				__METHOD__ . ' called by ' . wfGetAllCallers( 5 ) . ' with no title set.'
-			);
+			wfDeprecated( __METHOD__ . ' called with no title set', '1.32' );
 			global $wgTitle;
 			return $wgTitle;
 		} else {
 			return $this->mContextTitle;
 		}
-	}
-
-	/**
-	 * Check if the edit page is using OOUI controls
-	 * @return bool Always true
-	 * @deprecated since 1.30
-	 */
-	public function isOouiEnabled() {
-		wfDeprecated( __METHOD__, '1.30' );
-		return true;
 	}
 
 	/**
@@ -534,14 +565,6 @@ class EditPage {
 	 */
 	public function setApiEditOverride( $enableOverride ) {
 		$this->enableApiEditOverride = $enableOverride;
-	}
-
-	/**
-	 * @deprecated since 1.29, call edit directly
-	 */
-	public function submit() {
-		wfDeprecated( __METHOD__, '1.29' );
-		$this->edit();
 	}
 
 	/**
@@ -597,11 +620,18 @@ class EditPage {
 		$permErrors = $this->getEditPermissionErrors( $this->save ? 'secure' : 'full' );
 		if ( $permErrors ) {
 			wfDebug( __METHOD__ . ": User can't edit\n" );
-			// Auto-block user's IP if the account was "hard" blocked
-			if ( !wfReadOnly() ) {
-				DeferredUpdates::addCallableUpdate( function () {
-					$this->context->getUser()->spreadAnyEditBlock();
-				} );
+
+			if ( $this->context->getUser()->getBlock() ) {
+				// Track block with a cookie if it doesn't exist already
+				MediaWikiServices::getInstance()->getBlockManager()
+					->trackBlockWithCookie( $this->context->getUser() );
+
+				// Auto-block user's IP if the account was "hard" blocked
+				if ( !wfReadOnly() ) {
+					DeferredUpdates::addCallableUpdate( function () {
+						$this->context->getUser()->spreadAnyEditBlock();
+					} );
+				}
 			}
 			$this->displayPermissionsError( $permErrors );
 
@@ -647,7 +677,7 @@ class EditPage {
 		# that edit() already checked just in case someone tries to sneak
 		# in the back door with a hand-edited submission URL.
 
-		if ( 'save' == $this->formtype ) {
+		if ( $this->formtype == 'save' ) {
 			$resultDetails = null;
 			$status = $this->attemptSave( $resultDetails );
 			if ( !$this->handleStatus( $status, $resultDetails ) ) {
@@ -657,9 +687,8 @@ class EditPage {
 
 		# First time through: get contents, set time for conflict
 		# checking, etc.
-		if ( 'initial' == $this->formtype || $this->firsttime ) {
+		if ( $this->formtype == 'initial' || $this->firsttime ) {
 			if ( $this->initialiseForm() === false ) {
-				$this->noSuchSectionPage();
 				return;
 			}
 
@@ -766,7 +795,7 @@ class EditPage {
 		$out->addHTML( $this->editFormTextTop );
 
 		if ( $errorMessage !== '' ) {
-			$out->addWikiText( $errorMessage );
+			$out->addWikiTextAsInterface( $errorMessage );
 			$out->addHTML( "<hr />\n" );
 		}
 
@@ -824,7 +853,7 @@ class EditPage {
 		} elseif ( $this->section == 'new' ) {
 			// Nothing *to* preview for new sections
 			return false;
-		} elseif ( ( $request->getVal( 'preload' ) !== null || $this->mTitle->exists() )
+		} elseif ( ( $request->getCheck( 'preload' ) || $this->mTitle->exists() )
 			&& $this->context->getUser()->getOption( 'previewonfirst' )
 		) {
 			// Standard preference behavior
@@ -915,7 +944,7 @@ class EditPage {
 			# Note that wpSectionTitle is not yet a part of the actual edit form, as wpSummary is
 			# currently doing double duty as both edit summary and section title. Right now this
 			# is just to allow API edits to work around this limitation, but this should be
-			# incorporated into the actual edit form when EditPage is rewritten (Bugs 18654, 26312).
+			# incorporated into the actual edit form when EditPage is rewritten (T20654, T28312).
 			$this->sectiontitle = $request->getText( 'wpSectionTitle' );
 			$this->sectiontitle = preg_replace( '/^\s*=+\s*(.*?)\s*=+\s*$/', '$1', $this->sectiontitle );
 
@@ -930,7 +959,7 @@ class EditPage {
 
 			$this->scrolltop = $request->getIntOrNull( 'wpScrolltop' );
 
-			if ( $this->textbox1 === '' && $request->getVal( 'wpTextbox1' ) === null ) {
+			if ( $this->textbox1 === '' && !$request->getCheck( 'wpTextbox1' ) ) {
 				// wpTextbox1 field is missing, possibly due to being "too big"
 				// according to some filter rules such as Suhosin's setting for
 				// suhosin.request.max_value_length (d'oh)
@@ -938,17 +967,12 @@ class EditPage {
 			} else {
 				// If we receive the last parameter of the request, we can fairly
 				// claim the POST request has not been truncated.
-
-				// TODO: softened the check for cutover.  Once we determine
-				// that it is safe, we should complete the transition by
-				// removing the "edittime" clause.
-				$this->incompleteForm = ( !$request->getVal( 'wpUltimateParam' )
-					&& is_null( $this->edittime ) );
+				$this->incompleteForm = !$request->getVal( 'wpUltimateParam' );
 			}
 			if ( $this->incompleteForm ) {
 				# If the form is incomplete, force to preview.
 				wfDebug( __METHOD__ . ": Form data appears to be incomplete\n" );
-				wfDebug( "POST DATA: " . var_export( $_POST, true ) . "\n" );
+				wfDebug( "POST DATA: " . var_export( $request->getPostValues(), true ) . "\n" );
 				$this->preview = true;
 			} else {
 				$this->preview = $request->getCheck( 'wpPreview' );
@@ -1035,7 +1059,7 @@ class EditPage {
 				$this->sectiontitle = $request->getVal( 'preloadtitle' );
 				// Once wpSummary isn't being use for setting section titles, we should delete this.
 				$this->summary = $request->getVal( 'preloadtitle' );
-			} elseif ( $this->section != 'new' && $request->getVal( 'summary' ) ) {
+			} elseif ( $this->section != 'new' && $request->getVal( 'summary' ) !== '' ) {
 				$this->summary = $request->getText( 'summary' );
 				if ( $this->summary !== '' ) {
 					$this->hasPresetSummary = true;
@@ -1103,7 +1127,7 @@ class EditPage {
 	 * @return string|null
 	 */
 	protected function importContentFormData( &$request ) {
-		return; // Don't do anything, EditPage already extracted wpTextbox1
+		return null; // Don't do anything, EditPage already extracted wpTextbox1
 	}
 
 	/**
@@ -1117,8 +1141,26 @@ class EditPage {
 
 		$content = $this->getContentObject( false ); # TODO: track content object?!
 		if ( $content === false ) {
+			$out = $this->context->getOutput();
+			if ( $out->getRedirect() === '' ) { // mcrundo hack redirects, don't override it
+				$this->noSuchSectionPage();
+			}
 			return false;
 		}
+
+		if ( !$this->isSupportedContentModel( $content->getModel() ) ) {
+			$modelMsg = $this->getContext()->msg( 'content-model-' . $content->getModel() );
+			$modelName = $modelMsg->exists() ? $modelMsg->text() : $content->getModel();
+
+			$out = $this->context->getOutput();
+			$out->showErrorPage(
+				'modeleditnotsupported-title',
+				'modeleditnotsupported-text',
+				[ $modelName ]
+			);
+			return false;
+		}
+
 		$this->textbox1 = $this->toEditText( $content );
 
 		$user = $this->context->getUser();
@@ -1146,12 +1188,12 @@ class EditPage {
 	/**
 	 * @param Content|null $def_content The default value to return
 	 *
-	 * @return Content|null Content on success, $def_content for invalid sections
+	 * @return Content|false|null Content on success, $def_content for invalid sections
 	 *
 	 * @since 1.21
 	 */
 	protected function getContentObject( $def_content = null ) {
-		global $wgContLang;
+		global $wgDisableAnonTalk;
 
 		$content = false;
 
@@ -1176,101 +1218,149 @@ class EditPage {
 				$content = $this->getPreloadedContent( $preload, $params );
 			}
 		// For existing pages, get text based on "undo" or section parameters.
+		} elseif ( $this->section != '' ) {
+			// Get section edit text (returns $def_text for invalid sections)
+			$orig = $this->getOriginalContent( $user );
+			$content = $orig ? $orig->getSection( $this->section ) : null;
+
+			if ( !$content ) {
+				$content = $def_content;
+			}
 		} else {
-			if ( $this->section != '' ) {
-				// Get section edit text (returns $def_text for invalid sections)
-				$orig = $this->getOriginalContent( $user );
-				$content = $orig ? $orig->getSection( $this->section ) : null;
+			$undoafter = $request->getInt( 'undoafter' );
+			$undo = $request->getInt( 'undo' );
 
-				if ( !$content ) {
-					$content = $def_content;
-				}
-			} else {
-				$undoafter = $request->getInt( 'undoafter' );
-				$undo = $request->getInt( 'undo' );
+			if ( $undo > 0 && $undoafter > 0 ) {
+				$undorev = Revision::newFromId( $undo );
+				$oldrev = Revision::newFromId( $undoafter );
+				$undoMsg = null;
 
-				if ( $undo > 0 && $undoafter > 0 ) {
-					$undorev = Revision::newFromId( $undo );
-					$oldrev = Revision::newFromId( $undoafter );
-
-					# Sanity check, make sure it's the right page,
-					# the revisions exist and they were not deleted.
-					# Otherwise, $content will be left as-is.
-					if ( !is_null( $undorev ) && !is_null( $oldrev ) &&
-						!$undorev->isDeleted( Revision::DELETED_TEXT ) &&
-						!$oldrev->isDeleted( Revision::DELETED_TEXT )
+				# Sanity check, make sure it's the right page,
+				# the revisions exist and they were not deleted.
+				# Otherwise, $content will be left as-is.
+				if ( !is_null( $undorev ) && !is_null( $oldrev ) &&
+					!$undorev->isDeleted( RevisionRecord::DELETED_TEXT ) &&
+					!$oldrev->isDeleted( RevisionRecord::DELETED_TEXT )
+				) {
+					if ( WikiPage::hasDifferencesOutsideMainSlot( $undorev, $oldrev )
+						|| !$this->isSupportedContentModel( $oldrev->getContentModel() )
 					) {
+						// Hack for undo while EditPage can't handle multi-slot editing
+						$this->context->getOutput()->redirect( $this->mTitle->getFullURL( [
+							'action' => 'mcrundo',
+							'undo' => $undo,
+							'undoafter' => $undoafter,
+						] ) );
+						return false;
+					} else {
 						$content = $this->page->getUndoContent( $undorev, $oldrev );
 
 						if ( $content === false ) {
 							# Warn the user that something went wrong
 							$undoMsg = 'failure';
-						} else {
-							$oldContent = $this->page->getContent( Revision::RAW );
-							$popts = ParserOptions::newFromUserAndLang( $user, $wgContLang );
-							$newContent = $content->preSaveTransform( $this->mTitle, $user, $popts );
-							if ( $newContent->getModel() !== $oldContent->getModel() ) {
-								// The undo may change content
-								// model if its reverting the top
-								// edit. This can result in
-								// mismatched content model/format.
-								$this->contentModel = $newContent->getModel();
-								$this->contentFormat = $oldrev->getContentFormat();
-							}
-
-							if ( $newContent->equals( $oldContent ) ) {
-								# Tell the user that the undo results in no change,
-								# i.e. the revisions were already undone.
-								$undoMsg = 'nochange';
-								$content = false;
-							} else {
-								# Inform the user of our success and set an automatic edit summary
-								$undoMsg = 'success';
-
-								# If we just undid one rev, use an autosummary
-								$firstrev = $oldrev->getNext();
-								if ( $firstrev && $firstrev->getId() == $undo ) {
-									$userText = $undorev->getUserText();
-									if ( $userText === '' ) {
-										$undoSummary = $this->context->msg(
-											'undo-summary-username-hidden',
-											$undo
-										)->inContentLanguage()->text();
-									} else {
-										$undoSummary = $this->context->msg(
-											'undo-summary',
-											$undo,
-											$userText
-										)->inContentLanguage()->text();
-									}
-									if ( $this->summary === '' ) {
-										$this->summary = $undoSummary;
-									} else {
-										$this->summary = $undoSummary . $this->context->msg( 'colon-separator' )
-											->inContentLanguage()->text() . $this->summary;
-									}
-									$this->undidRev = $undo;
-								}
-								$this->formtype = 'diff';
-							}
 						}
-					} else {
-						// Failed basic sanity checks.
-						// Older revisions may have been removed since the link
-						// was created, or we may simply have got bogus input.
-						$undoMsg = 'norev';
 					}
 
-					$out = $this->context->getOutput();
-					// Messages: undo-success, undo-failure, undo-norev, undo-nochange
-					$class = ( $undoMsg == 'success' ? '' : 'error ' ) . "mw-undo-{$undoMsg}";
-					$this->editFormPageTop .= $out->parse( "<div class=\"{$class}\">" .
-						$this->context->msg( 'undo-' . $undoMsg )->plain() . '</div>', true, /* interface */true );
+					if ( $undoMsg === null ) {
+						$oldContent = $this->page->getContent( RevisionRecord::RAW );
+						$popts = ParserOptions::newFromUserAndLang(
+							$user, MediaWikiServices::getInstance()->getContentLanguage() );
+						$newContent = $content->preSaveTransform( $this->mTitle, $user, $popts );
+						if ( $newContent->getModel() !== $oldContent->getModel() ) {
+							// The undo may change content
+							// model if its reverting the top
+							// edit. This can result in
+							// mismatched content model/format.
+							$this->contentModel = $newContent->getModel();
+							$this->contentFormat = $oldrev->getContentFormat();
+						}
+
+						if ( $newContent->equals( $oldContent ) ) {
+							# Tell the user that the undo results in no change,
+							# i.e. the revisions were already undone.
+							$undoMsg = 'nochange';
+							$content = false;
+						} else {
+							# Inform the user of our success and set an automatic edit summary
+							$undoMsg = 'success';
+
+							# If we just undid one rev, use an autosummary
+							$firstrev = $oldrev->getNext();
+							if ( $firstrev && $firstrev->getId() == $undo ) {
+								$userText = $undorev->getUserText();
+								if ( $userText === '' ) {
+									$undoSummary = $this->context->msg(
+										'undo-summary-username-hidden',
+										$undo
+									)->inContentLanguage()->text();
+								} else {
+									$undoMessage = ( $undorev->getUser() === 0 && $wgDisableAnonTalk ) ?
+										'undo-summary-anon' :
+										'undo-summary';
+									$undoSummary = $this->context->msg(
+										$undoMessage,
+										$undo,
+										$userText
+									)->inContentLanguage()->text();
+								}
+								if ( $this->summary === '' ) {
+									$this->summary = $undoSummary;
+								} else {
+									$this->summary = $undoSummary . $this->context->msg( 'colon-separator' )
+										->inContentLanguage()->text() . $this->summary;
+								}
+								$this->undidRev = $undo;
+							}
+							$this->formtype = 'diff';
+						}
+					}
+				} else {
+					// Failed basic sanity checks.
+					// Older revisions may have been removed since the link
+					// was created, or we may simply have got bogus input.
+					$undoMsg = 'norev';
 				}
 
-				if ( $content === false ) {
-					$content = $this->getOriginalContent( $user );
+				$out = $this->context->getOutput();
+				// Messages: undo-success, undo-failure, undo-main-slot-only, undo-norev,
+				// undo-nochange.
+				$class = ( $undoMsg == 'success' ? '' : 'error ' ) . "mw-undo-{$undoMsg}";
+				$this->editFormPageTop .= Html::rawElement(
+					'div', [ 'class' => $class ],
+					$out->parseAsInterface(
+						$this->context->msg( 'undo-' . $undoMsg )->plain()
+					)
+				);
+			}
+
+			if ( $content === false ) {
+				// Hack for restoring old revisions while EditPage
+				// can't handle multi-slot editing.
+
+				$curRevision = $this->page->getRevision();
+				$oldRevision = $this->mArticle->getRevisionFetched();
+
+				if ( $curRevision
+					&& $oldRevision
+					&& $curRevision->getId() !== $oldRevision->getId()
+					&& ( WikiPage::hasDifferencesOutsideMainSlot( $oldRevision, $curRevision )
+						|| !$this->isSupportedContentModel( $oldRevision->getContentModel() ) )
+				) {
+					$this->context->getOutput()->redirect(
+						$this->mTitle->getFullURL(
+							[
+								'action' => 'mcrrestore',
+								'restore' => $oldRevision->getId(),
+							]
+						)
+					);
+
+					return false;
 				}
+			}
+
+			if ( $content === false ) {
+				$content = $this->getOriginalContent( $user );
 			}
 		}
 
@@ -1301,7 +1391,7 @@ class EditPage {
 			$handler = ContentHandler::getForModelID( $this->contentModel );
 			return $handler->makeEmptyContent();
 		}
-		$content = $revision->getContent( Revision::FOR_THIS_USER, $user );
+		$content = $revision->getContent( RevisionRecord::FOR_THIS_USER, $user );
 		return $content;
 	}
 
@@ -1335,7 +1425,7 @@ class EditPage {
 	 */
 	protected function getCurrentContent() {
 		$rev = $this->page->getRevision();
-		$content = $rev ? $rev->getContent( Revision::RAW ) : null;
+		$content = $rev ? $rev->getContent( RevisionRecord::RAW ) : null;
 
 		if ( $content === false || $content === null ) {
 			$handler = ContentHandler::getForModelID( $this->contentModel );
@@ -1407,8 +1497,9 @@ class EditPage {
 
 		$user = $this->context->getUser();
 		$title = Title::newFromText( $preload );
+
 		# Check for existence to avoid getting MediaWiki:Noarticletext
-		if ( $title === null || !$title->exists() || !$title->userCan( 'read', $user ) ) {
+		if ( !$this->isPageExistingAndViewable( $title, $user ) ) {
 			// TODO: somehow show a warning to the user!
 			return $handler->makeEmptyContent();
 		}
@@ -1417,7 +1508,7 @@ class EditPage {
 		if ( $page->isRedirect() ) {
 			$title = $page->getRedirectTarget();
 			# Same as before
-			if ( $title === null || !$title->exists() || !$title->userCan( 'read', $user ) ) {
+			if ( !$this->isPageExistingAndViewable( $title, $user ) ) {
 				// TODO: somehow show a warning to the user!
 				return $handler->makeEmptyContent();
 			}
@@ -1425,7 +1516,7 @@ class EditPage {
 		}
 
 		$parserOptions = ParserOptions::newFromUser( $user );
-		$content = $page->getContent( Revision::RAW );
+		$content = $page->getContent( RevisionRecord::RAW );
 
 		if ( !$content ) {
 			// TODO: somehow show a warning to the user!
@@ -1448,6 +1539,21 @@ class EditPage {
 		}
 
 		return $content->preloadTransform( $title, $parserOptions, $params );
+	}
+
+	/**
+	 * Verify if a given title exists and the given user is allowed to view it
+	 *
+	 * @see EditPage::getPreloadedContent()
+	 * @param Title|null $title
+	 * @param User $user
+	 * @return bool
+	 * @throws Exception
+	 */
+	private function isPageExistingAndViewable( $title, User $user ) {
+		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
+
+		return $title && $title->exists() && $permissionManager->userCan( 'read', $user, $title );
 	}
 
 	/**
@@ -1501,8 +1607,13 @@ class EditPage {
 	 * @return Status The resulting status object.
 	 */
 	public function attemptSave( &$resultDetails = false ) {
-		# Allow bots to exempt some edits from bot flagging
-		$bot = $this->context->getUser()->isAllowed( 'bot' ) && $this->bot;
+		// TODO: MCR: treat $this->minoredit like $this->bot and check isAllowed( 'minoredit' )!
+		// Also, add $this->autopatrol like $this->bot and check isAllowed( 'autopatrol' )!
+		// This is needed since PageUpdater no longer checks these rights!
+
+		// Allow bots to exempt some edits from bot flagging
+		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
+		$bot = $permissionManager->userHasRight( $this->context->getUser(), 'bot' ) && $this->bot;
 		$status = $this->internalAttemptSave( $resultDetails, $bot );
 
 		Hooks::run( 'EditPage::attemptSave:after', [ $this, $status, $resultDetails ] );
@@ -1572,19 +1683,20 @@ class EditPage {
 			case self::AS_CANNOT_USE_CUSTOM_MODEL:
 			case self::AS_PARSE_ERROR:
 			case self::AS_UNICODE_NOT_SUPPORTED:
-				$out->addWikiText( '<div class="error">' . "\n" . $status->getWikiText() . '</div>' );
+				$out->wrapWikiTextAsInterface( 'error',
+					$status->getWikiText( false, false, $this->context->getLanguage() )
+				);
 				return true;
 
 			case self::AS_SUCCESS_NEW_ARTICLE:
 				$query = $resultDetails['redirect'] ? 'redirect=no' : '';
 				if ( $extraQueryRedirect ) {
-					if ( $query === '' ) {
-						$query = $extraQueryRedirect;
-					} else {
-						$query = $query . '&' . $extraQueryRedirect;
+					if ( $query !== '' ) {
+						$query .= '&';
 					}
+					$query .= $extraQueryRedirect;
 				}
-				$anchor = isset( $resultDetails['sectionanchor'] ) ? $resultDetails['sectionanchor'] : '';
+				$anchor = $resultDetails['sectionanchor'] ?? '';
 				$out->redirect( $this->mTitle->getFullURL( $query ) . $anchor );
 				return false;
 
@@ -1599,18 +1711,16 @@ class EditPage {
 				);
 
 				if ( $resultDetails['redirect'] ) {
-					if ( $extraQuery == '' ) {
-						$extraQuery = 'redirect=no';
-					} else {
-						$extraQuery = 'redirect=no&' . $extraQuery;
+					if ( $extraQuery !== '' ) {
+						$extraQuery = '&' . $extraQuery;
 					}
+					$extraQuery = 'redirect=no' . $extraQuery;
 				}
 				if ( $extraQueryRedirect ) {
-					if ( $extraQuery === '' ) {
-						$extraQuery = $extraQueryRedirect;
-					} else {
-						$extraQuery = $extraQuery . '&' . $extraQueryRedirect;
+					if ( $extraQuery !== '' ) {
+						$extraQuery .= '&';
 					}
+					$extraQuery .= $extraQueryRedirect;
 				}
 
 				$out->redirect( $this->mTitle->getFullURL( $extraQuery ) . $sectionanchor );
@@ -1649,7 +1759,8 @@ class EditPage {
 				// is if an extension hook aborted from inside ArticleSave.
 				// Render the status object into $this->hookError
 				// FIXME this sucks, we should just use the Status object throughout
-				$this->hookError = '<div class="error">' ."\n" . $status->getWikiText() .
+				$this->hookError = '<div class="error">' . "\n" .
+					$status->getWikiText( false, false, $this->context->getLanguage() ) .
 					'</div>';
 				return true;
 		}
@@ -1696,8 +1807,11 @@ class EditPage {
 		} elseif ( !$status->isOK() ) {
 			# ...or the hook could be expecting us to produce an error
 			// FIXME this sucks, we should just use the Status object throughout
+			if ( !$status->getErrors() ) {
+				// Provide a fallback error message if none was set
+				$status->fatal( 'hookaborted' );
+			}
 			$this->hookError = $this->formatStatusErrors( $status );
-			$status->fatal( 'hookaborted' );
 			$status->value = self::AS_HOOK_ERROR_EXPECTED;
 			return false;
 		}
@@ -1732,25 +1846,25 @@ ERROR;
 	 * @return string
 	 */
 	private function newSectionSummary( &$sectionanchor = null ) {
-		global $wgParser;
-
 		if ( $this->sectiontitle !== '' ) {
 			$sectionanchor = $this->guessSectionName( $this->sectiontitle );
 			// If no edit summary was specified, create one automatically from the section
 			// title and have it link to the new section. Otherwise, respect the summary as
 			// passed.
 			if ( $this->summary === '' ) {
-				$cleanSectionTitle = $wgParser->stripSectionName( $this->sectiontitle );
+				$cleanSectionTitle = MediaWikiServices::getInstance()->getParser()
+					->stripSectionName( $this->sectiontitle );
 				return $this->context->msg( 'newsectionsummary' )
-					->rawParams( $cleanSectionTitle )->inContentLanguage()->text();
+					->plaintextParams( $cleanSectionTitle )->inContentLanguage()->text();
 			}
 		} elseif ( $this->summary !== '' ) {
 			$sectionanchor = $this->guessSectionName( $this->summary );
 			# This is a new section, so create a link to the new section
 			# in the revision summary.
-			$cleanSummary = $wgParser->stripSectionName( $this->summary );
+			$cleanSummary = MediaWikiServices::getInstance()->getParser()
+				->stripSectionName( $this->summary );
 			return $this->context->msg( 'newsectionsummary' )
-				->rawParams( $cleanSummary )->inContentLanguage()->text();
+				->plaintextParams( $cleanSummary )->inContentLanguage()->text();
 		}
 		return $this->summary;
 	}
@@ -1782,6 +1896,7 @@ ERROR;
 	public function internalAttemptSave( &$result, $bot = false ) {
 		$status = Status::newGood();
 		$user = $this->context->getUser();
+		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
 
 		if ( !Hooks::run( 'EditPage::attemptSave', [ $this ] ) ) {
 			wfDebug( "Hook 'EditPage::attemptSave' aborted article saving\n" );
@@ -1830,7 +1945,7 @@ ERROR;
 		# Check image redirect
 		if ( $this->mTitle->getNamespace() == NS_FILE &&
 			$textbox_content->isRedirect() &&
-			!$user->isAllowed( 'upload' )
+			!$permissionManager->userHasRight( $user, 'upload' )
 		) {
 				$code = $user->isAnon() ? self::AS_IMAGE_REDIRECT_ANON : self::AS_IMAGE_REDIRECT_LOGGED;
 				$status->setResult( false, $code );
@@ -1880,7 +1995,7 @@ ERROR;
 			return $status;
 		}
 
-		if ( $user->isBlockedFrom( $this->mTitle, false ) ) {
+		if ( $permissionManager->isBlockedFrom( $user, $this->mTitle ) ) {
 			// Auto-block user's IP if the account was "hard" blocked
 			if ( !wfReadOnly() ) {
 				$user->spreadAnyEditBlock();
@@ -1900,7 +2015,7 @@ ERROR;
 			return $status;
 		}
 
-		if ( !$user->isAllowed( 'edit' ) ) {
+		if ( !$permissionManager->userHasRight( $user, 'edit' ) ) {
 			if ( $user->isAnon() ) {
 				$status->setResult( false, self::AS_READ_ONLY_PAGE_ANON );
 				return $status;
@@ -1917,17 +2032,26 @@ ERROR;
 				$status->fatal( 'editpage-cannot-use-custom-model' );
 				$status->value = self::AS_CANNOT_USE_CUSTOM_MODEL;
 				return $status;
-			} elseif ( !$user->isAllowed( 'editcontentmodel' ) ) {
+			} elseif ( !$permissionManager->userHasRight( $user, 'editcontentmodel' ) ) {
 				$status->setResult( false, self::AS_NO_CHANGE_CONTENT_MODEL );
 				return $status;
 			}
 			// Make sure the user can edit the page under the new content model too
 			$titleWithNewContentModel = clone $this->mTitle;
 			$titleWithNewContentModel->setContentModel( $this->contentModel );
-			if ( !$titleWithNewContentModel->userCan( 'editcontentmodel', $user )
-				|| !$titleWithNewContentModel->userCan( 'edit', $user )
+
+			$canEditModel = $permissionManager->userCan(
+				'editcontentmodel',
+				$user,
+				$titleWithNewContentModel
+			);
+
+			if (
+				!$canEditModel
+				|| !$permissionManager->userCan( 'edit', $user, $titleWithNewContentModel )
 			) {
 				$status->setResult( false, self::AS_NO_CHANGE_CONTENT_MODEL );
+
 				return $status;
 			}
 
@@ -1971,7 +2095,7 @@ ERROR;
 
 		if ( $new ) {
 			// Late check for create permission, just in case *PARANOIA*
-			if ( !$this->mTitle->userCan( 'create', $user ) ) {
+			if ( !$permissionManager->userCan( 'create', $user, $this->mTitle ) ) {
 				$status->fatal( 'nocreatetext' );
 				$status->value = self::AS_NO_CREATE_PERMISSION;
 				wfDebug( __METHOD__ . ": no create permission\n" );
@@ -2025,7 +2149,10 @@ ERROR;
 
 			wfDebug( "timestamp: {$timestamp}, edittime: {$this->edittime}\n" );
 
-			// Check editRevId if set, which handles same-second timestamp collisions
+			// An edit conflict is detected if the current revision is different from the
+			// revision that was current when editing was initiated on the client.
+			// This is checked based on the timestamp and revision ID.
+			// TODO: the timestamp based check can probably go away now.
 			if ( $timestamp != $this->edittime
 				|| ( $this->editRevId !== null && $this->editRevId != $latest )
 			) {
@@ -2305,7 +2432,8 @@ ERROR;
 	private function mergeChangesIntoContent( &$editContent ) {
 		$db = wfGetDB( DB_MASTER );
 
-		// This is the revision the editor started from
+		// This is the revision that was current at the time editing was initiated on the client,
+		// even if the edit was based on an old revision.
 		$baseRevision = $this->getBaseRevision();
 		$baseContent = $baseRevision ? $baseRevision->getContent() : null;
 
@@ -2336,9 +2464,16 @@ ERROR;
 	}
 
 	/**
-	 * @note: this method is very poorly named. If the user opened the form with ?oldid=X,
-	 *        one might think of X as the "base revision", which is NOT what this returns.
-	 * @return Revision|null Current version when the edit was started
+	 * Returns the revision that was current at the time editing was initiated on the client,
+	 * even if the edit was based on an old revision.
+	 *
+	 * @warning this method is very poorly named. If the user opened the form with ?oldid=X,
+	 *        one might think of X as the "base revision", which is NOT what this returns,
+	 *        see oldid for that. One might further assume that this corresponds to the $baseRevId
+	 *        parameter of WikiPage::doEditContent, which is not the case either.
+	 *        getExpectedParentRevision() would perhaps be a better name.
+	 *
+	 * @return Revision|null Current version when editing was initiated on the client
 	 */
 	public function getBaseRevision() {
 		if ( !$this->mBaseRevision ) {
@@ -2400,13 +2535,6 @@ ERROR;
 		$out->addModuleStyles( 'mediawiki.editfont.styles' );
 
 		$user = $this->context->getUser();
-		if ( $user->getOption( 'showtoolbar' ) ) {
-			// The addition of default buttons is handled by getEditToolbar() which
-			// has its own dependency on this module. The call here ensures the module
-			// is loaded in time (it has position "top") for other modules to register
-			// buttons (e.g. extensions, gadgets, user scripts).
-			$out->addModules( 'mediawiki.toolbar' );
-		}
 
 		if ( $user->getOption( 'uselivepreview' ) ) {
 			$out->addModules( 'mediawiki.action.edit.preview' );
@@ -2439,6 +2567,8 @@ ERROR;
 		$displayTitle = isset( $this->mParserOutput ) ? $this->mParserOutput->getDisplayTitle() : false;
 		if ( $displayTitle === false ) {
 			$displayTitle = $contextTitle->getPrefixedText();
+		} else {
+			$out->setDisplayTitle( $displayTitle );
 		}
 		$out->setPageTitle( $this->context->msg( $msg, $displayTitle ) );
 
@@ -2488,7 +2618,7 @@ ERROR;
 			}
 		} elseif ( $namespace == NS_FILE ) {
 			# Show a hint to shared repo
-			$file = wfFindFile( $this->mTitle );
+			$file = MediaWikiServices::getInstance()->getRepoGroup()->findFile( $this->mTitle );
 			if ( $file && !$file->isLocal() ) {
 				$descUrl = $file->getDescriptionUrl();
 				# there must be a description url to show a hint to shared repo
@@ -2512,16 +2642,22 @@ ERROR;
 			$username = explode( '/', $this->mTitle->getText(), 2 )[0];
 			$user = User::newFromName( $username, false /* allow IP users */ );
 			$ip = User::isIP( $username );
-			$block = Block::newFromTarget( $user, $user );
+			$block = DatabaseBlock::newFromTarget( $user, $user );
 			if ( !( $user && $user->isLoggedIn() ) && !$ip ) { # User does not exist
 				$out->wrapWikiMsg( "<div class=\"mw-userpage-userdoesnotexist error\">\n$1\n</div>",
 					[ 'userpage-userdoesnotexist', wfEscapeWikiText( $username ) ] );
-			} elseif ( !is_null( $block ) && $block->getType() != Block::TYPE_AUTO ) {
-				# Show log extract if the user is currently blocked
+			} elseif (
+				!is_null( $block ) &&
+				$block->getType() != DatabaseBlock::TYPE_AUTO &&
+				( $block->isSitewide() || $user->isBlockedFrom( $this->mTitle ) )
+			) {
+				// Show log extract if the user is sitewide blocked or is partially
+				// blocked and not allowed to edit their user page or user talk page
 				LogEventsList::showLogExtract(
 					$out,
 					'block',
-					MWNamespace::getCanonicalName( NS_USER ) . ':' . $block->getTarget(),
+					MediaWikiServices::getInstance()->getNamespaceInfo()->
+						getCanonicalName( NS_USER ) . ':' . $block->getTarget(),
 					'',
 					[
 						'lim' => 1,
@@ -2583,10 +2719,11 @@ ERROR;
 	protected function showCustomIntro() {
 		if ( $this->editintro ) {
 			$title = Title::newFromText( $this->editintro );
-			if ( $title instanceof Title && $title->exists() && $title->userCan( 'read' ) ) {
+			if ( $this->isPageExistingAndViewable( $title, $this->context->getUser() ) ) {
 				// Added using template syntax, to take <noinclude>'s into account.
-				$this->context->getOutput()->addWikiTextTitleTidy(
+				$this->context->getOutput()->addWikiTextAsContent(
 					'<div class="mw-editintro">{{:' . $title->getFullText() . '}}</div>',
+					/*linestart*/true,
 					$this->mTitle
 				);
 				return true;
@@ -2608,7 +2745,7 @@ ERROR;
 	 * content.
 	 *
 	 * @param Content|null|bool|string $content
-	 * @return string The editable text form of the content.
+	 * @return string|false|null The editable text form of the content.
 	 *
 	 * @throws MWException If $content is not an instance of TextContent and
 	 *   $this->allowNonTextContent is not true.
@@ -2635,7 +2772,7 @@ ERROR;
 	 *
 	 * @param string|null|bool $text Text to unserialize
 	 * @return Content|bool|null The content object created from $text. If $text was false
-	 *   or null, false resp. null will be  returned instead.
+	 *   or null, then false or null will be returned instead.
 	 *
 	 * @throws MWException If unserializing the text results in a Content
 	 *   object that is not an instance of TextContent and
@@ -2706,16 +2843,9 @@ ERROR;
 
 		$out->addHTML( $this->editFormTextTop );
 
-		$showToolbar = true;
-		if ( $this->wasDeletedSinceLastEdit() ) {
-			if ( $this->formtype == 'save' ) {
-				// Hide the toolbar and edit area, user can click preview to get it back
-				// Add an confirmation checkbox and explanation.
-				$showToolbar = false;
-			} else {
-				$out->wrapWikiMsg( "<div class='error mw-deleted-while-editing'>\n$1\n</div>",
-					'deletedwhileediting' );
-			}
+		if ( $this->wasDeletedSinceLastEdit() && $this->formtype !== 'save' ) {
+			$out->wrapWikiMsg( "<div class='error mw-deleted-while-editing'>\n$1\n</div>",
+				'deletedwhileediting' );
 		}
 
 		// @todo add EditForm plugin interface and use it here!
@@ -2767,7 +2897,7 @@ ERROR;
 		// Put these up at the top to ensure they aren't lost on early form submission
 		$this->showFormBeforeText();
 
-		if ( $this->wasDeletedSinceLastEdit() && 'save' == $this->formtype ) {
+		if ( $this->wasDeletedSinceLastEdit() && $this->formtype == 'save' ) {
 			$username = $this->lastDelete->user_name;
 			$comment = CommentStore::getStore()
 				->getComment( 'log_comment', $this->lastDelete )->text;
@@ -2818,7 +2948,7 @@ ERROR;
 			$this->autoSumm = md5( '' );
 		}
 
-		$autosumm = $this->autoSumm ? $this->autoSumm : md5( $this->summary );
+		$autosumm = $this->autoSumm !== '' ? $this->autoSumm : md5( $this->summary );
 		$out->addHTML( Html::hidden( 'wpAutoSummary', $autosumm ) );
 
 		$out->addHTML( Html::hidden( 'oldid', $this->oldid ) );
@@ -2850,8 +2980,8 @@ ERROR;
 			$out->addHTML( $editConflictHelper->getEditFormHtmlBeforeContent() );
 		}
 
-		if ( !$this->mTitle->isUserConfigPage() && $showToolbar && $user->getOption( 'showtoolbar' ) ) {
-			$out->addHTML( self::getEditToolbar( $this->mTitle ) );
+		if ( !$this->mTitle->isUserConfigPage() ) {
+			$out->addHTML( self::getEditToolbar() );
 		}
 
 		if ( $this->blankArticle ) {
@@ -2909,7 +3039,7 @@ ERROR;
 					$this->contentFormat,
 					$ex->getMessage()
 				);
-				$out->addWikiText( '<div class="error">' . $msg->text() . '</div>' );
+				$out->wrapWikiTextAsInterface( 'error', $msg->plain() );
 			}
 		}
 
@@ -2969,8 +3099,8 @@ ERROR;
 	public static function extractSectionTitle( $text ) {
 		preg_match( "/^(=+)(.+)\\1\\s*(\n|$)/i", $text, $matches );
 		if ( !empty( $matches[2] ) ) {
-			global $wgParser;
-			return $wgParser->stripSectionName( trim( $matches[2] ) );
+			return MediaWikiServices::getInstance()->getParser()
+				->stripSectionName( trim( $matches[2] ) );
 		} else {
 			return false;
 		}
@@ -2983,12 +3113,12 @@ ERROR;
 			$this->addExplainConflictHeader( $out );
 			$this->editRevId = $this->page->getLatest();
 		} else {
-			if ( $this->section != '' && $this->section != 'new' ) {
-				if ( !$this->summary && !$this->preview && !$this->diff ) {
-					$sectionTitle = self::extractSectionTitle( $this->textbox1 ); // FIXME: use Content object
-					if ( $sectionTitle !== false ) {
-						$this->summary = "/* $sectionTitle */ ";
-					}
+			if ( $this->section != '' && $this->section != 'new' && !$this->summary &&
+				!$this->preview && !$this->diff
+			) {
+				$sectionTitle = self::extractSectionTitle( $this->textbox1 ); // FIXME: use Content object
+				if ( $sectionTitle !== false ) {
+					$this->summary = "/* $sectionTitle */ ";
 				}
 			}
 
@@ -3027,7 +3157,7 @@ ERROR;
 			}
 
 			if ( $this->hookError !== '' ) {
-				$out->addWikiText( $this->hookError );
+				$out->addWikiTextAsInterface( $this->hookError );
 			}
 
 			if ( $this->section != 'new' ) {
@@ -3035,12 +3165,12 @@ ERROR;
 				if ( $revision ) {
 					// Let sysop know that this will make private content public if saved
 
-					if ( !$revision->userCan( Revision::DELETED_TEXT, $user ) ) {
+					if ( !$revision->userCan( RevisionRecord::DELETED_TEXT, $user ) ) {
 						$out->wrapWikiMsg(
 							"<div class='mw-warning plainlinks'>\n$1\n</div>\n",
 							'rev-deleted-text-permission'
 						);
-					} elseif ( $revision->isDeleted( Revision::DELETED_TEXT ) ) {
+					} elseif ( $revision->isDeleted( RevisionRecord::DELETED_TEXT ) ) {
 						$out->wrapWikiMsg(
 							"<div class='mw-warning plainlinks'>\n$1\n</div>\n",
 							'rev-deleted-text-view'
@@ -3049,7 +3179,10 @@ ERROR;
 
 					if ( !$revision->isCurrent() ) {
 						$this->mArticle->setOldSubtitle( $revision->getId() );
-						$out->addWikiMsg( 'editingold' );
+						$out->wrapWikiMsg(
+							Html::warningBox( "\n$1\n" ),
+							'editingold'
+						);
 						$this->isOldRev = true;
 					}
 				} elseif ( $this->mTitle->exists() ) {
@@ -3068,16 +3201,22 @@ ERROR;
 			);
 		} elseif ( $user->isAnon() ) {
 			if ( $this->formtype != 'preview' ) {
+				$returntoquery = array_diff_key(
+					$this->context->getRequest()->getValues(),
+					[ 'title' => true, 'returnto' => true, 'returntoquery' => true ]
+				);
 				$out->wrapWikiMsg(
 					"<div id='mw-anon-edit-warning' class='warningbox'>\n$1\n</div>",
 					[ 'anoneditwarning',
 						// Log-in link
 						SpecialPage::getTitleFor( 'Userlogin' )->getFullURL( [
-							'returnto' => $this->getTitle()->getPrefixedDBkey()
+							'returnto' => $this->getTitle()->getPrefixedDBkey(),
+							'returntoquery' => wfArrayToCgi( $returntoquery ),
 						] ),
 						// Sign-up link
 						SpecialPage::getTitleFor( 'CreateAccount' )->getFullURL( [
-							'returnto' => $this->getTitle()->getPrefixedDBkey()
+							'returnto' => $this->getTitle()->getPrefixedDBkey(),
+							'returntoquery' => wfArrayToCgi( $returntoquery ),
 						] )
 					]
 				);
@@ -3086,44 +3225,42 @@ ERROR;
 					'anonpreviewwarning'
 				);
 			}
-		} else {
-			if ( $this->mTitle->isUserConfigPage() ) {
-				# Check the skin exists
-				if ( $this->isWrongCaseUserConfigPage() ) {
-					$out->wrapWikiMsg(
-						"<div class='error' id='mw-userinvalidconfigtitle'>\n$1\n</div>",
-						[ 'userinvalidconfigtitle', $this->mTitle->getSkinFromConfigSubpage() ]
-					);
-				}
-				if ( $this->getTitle()->isSubpageOf( $user->getUserPage() ) ) {
-					$isUserCssConfig = $this->mTitle->isUserCssConfigPage();
-					$isUserJsonConfig = $this->mTitle->isUserJsonConfigPage();
-					$isUserJsConfig = $this->mTitle->isUserJsConfigPage();
+		} elseif ( $this->mTitle->isUserConfigPage() ) {
+			# Check the skin exists
+			if ( $this->isWrongCaseUserConfigPage() ) {
+				$out->wrapWikiMsg(
+					"<div class='error' id='mw-userinvalidconfigtitle'>\n$1\n</div>",
+					[ 'userinvalidconfigtitle', $this->mTitle->getSkinFromConfigSubpage() ]
+				);
+			}
+			if ( $this->getTitle()->isSubpageOf( $user->getUserPage() ) ) {
+				$isUserCssConfig = $this->mTitle->isUserCssConfigPage();
+				$isUserJsonConfig = $this->mTitle->isUserJsonConfigPage();
+				$isUserJsConfig = $this->mTitle->isUserJsConfigPage();
 
-					$warning = $isUserCssConfig
-						? 'usercssispublic'
-						: ( $isUserJsonConfig ? 'userjsonispublic' : 'userjsispublic' );
+				$warning = $isUserCssConfig
+					? 'usercssispublic'
+					: ( $isUserJsonConfig ? 'userjsonispublic' : 'userjsispublic' );
 
-					$out->wrapWikiMsg( '<div class="mw-userconfigpublic">$1</div>', $warning );
+				$out->wrapWikiMsg( '<div class="mw-userconfigpublic">$1</div>', $warning );
 
-					if ( $this->formtype !== 'preview' ) {
-						$config = $this->context->getConfig();
-						if ( $isUserCssConfig && $config->get( 'AllowUserCss' ) ) {
-							$out->wrapWikiMsg(
-								"<div id='mw-usercssyoucanpreview'>\n$1\n</div>",
-								[ 'usercssyoucanpreview' ]
-							);
-						} elseif ( $isUserJsonConfig /* No comparable 'AllowUserJson' */ ) {
-							$out->wrapWikiMsg(
-								"<div id='mw-userjsonyoucanpreview'>\n$1\n</div>",
-								[ 'userjsonyoucanpreview' ]
-							);
-						} elseif ( $isUserJsConfig && $config->get( 'AllowUserJs' ) ) {
-							$out->wrapWikiMsg(
-								"<div id='mw-userjsyoucanpreview'>\n$1\n</div>",
-								[ 'userjsyoucanpreview' ]
-							);
-						}
+				if ( $this->formtype !== 'preview' ) {
+					$config = $this->context->getConfig();
+					if ( $isUserCssConfig && $config->get( 'AllowUserCss' ) ) {
+						$out->wrapWikiMsg(
+							"<div id='mw-usercssyoucanpreview'>\n$1\n</div>",
+							[ 'usercssyoucanpreview' ]
+						);
+					} elseif ( $isUserJsonConfig /* No comparable 'AllowUserJson' */ ) {
+						$out->wrapWikiMsg(
+							"<div id='mw-userjsonyoucanpreview'>\n$1\n</div>",
+							[ 'userjsonyoucanpreview' ]
+						);
+					} elseif ( $isUserJsConfig && $config->get( 'AllowUserJs' ) ) {
+						$out->wrapWikiMsg(
+							"<div id='mw-userjsyoucanpreview'>\n$1\n</div>",
+							[ 'userjsyoucanpreview' ]
+						);
 					}
 				}
 			}
@@ -3138,22 +3275,20 @@ ERROR;
 	}
 
 	/**
-	 * Helper function for summary input functions, which returns the neccessary
+	 * Helper function for summary input functions, which returns the necessary
 	 * attributes for the input.
 	 *
 	 * @param array|null $inputAttrs Array of attrs to use on the input
 	 * @return array
 	 */
 	private function getSummaryInputAttributes( array $inputAttrs = null ) {
-		$conf = $this->context->getConfig();
-		$oldCommentSchema = $conf->get( 'CommentTableSchemaMigrationStage' ) === MIGRATION_OLD;
 		// HTML maxlength uses "UTF-16 code units", which means that characters outside BMP
 		// (e.g. emojis) count for two each. This limit is overridden in JS to instead count
-		// Unicode codepoints (or 255 UTF-8 bytes for old schema).
+		// Unicode codepoints.
 		return ( is_array( $inputAttrs ) ? $inputAttrs : [] ) + [
 			'id' => 'wpSummary',
 			'name' => 'wpSummary',
-			'maxlength' => $oldCommentSchema ? 200 : CommentStore::COMMENT_CHARACTER_LIMIT,
+			'maxlength' => CommentStore::COMMENT_CHARACTER_LIMIT,
 			'tabindex' => 1,
 			'size' => 60,
 			'spellcheck' => 'true',
@@ -3164,8 +3299,8 @@ ERROR;
 	 * Builds a standard summary input with a label.
 	 *
 	 * @param string $summary The value of the summary input
-	 * @param string $labelText The html to place inside the label
-	 * @param array $inputAttrs Array of attrs to use on the input
+	 * @param string|null $labelText The html to place inside the label
+	 * @param array|null $inputAttrs Array of attrs to use on the input
 	 *
 	 * @return OOUI\FieldLayout OOUI FieldLayout with Label and Input
 	 */
@@ -3209,10 +3344,8 @@ ERROR;
 			if ( $this->nosummary ) {
 				return;
 			}
-		} else {
-			if ( !$this->mShowSummaryField ) {
-				return;
-			}
+		} elseif ( !$this->mShowSummaryField ) {
+			return;
 		}
 
 		$labelText = $this->context->msg( $isSubjectPreview ? 'subject' : 'summary' )->parse();
@@ -3237,11 +3370,10 @@ ERROR;
 			return "";
 		}
 
-		global $wgParser;
-
 		if ( $isSubjectPreview ) {
 			$summary = $this->context->msg( 'newsectionsummary' )
-				->rawParams( $wgParser->stripSectionName( $summary ) )
+				->rawParams( MediaWikiServices::getInstance()->getParser()
+					->stripSectionName( $summary ) )
 				->inContentLanguage()->text();
 		}
 
@@ -3298,8 +3430,8 @@ ERROR;
 	 * The $textoverride method can be used by subclasses overriding showContentForm
 	 * to pass back to this method.
 	 *
-	 * @param array $customAttribs Array of html attributes to use in the textarea
-	 * @param string $textoverride Optional text to override $this->textarea1 with
+	 * @param array|null $customAttribs Array of html attributes to use in the textarea
+	 * @param string|null $textoverride Optional text to override $this->textarea1 with
 	 */
 	protected function showTextbox1( $customAttribs = null, $textoverride = null ) {
 		if ( $this->wasDeletedSinceLastEdit() && $this->formtype == 'save' ) {
@@ -3323,7 +3455,7 @@ ERROR;
 		}
 
 		$this->showTextbox(
-			$textoverride !== null ? $textoverride : $this->textbox1,
+			$textoverride ?? $this->textbox1,
 			'wpTextbox1',
 			$attribs
 		);
@@ -3384,7 +3516,7 @@ ERROR;
 					$this->contentFormat,
 					$ex->getMessage()
 				);
-				$out->addWikiText( '<div class="error">' . $msg->text() . '</div>' );
+				$out->wrapWikiTextAsInterface( 'error', $msg->plain() );
 			}
 		}
 	}
@@ -3417,8 +3549,6 @@ ERROR;
 	 * save and then make a comparison.
 	 */
 	public function showDiff() {
-		global $wgContLang;
-
 		$oldtitlemsg = 'currentrev';
 		# if message does not exist, show diff against the preloaded default
 		if ( $this->mTitle->getNamespace() == NS_MEDIAWIKI && !$this->mTitle->exists() ) {
@@ -3448,7 +3578,8 @@ ERROR;
 			Hooks::run( 'EditPageGetDiffContent', [ $this, &$newContent ] );
 
 			$user = $this->context->getUser();
-			$popts = ParserOptions::newFromUserAndLang( $user, $wgContLang );
+			$popts = ParserOptions::newFromUserAndLang( $user,
+				MediaWikiServices::getInstance()->getContentLanguage() );
 			$newContent = $newContent->preSaveTransform( $this->mTitle, $user, $popts );
 		}
 
@@ -3547,7 +3678,7 @@ ERROR;
 		// Allow for site and per-namespace customization of contribution/copyright notice.
 		Hooks::run( 'EditPageCopyrightWarning', [ $title, &$copywarnMsg ] );
 
-		$msg = call_user_func_array( 'wfMessage', $copywarnMsg )->title( $title );
+		$msg = wfMessage( ...$copywarnMsg )->title( $title );
 		if ( $langcode ) {
 			$msg->inLanguage( $langcode );
 		}
@@ -3559,10 +3690,10 @@ ERROR;
 	 * Get the Limit report for page previews
 	 *
 	 * @since 1.22
-	 * @param ParserOutput $output ParserOutput object from the parse
+	 * @param ParserOutput|null $output ParserOutput object from the parse
 	 * @return string HTML
 	 */
-	public static function getPreviewLimitReport( $output ) {
+	public static function getPreviewLimitReport( ParserOutput $output = null ) {
 		global $wgLang;
 
 		if ( !$output || !$output->getLimitReportData() ) {
@@ -3626,7 +3757,7 @@ ERROR;
 		$out->addHTML( "<div class='editCheckboxes'>" . $checkboxesHTML . "</div>\n" );
 
 		// Show copyright warning.
-		$out->addWikiText( $this->getCopywarn() );
+		$out->addWikiTextAsInterface( $this->getCopywarn() );
 		$out->addHTML( $this->editFormTextAfterWarn );
 
 		$out->addHTML( "<div class='editButtons'>\n" );
@@ -3735,6 +3866,8 @@ ERROR;
 	}
 
 	/**
+	 * Get the last log record of this page being deleted, if ever.  This is
+	 * used to detect whether a delete occurred during editing.
 	 * @return bool|stdClass
 	 */
 	protected function getLastDelete() {
@@ -3797,9 +3930,10 @@ ERROR;
 				// Do not put big scary notice, if previewing the empty
 				// string, which happens when you initially edit
 				// a category page, due to automatic preview-on-open.
-				$parsedNote = $out->parse( "<div class='previewnote'>" .
-					$this->context->msg( 'session_fail_preview_html' )->text() . "</div>",
-					true, /* interface */true );
+				$parsedNote = Html::rawElement( 'div', [ 'class' => 'previewnote' ],
+					$out->parseAsInterface(
+						$this->context->msg( 'session_fail_preview_html' )->plain()
+					) );
 			}
 			$this->incrementEditFailureStats( 'session_loss' );
 			return $parsedNote;
@@ -3874,7 +4008,7 @@ ERROR;
 				#   sitecsspreview, sitejsonpreview, sitejspreview
 				if ( $level && $format ) {
 					$note = "<div id='mw-{$level}{$format}preview'>" .
-						$this->context->msg( "{$level}{$format}preview" )->text() .
+						$this->context->msg( "{$level}{$format}preview" )->plain() .
 						' ' . $continueEditing . "</div>";
 				}
 			}
@@ -3893,6 +4027,9 @@ ERROR;
 			$previewHTML = $parserResult['html'];
 			$this->mParserOutput = $parserOutput;
 			$out->addParserOutputMetadata( $parserOutput );
+			if ( $out->userCanPreview() ) {
+				$out->addContentOverride( $this->getTitle(), $content );
+			}
 
 			if ( count( $parserOutput->getWarnings() ) ) {
 				$note .= "\n\n" . implode( "\n\n", $parserOutput->getWarnings() );
@@ -3905,20 +4042,29 @@ ERROR;
 				$this->contentFormat,
 				$ex->getMessage()
 			);
-			$note .= "\n\n" . $m->parse();
+			$note .= "\n\n" . $m->plain(); # gets parsed down below
 			$previewHTML = '';
 		}
 
 		if ( $this->isConflict ) {
-			$conflict = '<h2 id="mw-previewconflict">'
-				. $this->context->msg( 'previewconflict' )->escaped() . "</h2>\n";
+			$conflict = Html::rawElement(
+				'div', [ 'id' => 'mw-previewconflict', 'class' => 'warningbox' ],
+				$this->context->msg( 'previewconflict' )->escaped()
+			);
 		} else {
-			$conflict = '<hr />';
+			$conflict = '';
 		}
 
-		$previewhead = "<div class='previewnote'>\n" .
-			'<h2 id="mw-previewheader">' . $this->context->msg( 'preview' )->escaped() . "</h2>" .
-			$out->parse( $note, true, /* interface */true ) . $conflict . "</div>\n";
+		$previewhead = Html::rawElement(
+			'div', [ 'class' => 'previewnote' ],
+			Html::rawElement(
+				'h2', [ 'id' => 'mw-previewheader' ],
+				$this->context->msg( 'preview' )->escaped()
+			) .
+			Html::rawElement( 'div', [ 'class' => 'warningbox' ],
+				$out->parseAsInterface( $note )
+			) . $conflict
+		);
 
 		$pageViewLang = $this->mTitle->getPageViewLanguage();
 		$attribs = [ 'lang' => $pageViewLang->getHtmlCode(), 'dir' => $pageViewLang->getDir(),
@@ -3942,6 +4088,12 @@ ERROR;
 		$parserOptions->setIsPreview( true );
 		$parserOptions->setIsSectionPreview( !is_null( $this->section ) && $this->section !== '' );
 		$parserOptions->enableLimitReport();
+
+		// XXX: we could call $parserOptions->setCurrentRevisionCallback here to force the
+		// current revision to be null during PST, until setupFakeRevision is called on
+		// the ParserOptions. Currently, we rely on Parser::getRevisionObject() to ignore
+		// existing revisions in preview mode.
+
 		return $parserOptions;
 	}
 
@@ -3957,9 +4109,14 @@ ERROR;
 	protected function doPreviewParse( Content $content ) {
 		$user = $this->context->getUser();
 		$parserOptions = $this->getPreviewParserOptions();
+
+		// NOTE: preSaveTransform doesn't have a fake revision to operate on.
+		// Parser::getRevisionObject() will return null in preview mode,
+		// causing the context user to be used for {{subst:REVISIONUSER}}.
+		// XXX: Alternatively, we could also call setupFakeRevision() a second time:
+		// once before PST with $content, and then after PST with $pstContent.
 		$pstContent = $content->preSaveTransform( $this->mTitle, $user, $parserOptions );
-		$scopedCallback = $parserOptions->setupFakeRevision(
-			$this->mTitle, $pstContent, $user );
+		$scopedCallback = $parserOptions->setupFakeRevision( $this->mTitle, $pstContent, $user );
 		$parserOutput = $pstContent->getParserOutput( $this->mTitle, null, $parserOptions );
 		ScopedCallback::consume( $scopedCallback );
 		return [
@@ -3991,142 +4148,19 @@ ERROR;
 	}
 
 	/**
-	 * Shows a bulletin board style toolbar for common editing functions.
-	 * It can be disabled in the user preferences.
+	 * Allow extensions to provide a toolbar.
 	 *
-	 * @param Title $title Title object for the page being edited (optional)
-	 * @return string
+	 * @return string|null
 	 */
-	public static function getEditToolbar( $title = null ) {
-		global $wgContLang, $wgOut;
-		global $wgEnableUploads, $wgForeignFileRepos;
+	public static function getEditToolbar() {
+		$startingToolbar = '<div id="toolbar"></div>';
+		$toolbar = $startingToolbar;
 
-		$imagesAvailable = $wgEnableUploads || count( $wgForeignFileRepos );
-		$showSignature = true;
-		if ( $title ) {
-			$showSignature = MWNamespace::wantSignatures( $title->getNamespace() );
+		if ( !Hooks::run( 'EditPageBeforeEditToolbar', [ &$toolbar ] ) ) {
+			return null;
 		}
-
-		/**
-		 * $toolarray is an array of arrays each of which includes the
-		 * opening tag, the closing tag, optionally a sample text that is
-		 * inserted between the two when no selection is highlighted
-		 * and.  The tip text is shown when the user moves the mouse
-		 * over the button.
-		 *
-		 * Images are defined in ResourceLoaderEditToolbarModule.
-		 */
-		$toolarray = [
-			[
-				'id'     => 'mw-editbutton-bold',
-				'open'   => '\'\'\'',
-				'close'  => '\'\'\'',
-				'sample' => wfMessage( 'bold_sample' )->text(),
-				'tip'    => wfMessage( 'bold_tip' )->text(),
-			],
-			[
-				'id'     => 'mw-editbutton-italic',
-				'open'   => '\'\'',
-				'close'  => '\'\'',
-				'sample' => wfMessage( 'italic_sample' )->text(),
-				'tip'    => wfMessage( 'italic_tip' )->text(),
-			],
-			[
-				'id'     => 'mw-editbutton-link',
-				'open'   => '[[',
-				'close'  => ']]',
-				'sample' => wfMessage( 'link_sample' )->text(),
-				'tip'    => wfMessage( 'link_tip' )->text(),
-			],
-			[
-				'id'     => 'mw-editbutton-extlink',
-				'open'   => '[',
-				'close'  => ']',
-				'sample' => wfMessage( 'extlink_sample' )->text(),
-				'tip'    => wfMessage( 'extlink_tip' )->text(),
-			],
-			[
-				'id'     => 'mw-editbutton-headline',
-				'open'   => "\n== ",
-				'close'  => " ==\n",
-				'sample' => wfMessage( 'headline_sample' )->text(),
-				'tip'    => wfMessage( 'headline_tip' )->text(),
-			],
-			$imagesAvailable ? [
-				'id'     => 'mw-editbutton-image',
-				'open'   => '[[' . $wgContLang->getNsText( NS_FILE ) . ':',
-				'close'  => ']]',
-				'sample' => wfMessage( 'image_sample' )->text(),
-				'tip'    => wfMessage( 'image_tip' )->text(),
-			] : false,
-			$imagesAvailable ? [
-				'id'     => 'mw-editbutton-media',
-				'open'   => '[[' . $wgContLang->getNsText( NS_MEDIA ) . ':',
-				'close'  => ']]',
-				'sample' => wfMessage( 'media_sample' )->text(),
-				'tip'    => wfMessage( 'media_tip' )->text(),
-			] : false,
-			[
-				'id'     => 'mw-editbutton-nowiki',
-				'open'   => "<nowiki>",
-				'close'  => "</nowiki>",
-				'sample' => wfMessage( 'nowiki_sample' )->text(),
-				'tip'    => wfMessage( 'nowiki_tip' )->text(),
-			],
-			$showSignature ? [
-				'id'     => 'mw-editbutton-signature',
-				'open'   => wfMessage( 'sig-text', '~~~~' )->inContentLanguage()->text(),
-				'close'  => '',
-				'sample' => '',
-				'tip'    => wfMessage( 'sig_tip' )->text(),
-			] : false,
-			[
-				'id'     => 'mw-editbutton-hr',
-				'open'   => "\n----\n",
-				'close'  => '',
-				'sample' => '',
-				'tip'    => wfMessage( 'hr_tip' )->text(),
-			]
-		];
-
-		$script = 'mw.loader.using("mediawiki.toolbar", function () {';
-		foreach ( $toolarray as $tool ) {
-			if ( !$tool ) {
-				continue;
-			}
-
-			$params = [
-				// Images are defined in ResourceLoaderEditToolbarModule
-				false,
-				// Note that we use the tip both for the ALT tag and the TITLE tag of the image.
-				// Older browsers show a "speedtip" type message only for ALT.
-				// Ideally these should be different, realistically they
-				// probably don't need to be.
-				$tool['tip'],
-				$tool['open'],
-				$tool['close'],
-				$tool['sample'],
-				$tool['id'],
-			];
-
-			$script .= Xml::encodeJsCall(
-				'mw.toolbar.addButton',
-				$params,
-				ResourceLoader::inDebugMode()
-			);
-		}
-
-		$script .= '});';
-
-		$toolbar = '<div id="toolbar"></div>';
-
-		if ( Hooks::run( 'EditPageBeforeEditToolbar', [ &$toolbar ] ) ) {
-			// Only add the old toolbar cruft to the page payload if the toolbar has not
-			// been over-written by a hook caller
-			$wgOut->addScript( ResourceLoader::makeInlineScript( $script ) );
-		};
-
-		return $toolbar;
+		// Don't add a pointless `<div>` to the page unless a hook caller populated it
+		return ( $toolbar === $startingToolbar ) ? null : $toolbar;
 	}
 
 	/**
@@ -4145,14 +4179,15 @@ ERROR;
 	 *  - 'legacy-name' (optional): short name for backwards-compatibility
 	 * @param array $checked Array of checkbox name (matching the 'legacy-name') => bool,
 	 *   where bool indicates the checked status of the checkbox
-	 * @return array
+	 * @return array[]
 	 */
 	public function getCheckboxesDefinition( $checked ) {
 		$checkboxes = [];
 
 		$user = $this->context->getUser();
 		// don't show the minor edit checkbox if it's a new page or section
-		if ( !$this->isNew && $user->isAllowed( 'minoredit' ) ) {
+		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
+		if ( !$this->isNew && $permissionManager->userHasRight( $user, 'minoredit' ) ) {
 			$checkboxes['wpMinoredit'] = [
 				'id' => 'wpMinoredit',
 				'label-message' => 'minoredit',
@@ -4197,7 +4232,7 @@ ERROR;
 		$checkboxesDef = $this->getCheckboxesDefinition( $checked );
 
 		foreach ( $checkboxesDef as $name => $options ) {
-			$legacyName = isset( $options['legacy-name'] ) ? $options['legacy-name'] : $name;
+			$legacyName = $options['legacy-name'] ?? $name;
 
 			$title = null;
 			$accesskey = null;
@@ -4223,31 +4258,9 @@ ERROR;
 					'align' => 'inline',
 					'label' => new OOUI\HtmlSnippet( $this->context->msg( $options['label-message'] )->parse() ),
 					'title' => $title,
-					'id' => isset( $options['label-id'] ) ? $options['label-id'] : null,
+					'id' => $options['label-id'] ?? null,
 				]
 			);
-		}
-
-		// Backwards-compatibility hack to run the EditPageBeforeEditChecks hook. It's important,
-		// people have used it for the weirdest things completely unrelated to checkboxes...
-		// And if we're gonna run it, might as well allow its legacy checkboxes to be shown.
-		$legacyCheckboxes = [];
-		if ( !$this->isNew ) {
-			$legacyCheckboxes['minor'] = '';
-		}
-		$legacyCheckboxes['watch'] = '';
-		// Copy new-style checkboxes into an old-style structure
-		foreach ( $checkboxes as $name => $oouiLayout ) {
-			$legacyCheckboxes[$name] = (string)$oouiLayout;
-		}
-		// Avoid PHP 7.1 warning of passing $this by reference
-		$ep = $this;
-		Hooks::run( 'EditPageBeforeEditChecks', [ &$ep, &$legacyCheckboxes, &$tabindex ], '1.29' );
-		// Copy back any additional old-style checkboxes into the new-style structure
-		foreach ( $legacyCheckboxes as $name => $html ) {
-			if ( $html && !isset( $checkboxes[$name] ) ) {
-				$checkboxes[$name] = new OOUI\Widget( [ 'content' => new OOUI\HtmlSnippet( $html ) ] );
-			}
 		}
 
 		return $checkboxes;
@@ -4397,33 +4410,6 @@ ERROR;
 	}
 
 	/**
-	 * Filter an input field through a Unicode de-armoring process if it
-	 * came from an old browser with known broken Unicode editing issues.
-	 *
-	 * @deprecated since 1.30, does nothing
-	 *
-	 * @param WebRequest $request
-	 * @param string $field
-	 * @return string
-	 */
-	protected function safeUnicodeInput( $request, $field ) {
-		return rtrim( $request->getText( $field ) );
-	}
-
-	/**
-	 * Filter an output field through a Unicode armoring process if it is
-	 * going to an old browser with known broken Unicode editing issues.
-	 *
-	 * @deprecated since 1.30, does nothing
-	 *
-	 * @param string $text
-	 * @return string
-	 */
-	protected function safeUnicodeOutput( $text ) {
-		return $text;
-	}
-
-	/**
 	 * @since 1.29
 	 */
 	protected function addEditNotices() {
@@ -4471,16 +4457,14 @@ ERROR;
 					$lang->formatNum( $maxArticleSize )
 				]
 			);
-		} else {
-			if ( !$this->context->msg( 'longpage-hint' )->isDisabled() ) {
-				$out->wrapWikiMsg( "<div id='mw-edit-longpage-hint'>\n$1\n</div>",
-					[
-						'longpage-hint',
-						$lang->formatSize( strlen( $this->textbox1 ) ),
-						strlen( $this->textbox1 )
-					]
-				);
-			}
+		} elseif ( !$this->context->msg( 'longpage-hint' )->isDisabled() ) {
+			$out->wrapWikiMsg( "<div id='mw-edit-longpage-hint'>\n$1\n</div>",
+				[
+					'longpage-hint',
+					$lang->formatSize( strlen( $this->textbox1 ) ),
+					strlen( $this->textbox1 )
+				]
+			);
 		}
 	}
 
@@ -4490,7 +4474,9 @@ ERROR;
 	protected function addPageProtectionWarningHeaders() {
 		$out = $this->context->getOutput();
 		if ( $this->mTitle->isProtected( 'edit' ) &&
-			MWNamespace::getRestrictionLevels( $this->mTitle->getNamespace() ) !== [ '' ]
+			MediaWikiServices::getInstance()->getPermissionManager()->getNamespaceRestrictionLevels(
+				$this->getTitle()->getNamespace()
+			) !== [ '' ]
 		) {
 			# Is the title semi-protected?
 			if ( $this->mTitle->isSemiProtected() ) {
@@ -4569,16 +4555,15 @@ ERROR;
 	 * @return string
 	 */
 	private function guessSectionName( $text ) {
-		global $wgParser;
-
 		// Detect Microsoft browsers
 		$userAgent = $this->context->getRequest()->getHeader( 'User-Agent' );
+		$parser = MediaWikiServices::getInstance()->getParser();
 		if ( $userAgent && preg_match( '/MSIE|Edge/', $userAgent ) ) {
 			// ...and redirect them to legacy encoding, if available
-			return $wgParser->guessLegacySectionNameFromWikiText( $text );
+			return $parser->guessLegacySectionNameFromWikiText( $text );
 		}
 		// Meanwhile, real browsers get real anchors
-		$name = $wgParser->guessSectionNameFromWikiText( $text );
+		$name = $parser->guessSectionNameFromWikiText( $text );
 		// With one little caveat: per T216029, fragments in HTTP redirects need to be urlencoded,
 		// otherwise Chrome double-escapes the rest of the URL.
 		return '#' . urlencode( mb_substr( $name, 1 ) );

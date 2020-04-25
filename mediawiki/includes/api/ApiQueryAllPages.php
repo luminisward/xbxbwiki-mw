@@ -122,12 +122,12 @@ class ApiQueryAllPages extends ApiQueryGeneratorBase {
 		$this->addFields( $selectFields );
 		$forceNameTitleIndex = true;
 		if ( isset( $params['minsize'] ) ) {
-			$this->addWhere( 'page_len>=' . intval( $params['minsize'] ) );
+			$this->addWhere( 'page_len>=' . (int)$params['minsize'] );
 			$forceNameTitleIndex = false;
 		}
 
 		if ( isset( $params['maxsize'] ) ) {
-			$this->addWhere( 'page_len<=' . intval( $params['maxsize'] ) );
+			$this->addWhere( 'page_len<=' . (int)$params['maxsize'] );
 			$forceNameTitleIndex = false;
 		}
 
@@ -211,12 +211,13 @@ class ApiQueryAllPages extends ApiQueryGeneratorBase {
 		$res = $this->select( __METHOD__ );
 
 		// Get gender information
-		if ( MWNamespace::hasGenderDistinction( $params['namespace'] ) ) {
+		$services = MediaWikiServices::getInstance();
+		if ( $services->getNamespaceInfo()->hasGenderDistinction( $params['namespace'] ) ) {
 			$users = [];
 			foreach ( $res as $row ) {
 				$users[] = $row->page_title;
 			}
-			MediaWikiServices::getInstance()->getGenderCache()->doQuery( $users, __METHOD__ );
+			$services->getGenderCache()->doQuery( $users, __METHOD__ );
 			$res->rewind(); // reset
 		}
 
@@ -238,8 +239,8 @@ class ApiQueryAllPages extends ApiQueryGeneratorBase {
 			if ( is_null( $resultPageSet ) ) {
 				$title = Title::makeTitle( $row->page_namespace, $row->page_title );
 				$vals = [
-					'pageid' => intval( $row->page_id ),
-					'ns' => intval( $title->getNamespace() ),
+					'pageid' => (int)$row->page_id,
+					'ns' => (int)$title->getNamespace(),
 					'title' => $title->getPrefixedText()
 				];
 				$fit = $result->addValue( [ 'query', $this->getModuleName() ], null, $vals );
@@ -341,7 +342,7 @@ class ApiQueryAllPages extends ApiQueryGeneratorBase {
 	protected function getExamplesMessages() {
 		return [
 			'action=query&list=allpages&apfrom=B'
-				=> 'apihelp-query+allpages-example-B',
+				=> 'apihelp-query+allpages-example-b',
 			'action=query&generator=allpages&gaplimit=4&gapfrom=T&prop=info'
 				=> 'apihelp-query+allpages-example-generator',
 			'action=query&generator=allpages&gaplimit=2&' .

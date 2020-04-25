@@ -21,6 +21,8 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * A special page that redirects to: the user for a numeric user id,
  * the file for a given filename, or the page for a given revision id.
@@ -61,8 +63,8 @@ class SpecialRedirect extends FormSpecialPage {
 	function setParameter( $subpage ) {
 		// parse $subpage to pull out the parts
 		$parts = explode( '/', $subpage, 2 );
-		$this->mType = count( $parts ) > 0 ? $parts[0] : null;
-		$this->mValue = count( $parts ) > 1 ? $parts[1] : null;
+		$this->mType = $parts[0];
+		$this->mValue = $parts[1] ?? null;
 	}
 
 	/**
@@ -81,7 +83,9 @@ class SpecialRedirect extends FormSpecialPage {
 			// Message: redirect-not-exists
 			return Status::newFatal( $this->getMessagePrefix() . '-not-exists' );
 		}
-		if ( $user->isHidden() && !$this->getUser()->isAllowed( 'hideuser' ) ) {
+		if ( $user->isHidden() && !MediaWikiServices::getInstance()->getPermissionManager()
+			->userHasRight( $this->getUser(), 'hideuser' )
+		) {
 			throw new PermissionsError( null, [ 'badaccess-group0' ] );
 		}
 		$userpage = Title::makeTitle( NS_USER, $username );
@@ -106,7 +110,7 @@ class SpecialRedirect extends FormSpecialPage {
 		} catch ( MalformedTitleException $e ) {
 			return Status::newFatal( $e->getMessageObject() );
 		}
-		$file = wfFindFile( $title );
+		$file = MediaWikiServices::getInstance()->getRepoGroup()->findFile( $title );
 
 		if ( !$file || !$file->exists() ) {
 			// Message: redirect-not-exists

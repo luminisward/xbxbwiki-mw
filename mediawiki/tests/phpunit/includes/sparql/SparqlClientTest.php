@@ -1,4 +1,5 @@
 <?php
+
 namespace MediaWiki\Sparql;
 
 use Http;
@@ -105,7 +106,7 @@ JSON;
 				],
 				[
 					'method' => 'GET',
-					'userAgent' => Http::userAgent() ." SparqlClient",
+					'userAgent' => Http::userAgent() . " SparqlClient",
 					'timeout' => 30
 				]
 			],

@@ -8,12 +8,10 @@ module.exports = function ( grunt ) {
 
 	grunt.loadNpmTasks( 'grunt-banana-checker' );
 	grunt.loadNpmTasks( 'grunt-contrib-copy' );
-	grunt.loadNpmTasks( 'grunt-contrib-watch' );
 	grunt.loadNpmTasks( 'grunt-eslint' );
-	grunt.loadNpmTasks( 'grunt-jsonlint' );
 	grunt.loadNpmTasks( 'grunt-karma' );
 	grunt.loadNpmTasks( 'grunt-stylelint' );
-	grunt.loadNpmTasks( 'grunt-webdriver' );
+	grunt.loadNpmTasks( 'grunt-svgmin' );
 
 	karmaProxy[ wgScriptPath ] = {
 		target: wgServer + wgScriptPath,
@@ -22,40 +20,73 @@ module.exports = function ( grunt ) {
 
 	grunt.initConfig( {
 		eslint: {
+			options: {
+				reportUnusedDisableDirectives: true,
+				extensions: [ '.js', '.json' ],
+				cache: true
+			},
 			all: [
-				'**/*.js',
+				'**/*.{js,json}',
 				'!docs/**',
 				'!node_modules/**',
 				'!resources/lib/**',
 				'!resources/src/jquery.tipsy/**',
-				'!resources/src/jquery/jquery.farbtastic.js',
-				'!resources/src/mediawiki.libs/**',
+				'!resources/src/mediawiki.libs.jpegmeta/**',
 				// Third-party code of PHPUnit coverage report
 				'!tests/coverage/**',
 				'!vendor/**',
 				// Explicitly say "**/*.js" here in case of symlinks
-				'!extensions/**/*.js',
-				'!skins/**/*.js',
-				// Skip functions aren't even parseable
-				'!resources/src/mediawiki.hidpi-skip.js'
-			]
-		},
-		jsonlint: {
-			all: [
-				'**/*.json',
-				'!{docs/js,extensions,node_modules,skins,vendor}/**'
+				'!extensions/**/*.js{,on}',
+				'!skins/**/*.js{,on}'
 			]
 		},
 		banana: {
 			options: {
+				requireLowerCase: false,
 				disallowBlankTranslations: false
 			},
 			core: 'languages/i18n/',
+			exif: 'languages/i18n/exif/',
 			api: 'includes/api/i18n/',
 			installer: 'includes/installer/i18n/'
 		},
 		stylelint: {
 			src: '{resources/src,mw-config}/**/*.{css,less}'
+		},
+		svgmin: {
+			options: {
+				js2svg: {
+					indent: '\t',
+					pretty: true
+				},
+				multipass: true,
+				plugins: [ {
+					cleanupIDs: false
+				}, {
+					removeDesc: false
+				}, {
+					removeRasterImages: true
+				}, {
+					removeTitle: false
+				}, {
+					removeViewBox: false
+				}, {
+					removeXMLProcInst: false
+				}, {
+					sortAttrs: true
+				} ]
+			},
+			all: {
+				files: [ {
+					expand: true,
+					cwd: 'resources/src',
+					src: [
+						'**/*.svg'
+					],
+					dest: 'resources/src/',
+					ext: '.svg'
+				} ]
+			}
 		},
 		watch: {
 			files: [
@@ -67,6 +98,18 @@ module.exports = function ( grunt ) {
 		},
 		karma: {
 			options: {
+				customLaunchers: {
+					ChromeCustom: {
+						base: 'ChromeHeadless',
+						// Chrome requires --no-sandbox in Docker/CI.
+						// Newer CI images expose CHROMIUM_FLAGS which sets this (and
+						// anything else it might need) automatically. Older CI images,
+						// (including Quibble for MW) don't set it yet.
+						flags: ( process.env.CHROMIUM_FLAGS ||
+							( process.env.ZUUL_PROJECT ? '--no-sandbox' : '' )
+						).split( ' ' )
+					}
+				},
 				proxies: karmaProxy,
 				files: [ {
 					pattern: wgServer + wgScriptPath + '/index.php?title=Special:JavaScriptTest/qunit/export',
@@ -74,7 +117,7 @@ module.exports = function ( grunt ) {
 					included: true,
 					served: false
 				} ],
-				logLevel: 'DEBUG',
+				logLevel: ( process.env.ZUUL_PROJECT ? 'DEBUG' : 'INFO' ),
 				frameworks: [ 'qunit' ],
 				reporters: [ 'mocha' ],
 				singleRun: true,
@@ -86,13 +129,10 @@ module.exports = function ( grunt ) {
 				crossOriginAttribute: false
 			},
 			main: {
-				browsers: [ 'Chrome' ]
-			},
-			chromium: {
-				browsers: [ 'Chromium' ]
+				browsers: [ 'ChromeCustom' ]
 			},
 			firefox: {
-				browsers: [ 'Firefox' ]
+				browsers: [ 'FirefoxHeadless' ]
 			}
 		},
 		copy: {
@@ -104,15 +144,7 @@ module.exports = function ( grunt ) {
 					return require( 'path' ).join( dest, src.replace( 'resources/', '' ) );
 				}
 			}
-		},
-
-		// Configure WebdriverIO task
-		webdriver: {
-			test: {
-				configFile: './tests/selenium/wdio.conf.js'
-			}
 		}
-
 	} );
 
 	grunt.registerTask( 'assert-mw-env', function () {
@@ -128,9 +160,7 @@ module.exports = function ( grunt ) {
 		return !!( process.env.MW_SERVER && process.env.MW_SCRIPT_PATH );
 	} );
 
+	grunt.registerTask( 'minify', 'svgmin' );
 	grunt.registerTask( 'lint', [ 'eslint', 'banana', 'stylelint' ] );
 	grunt.registerTask( 'qunit', [ 'assert-mw-env', 'karma:main' ] );
-
-	grunt.registerTask( 'test', [ 'lint' ] );
-	grunt.registerTask( 'default', 'test' );
 };

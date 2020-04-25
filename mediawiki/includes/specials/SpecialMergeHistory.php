@@ -21,6 +21,8 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\Revision\RevisionRecord;
+
 /**
  * Special page allowing users with the appropriate permissions to
  * merge article histories, with some restrictions
@@ -224,11 +226,11 @@ class SpecialMergeHistory extends SpecialPage {
 					'</td>
 					<td class="mw-input">' .
 					Xml::input( 'wpComment', 50, $this->mComment, [ 'id' => 'wpComment' ] ) .
-					'</td>
+					"</td>
 					</tr>
 					<tr>
-						<td>&#160;</td>
-						<td class="mw-submit">' .
+						<td>\u{00A0}</td>
+						<td class=\"mw-submit\">" .
 					Xml::submitButton(
 						$this->msg( 'mergehistory-submit' )->text(),
 						[ 'name' => 'merge', 'id' => 'mw-merge-submit' ]
@@ -293,12 +295,12 @@ class SpecialMergeHistory extends SpecialPage {
 			[],
 			[ 'oldid' => $rev->getId() ]
 		);
-		if ( $rev->isDeleted( Revision::DELETED_TEXT ) ) {
+		if ( $rev->isDeleted( RevisionRecord::DELETED_TEXT ) ) {
 			$pageLink = '<span class="history-deleted">' . $pageLink . '</span>';
 		}
 
 		# Last link
-		if ( !$rev->userCan( Revision::DELETED_TEXT, $user ) ) {
+		if ( !$rev->userCan( RevisionRecord::DELETED_TEXT, $user ) ) {
 			$last = $this->msg( 'last' )->escaped();
 		} elseif ( isset( $this->prevId[$row->rev_id] ) ) {
 			$last = $linkRenderer->makeKnownLink(

@@ -23,6 +23,8 @@
  * @author Rob Church <robchur@gmail.com>
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * File reversion user interface
  *
@@ -78,8 +80,6 @@ class RevertAction extends FormAction {
 	}
 
 	protected function getFormFields() {
-		global $wgContLang;
-
 		$timestamp = $this->oldFile->getTimestamp();
 
 		$user = $this->getUser();
@@ -88,8 +88,9 @@ class RevertAction extends FormAction {
 		$userTime = $lang->userTime( $timestamp, $user );
 		$siteTs = MWTimestamp::getLocalInstance( $timestamp );
 		$ts = $siteTs->format( 'YmdHis' );
-		$siteDate = $wgContLang->date( $ts, false, false );
-		$siteTime = $wgContLang->time( $ts, false, false );
+		$contLang = MediaWikiServices::getInstance()->getContentLanguage();
+		$siteDate = $contLang->date( $ts, false, false );
+		$siteTime = $contLang->time( $ts, false, false );
 		$tzMsg = $siteTs->getTimezoneMessage()->inContentLanguage()->text();
 
 		return [
@@ -117,7 +118,9 @@ class RevertAction extends FormAction {
 		$this->useTransactionalTimeLimit();
 
 		$old = $this->getRequest()->getText( 'oldimage' );
+		/** @var LocalFile $localFile */
 		$localFile = $this->page->getFile();
+		'@phan-var LocalFile $localFile';
 		$oldFile = OldLocalFile::newFromArchiveName( $this->getTitle(), $localFile->getRepo(), $old );
 
 		$source = $localFile->getArchiveVirtualUrl( $old );
@@ -135,7 +138,10 @@ class RevertAction extends FormAction {
 			0,
 			false,
 			false,
-			$this->getUser()
+			$this->getUser(),
+			[],
+			true,
+			true
 		);
 	}
 

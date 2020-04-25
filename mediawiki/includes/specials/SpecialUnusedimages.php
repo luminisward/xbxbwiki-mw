@@ -26,7 +26,7 @@
  *
  * @ingroup SpecialPage
  */
-class UnusedimagesPage extends ImageQueryPage {
+class SpecialUnusedImages extends ImageQueryPage {
 	function __construct( $name = 'Unusedimages' ) {
 		parent::__construct( $name );
 	}
@@ -76,6 +76,11 @@ class UnusedimagesPage extends ImageQueryPage {
 	}
 
 	function getPageHeader() {
+		if ( $this->getConfig()->get( 'CountCategorizedImagesAsUsed' ) ) {
+			return $this->msg(
+				'unusedimagestext-categorizedimgisused'
+			)->parseAsBlock();
+		}
 		return $this->msg( 'unusedimagestext' )->parseAsBlock();
 	}
 

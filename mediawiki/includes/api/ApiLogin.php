@@ -107,7 +107,6 @@ class ApiLogin extends ApiBase {
 		}
 
 		$authRes = false;
-		$context = new DerivativeContext( $this->getContext() );
 		$loginType = 'N/A';
 
 		// Check login token
@@ -130,7 +129,7 @@ class ApiLogin extends ApiBase {
 				$session = $status->getValue();
 				$authRes = 'Success';
 				$loginType = 'BotPassword';
-			} elseif ( !$botLoginData[2] ||
+			} elseif (
 				$status->hasMessage( 'login-throttled' ) ||
 				$status->hasMessage( 'botpasswords-needs-reset' ) ||
 				$status->hasMessage( 'botpasswords-locked' )
@@ -141,6 +140,7 @@ class ApiLogin extends ApiBase {
 					'BotPassword login failed: ' . $status->getWikiText( false, false, 'en' )
 				);
 			}
+			// For other errors, let's see if it's a valid non-bot login
 		}
 
 		if ( $authRes === false ) {
@@ -196,7 +196,7 @@ class ApiLogin extends ApiBase {
 				$injected_html = '';
 				Hooks::run( 'UserLoginComplete', [ &$user, &$injected_html, true ] );
 
-				$result['lguserid'] = intval( $user->getId() );
+				$result['lguserid'] = (int)$user->getId();
 				$result['lgusername'] = $user->getName();
 				break;
 
@@ -220,15 +220,15 @@ class ApiLogin extends ApiBase {
 				);
 				break;
 
+			// @codeCoverageIgnoreStart
+			// Unreachable
 			default:
 				ApiBase::dieDebug( __METHOD__, "Unhandled case value: {$authRes}" );
+			// @codeCoverageIgnoreEnd
 		}
 
 		$this->getResult()->addValue( null, 'login', $result );
 
-		if ( $loginType === 'LoginForm' && isset( LoginForm::$statusCodes[$authRes] ) ) {
-			$authRes = LoginForm::$statusCodes[$authRes];
-		}
 		LoggerFactory::getInstance( 'authevents' )->info( 'Login attempt', [
 			'event' => 'login',
 			'successful' => $authRes === 'Success',
@@ -267,8 +267,6 @@ class ApiLogin extends ApiBase {
 
 	protected function getExamplesMessages() {
 		return [
-			'action=login&lgname=user&lgpassword=password'
-				=> 'apihelp-login-example-gettoken',
 			'action=login&lgname=user&lgpassword=password&lgtoken=123ABC'
 				=> 'apihelp-login-example-login',
 		];
@@ -289,7 +287,7 @@ class ApiLogin extends ApiBase {
 		];
 		if ( $response->message ) {
 			$ret['message'] = $response->message->inLanguage( 'en' )->plain();
-		};
+		}
 		$reqs = [
 			'neededRequests' => $response->neededRequests,
 			'createRequest' => $response->createRequest,

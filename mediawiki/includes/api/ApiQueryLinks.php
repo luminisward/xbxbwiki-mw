@@ -103,7 +103,7 @@ class ApiQueryLinks extends ApiQueryGeneratorBase {
 			if ( $cond ) {
 				$this->addWhere( $cond );
 				$multiNS = count( $lb->data ) !== 1;
-				$multiTitle = count( call_user_func_array( 'array_merge', $lb->data ) ) !== 1;
+				$multiTitle = count( array_merge( ...$lb->data ) ) !== 1;
 			} else {
 				// No titles so no results
 				return;
@@ -117,8 +117,8 @@ class ApiQueryLinks extends ApiQueryGeneratorBase {
 			$cont = explode( '|', $params['continue'] );
 			$this->dieContinueUsageIf( count( $cont ) != 3 );
 			$op = $params['dir'] == 'descending' ? '<' : '>';
-			$plfrom = intval( $cont[0] );
-			$plns = intval( $cont[1] );
+			$plfrom = (int)$cont[0];
+			$plns = (int)$cont[1];
 			$pltitle = $this->getDB()->addQuotes( $cont[2] );
 			$this->addWhere(
 				"{$this->prefix}_from $op $plfrom OR " .

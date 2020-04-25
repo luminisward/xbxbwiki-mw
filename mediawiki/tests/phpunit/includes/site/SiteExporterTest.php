@@ -1,8 +1,6 @@
 <?php
 
 /**
- * Tests for the SiteExporter class.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -29,10 +27,7 @@
  *
  * @author Daniel Kinzler
  */
-class SiteExporterTest extends PHPUnit\Framework\TestCase {
-
-	use MediaWikiCoversValidator;
-	use PHPUnit4And6Compat;
+class SiteExporterTest extends MediaWikiIntegrationTestCase {
 
 	public function testConstructor_InvalidArgument() {
 		$this->setExpectedException( InvalidArgumentException::class );

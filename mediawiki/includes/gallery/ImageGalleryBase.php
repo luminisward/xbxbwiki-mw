@@ -20,6 +20,8 @@
  * @file
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * Image gallery
  *
@@ -73,21 +75,30 @@ abstract class ImageGalleryBase extends ContextSource {
 	protected $mHideBadImages;
 
 	/**
-	 * @var Parser Registered parser object for output callbacks
+	 * @var Parser|false Registered parser object for output callbacks
 	 */
 	public $mParser;
 
 	/**
-	 * @var Title Contextual title, used when images are being screened against
+	 * @var Title|null Contextual title, used when images are being screened against
 	 *   the bad image list
 	 */
-	protected $contextTitle = false;
+	protected $contextTitle = null;
 
 	/** @var array */
 	protected $mAttribs = [];
 
-	/** @var bool */
-	static private $modeMapping = false;
+	/** @var int */
+	protected $mPerRow;
+
+	/** @var int */
+	protected $mWidths;
+
+	/** @var int */
+	protected $mHeights;
+
+	/** @var array */
+	private static $modeMapping;
 
 	/**
 	 * Get a new image gallery. This is the method other callers
@@ -99,7 +110,6 @@ abstract class ImageGalleryBase extends ContextSource {
 	 * @throws MWException
 	 */
 	static function factory( $mode = false, IContextSource $context = null ) {
-		global $wgContLang;
 		self::loadModes();
 		if ( !$context ) {
 			$context = RequestContext::getMainAndWarn( __METHOD__ );
@@ -109,7 +119,7 @@ abstract class ImageGalleryBase extends ContextSource {
 			$mode = $galleryOptions['mode'];
 		}
 
-		$mode = $wgContLang->lc( $mode );
+		$mode = MediaWikiServices::getInstance()->getContentLanguage()->lc( $mode );
 
 		if ( isset( self::$modeMapping[$mode] ) ) {
 			$class = self::$modeMapping[$mode];
@@ -120,7 +130,7 @@ abstract class ImageGalleryBase extends ContextSource {
 	}
 
 	private static function loadModes() {
-		if ( self::$modeMapping === false ) {
+		if ( self::$modeMapping === null ) {
 			self::$modeMapping = [
 				'traditional' => TraditionalImageGallery::class,
 				'nolines' => NolinesImageGallery::class,
@@ -362,7 +372,7 @@ abstract class ImageGalleryBase extends ContextSource {
 	/**
 	 * Set the contextual title
 	 *
-	 * @param Title $title Contextual title
+	 * @param Title|null $title Contextual title
 	 */
 	public function setContextTitle( $title ) {
 		$this->contextTitle = $title;
@@ -371,12 +381,10 @@ abstract class ImageGalleryBase extends ContextSource {
 	/**
 	 * Get the contextual title, if applicable
 	 *
-	 * @return Title|bool Title or false
+	 * @return Title|null
 	 */
 	public function getContextTitle() {
-		return is_object( $this->contextTitle ) && $this->contextTitle instanceof Title
-			? $this->contextTitle
-			: false;
+		return $this->contextTitle;
 	}
 
 	/**

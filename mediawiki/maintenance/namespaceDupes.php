@@ -28,7 +28,7 @@ require_once __DIR__ . '/Maintenance.php';
 
 use MediaWiki\Linker\LinkTarget;
 use MediaWiki\MediaWikiServices;
-use Wikimedia\Rdbms\ResultWrapper;
+use Wikimedia\Rdbms\IResultWrapper;
 use Wikimedia\Rdbms\IMaintainableDatabase;
 
 /**
@@ -37,7 +37,7 @@ use Wikimedia\Rdbms\IMaintainableDatabase;
  *
  * @ingroup Maintenance
  */
-class NamespaceConflictChecker extends Maintenance {
+class NamespaceDupes extends Maintenance {
 
 	/**
 	 * @var IMaintainableDatabase
@@ -72,8 +72,6 @@ class NamespaceConflictChecker extends Maintenance {
 	}
 
 	public function execute() {
-		$this->db = $this->getDB( DB_MASTER );
-
 		$options = [
 			'fix' => $this->hasOption( 'fix' ),
 			'merge' => $this->hasOption( 'merge' ),
@@ -104,51 +102,54 @@ class NamespaceConflictChecker extends Maintenance {
 	 * @return bool
 	 */
 	private function checkAll( $options ) {
-		global $wgContLang, $wgNamespaceAliases, $wgCapitalLinks;
-
+		$contLang = MediaWikiServices::getInstance()->getContentLanguage();
 		$spaces = [];
 
 		// List interwikis first, so they'll be overridden
 		// by any conflicting local namespaces.
 		foreach ( $this->getInterwikiList() as $prefix ) {
-			$name = $wgContLang->ucfirst( $prefix );
+			$name = $contLang->ucfirst( $prefix );
 			$spaces[$name] = 0;
 		}
 
 		// Now pull in all canonical and alias namespaces...
-		foreach ( MWNamespace::getCanonicalNamespaces() as $ns => $name ) {
+		foreach (
+			MediaWikiServices::getInstance()->getNamespaceInfo()->getCanonicalNamespaces()
+			as $ns => $name
+		) {
 			// This includes $wgExtraNamespaces
 			if ( $name !== '' ) {
 				$spaces[$name] = $ns;
 			}
 		}
-		foreach ( $wgContLang->getNamespaces() as $ns => $name ) {
+		foreach ( $contLang->getNamespaces() as $ns => $name ) {
 			if ( $name !== '' ) {
 				$spaces[$name] = $ns;
 			}
 		}
-		foreach ( $wgNamespaceAliases as $name => $ns ) {
+		foreach ( $this->getConfig()->get( 'NamespaceAliases' ) as $name => $ns ) {
 			$spaces[$name] = $ns;
 		}
-		foreach ( $wgContLang->getNamespaceAliases() as $name => $ns ) {
+		foreach ( $contLang->getNamespaceAliases() as $name => $ns ) {
 			$spaces[$name] = $ns;
 		}
 
 		// We'll need to check for lowercase keys as well,
 		// since we're doing case-sensitive searches in the db.
+		$capitalLinks = $this->getConfig()->get( 'CapitalLinks' );
 		foreach ( $spaces as $name => $ns ) {
 			$moreNames = [];
-			$moreNames[] = $wgContLang->uc( $name );
-			$moreNames[] = $wgContLang->ucfirst( $wgContLang->lc( $name ) );
-			$moreNames[] = $wgContLang->ucwords( $name );
-			$moreNames[] = $wgContLang->ucwords( $wgContLang->lc( $name ) );
-			$moreNames[] = $wgContLang->ucwordbreaks( $name );
-			$moreNames[] = $wgContLang->ucwordbreaks( $wgContLang->lc( $name ) );
-			if ( !$wgCapitalLinks ) {
+			$moreNames[] = $contLang->uc( $name );
+			$moreNames[] = $contLang->ucfirst( $contLang->lc( $name ) );
+			$moreNames[] = $contLang->ucwords( $name );
+			$moreNames[] = $contLang->ucwords( $contLang->lc( $name ) );
+			$moreNames[] = $contLang->ucwordbreaks( $name );
+			$moreNames[] = $contLang->ucwordbreaks( $contLang->lc( $name ) );
+			if ( !$capitalLinks ) {
 				foreach ( $moreNames as $altName ) {
-					$moreNames[] = $wgContLang->lcfirst( $altName );
+					$moreNames[] = $contLang->lcfirst( $altName );
 				}
-				$moreNames[] = $wgContLang->lcfirst( $name );
+				$moreNames[] = $contLang->lcfirst( $name );
 			}
 			foreach ( array_unique( $moreNames ) as $altName ) {
 				if ( $altName !== $name ) {
@@ -161,17 +162,8 @@ class NamespaceConflictChecker extends Maintenance {
 		// break the tie by sorting by name
 		$origSpaces = $spaces;
 		uksort( $spaces, function ( $a, $b ) use ( $origSpaces ) {
-			if ( $origSpaces[$a] < $origSpaces[$b] ) {
-				return -1;
-			} elseif ( $origSpaces[$a] > $origSpaces[$b] ) {
-				return 1;
-			} elseif ( $a < $b ) {
-				return -1;
-			} elseif ( $a > $b ) {
-				return 1;
-			} else {
-				return 0;
-			}
+			return $origSpaces[$a] <=> $origSpaces[$b]
+				?: $a <=> $b;
 		} );
 
 		$ok = true;
@@ -258,8 +250,8 @@ class NamespaceConflictChecker extends Maintenance {
 		foreach ( $targets as $row ) {
 			// Find the new title and determine the action to take
 
-			$newTitle = $this->getDestinationTitle( $ns, $name,
-				$row->page_namespace, $row->page_title, $options );
+			$newTitle = $this->getDestinationTitle(
+				$ns, $name, $row->page_namespace, $row->page_title );
 			$logStatus = false;
 			if ( !$newTitle ) {
 				$logStatus = 'invalid title';
@@ -342,18 +334,20 @@ class NamespaceConflictChecker extends Maintenance {
 	private function checkLinkTable( $table, $fieldPrefix, $ns, $name, $options,
 		$extraConds = []
 	) {
+		$dbw = $this->getDB( DB_MASTER );
+
 		$batchConds = [];
 		$fromField = "{$fieldPrefix}_from";
 		$namespaceField = "{$fieldPrefix}_namespace";
 		$titleField = "{$fieldPrefix}_title";
 		$batchSize = 500;
 		while ( true ) {
-			$res = $this->db->select(
+			$res = $dbw->select(
 				$table,
 				[ $fromField, $namespaceField, $titleField ],
 				array_merge( $batchConds, $extraConds, [
 					$namespaceField => 0,
-					$titleField . $this->db->buildLike( "$name:", $this->db->anyString() )
+					$titleField . $dbw->buildLike( "$name:", $dbw->anyString() )
 				] ),
 				__METHOD__,
 				[
@@ -368,8 +362,8 @@ class NamespaceConflictChecker extends Maintenance {
 			foreach ( $res as $row ) {
 				$logTitle = "from={$row->$fromField} ns={$row->$namespaceField} " .
 					"dbk={$row->$titleField}";
-				$destTitle = $this->getDestinationTitle( $ns, $name,
-					$row->$namespaceField, $row->$titleField, $options );
+				$destTitle = $this->getDestinationTitle(
+					$ns, $name, $row->$namespaceField, $row->$titleField );
 				$this->totalLinks++;
 				if ( !$destTitle ) {
 					$this->output( "$table $logTitle *** INVALID\n" );
@@ -382,7 +376,7 @@ class NamespaceConflictChecker extends Maintenance {
 					continue;
 				}
 
-				$this->db->update( $table,
+				$dbw->update( $table,
 					// SET
 					[
 						$namespaceField => $destTitle->getNamespace(),
@@ -400,8 +394,8 @@ class NamespaceConflictChecker extends Maintenance {
 				$this->output( "$table $logTitle -> " .
 					$destTitle->getPrefixedDBkey() . "\n" );
 			}
-			$encLastTitle = $this->db->addQuotes( $row->$titleField );
-			$encLastFrom = $this->db->addQuotes( $row->$fromField );
+			$encLastTitle = $dbw->addQuotes( $row->$titleField );
+			$encLastFrom = $dbw->addQuotes( $row->$fromField );
 
 			$batchConds = [
 				"$titleField > $encLastTitle " .
@@ -434,16 +428,21 @@ class NamespaceConflictChecker extends Maintenance {
 	 * @param string $name Prefix that is being made a namespace
 	 * @param array $options Associative array of validated command-line options
 	 *
-	 * @return ResultWrapper
+	 * @return IResultWrapper
 	 */
 	private function getTargetList( $ns, $name, $options ) {
-		if ( $options['move-talk'] && MWNamespace::isSubject( $ns ) ) {
+		$dbw = $this->getDB( DB_MASTER );
+
+		if (
+			$options['move-talk'] &&
+			MediaWikiServices::getInstance()->getNamespaceInfo()->isSubject( $ns )
+		) {
 			$checkNamespaces = [ NS_MAIN, NS_TALK ];
 		} else {
 			$checkNamespaces = NS_MAIN;
 		}
 
-		return $this->db->select( 'page',
+		return $dbw->select( 'page',
 			[
 				'page_id',
 				'page_title',
@@ -451,7 +450,7 @@ class NamespaceConflictChecker extends Maintenance {
 			],
 			[
 				'page_namespace' => $checkNamespaces,
-				'page_title' . $this->db->buildLike( "$name:", $this->db->anyString() ),
+				'page_title' . $dbw->buildLike( "$name:", $dbw->anyString() ),
 			],
 			__METHOD__
 		);
@@ -463,19 +462,19 @@ class NamespaceConflictChecker extends Maintenance {
 	 * @param string $name The conflicting prefix
 	 * @param int $sourceNs The source namespace
 	 * @param int $sourceDbk The source DB key (i.e. page_title)
-	 * @param array $options Associative array of validated command-line options
 	 * @return Title|false
 	 */
-	private function getDestinationTitle( $ns, $name, $sourceNs, $sourceDbk, $options ) {
+	private function getDestinationTitle( $ns, $name, $sourceNs, $sourceDbk ) {
 		$dbk = substr( $sourceDbk, strlen( "$name:" ) );
 		if ( $ns == 0 ) {
 			// An interwiki; try an alternate encoding with '-' for ':'
 			$dbk = "$name-" . $dbk;
 		}
 		$destNS = $ns;
-		if ( $sourceNs == NS_TALK && MWNamespace::isSubject( $ns ) ) {
+		$nsInfo = MediaWikiServices::getInstance()->getNamespaceInfo();
+		if ( $sourceNs == NS_TALK && $nsInfo->isSubject( $ns ) ) {
 			// This is an associated talk page moved with the --move-talk feature.
-			$destNS = MWNamespace::getTalk( $destNS );
+			$destNS = $nsInfo->getTalk( $destNS );
 		}
 		$newTitle = Title::makeTitleSafe( $destNS, $dbk );
 		if ( !$newTitle || !$newTitle->canExist() ) {
@@ -518,7 +517,9 @@ class NamespaceConflictChecker extends Maintenance {
 	 * @return bool
 	 */
 	private function movePage( $id, LinkTarget $newLinkTarget ) {
-		$this->db->update( 'page',
+		$dbw = $this->getDB( DB_MASTER );
+
+		$dbw->update( 'page',
 			[
 				"page_namespace" => $newLinkTarget->getNamespace(),
 				"page_title" => $newLinkTarget->getDBkey(),
@@ -535,7 +536,7 @@ class NamespaceConflictChecker extends Maintenance {
 			[ 'imagelinks', 'il' ] ];
 		foreach ( $fromNamespaceTables as $tableInfo ) {
 			list( $table, $fieldPrefix ) = $tableInfo;
-			$this->db->update( $table,
+			$dbw->update( $table,
 				// SET
 				[ "{$fieldPrefix}_from_namespace" => $newLinkTarget->getNamespace() ],
 				// WHERE
@@ -577,6 +578,8 @@ class NamespaceConflictChecker extends Maintenance {
 	 * @return bool
 	 */
 	private function mergePage( $row, Title $newTitle ) {
+		$dbw = $this->getDB( DB_MASTER );
+
 		$id = $row->page_id;
 
 		// Construct the WikiPage object we will need later, while the
@@ -588,17 +591,17 @@ class NamespaceConflictChecker extends Maintenance {
 		$wikiPage->loadPageData( 'fromdbmaster' );
 
 		$destId = $newTitle->getArticleID();
-		$this->beginTransaction( $this->db, __METHOD__ );
-		$this->db->update( 'revision',
+		$this->beginTransaction( $dbw, __METHOD__ );
+		$dbw->update( 'revision',
 			// SET
 			[ 'rev_page' => $destId ],
 			// WHERE
 			[ 'rev_page' => $id ],
 			__METHOD__ );
 
-		$this->db->delete( 'page', [ 'page_id' => $id ], __METHOD__ );
+		$dbw->delete( 'page', [ 'page_id' => $id ], __METHOD__ );
 
-		$this->commitTransaction( $this->db, __METHOD__ );
+		$this->commitTransaction( $dbw, __METHOD__ );
 
 		/* Call LinksDeletionUpdate to delete outgoing links from the old title,
 		 * and update category counts.
@@ -616,5 +619,5 @@ class NamespaceConflictChecker extends Maintenance {
 	}
 }
 
-$maintClass = NamespaceConflictChecker::class;
+$maintClass = NamespaceDupes::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

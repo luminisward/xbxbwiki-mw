@@ -7,6 +7,19 @@
 
 class LocalFileTest extends MediaWikiTestCase {
 
+	/** @var LocalRepo */
+	private $repo_hl0;
+	/** @var LocalRepo */
+	private $repo_hl2;
+	/** @var LocalRepo */
+	private $repo_lc;
+	/** @var File */
+	private $file_hl0;
+	/** @var File */
+	private $file_hl2;
+	/** @var File */
+	private $file_lc;
+
 	protected function setUp() {
 		parent::setUp();
 
@@ -39,7 +52,7 @@ class LocalFileTest extends MediaWikiTestCase {
 	 * @covers File::getHashPath
 	 */
 	public function testGetHashPath() {
-		$this->assertEquals( '', $this->file_hl0->getHashPath() );
+		$this->assertSame( '', $this->file_hl0->getHashPath() );
 		$this->assertEquals( 'a/a2/', $this->file_hl2->getHashPath() );
 		$this->assertEquals( 'c/c4/', $this->file_lc->getHashPath() );
 	}
@@ -179,5 +192,27 @@ class LocalFileTest extends MediaWikiTestCase {
 			$this->isInstanceOf( LocalFile::class ),
 			'wfLocalFile() returns LocalFile for valid Titles'
 		);
+	}
+
+	/**
+	 * @covers File::getUser
+	 */
+	public function testGetUserForNonExistingFile() {
+		$this->assertSame( 'Unknown user', $this->file_hl0->getUser() );
+		$this->assertSame( 0, $this->file_hl0->getUser( 'id' ) );
+	}
+
+	/**
+	 * @covers File::getUser
+	 */
+	public function testDescriptionShortUrlForNonExistingFile() {
+		$this->assertNull( $this->file_hl0->getDescriptionShortUrl() );
+	}
+
+	/**
+	 * @covers File::getUser
+	 */
+	public function testDescriptionTextForNonExistingFile() {
+		$this->assertFalse( $this->file_hl0->getDescriptionText() );
 	}
 }

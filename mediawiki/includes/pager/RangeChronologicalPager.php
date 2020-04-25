@@ -26,6 +26,7 @@ use Wikimedia\Timestamp\TimestampException;
  */
 abstract class RangeChronologicalPager extends ReverseChronologicalPager {
 
+	/** @var string[] */
 	protected $rangeConds = [];
 
 	/**
@@ -45,14 +46,12 @@ abstract class RangeChronologicalPager extends ReverseChronologicalPager {
 		try {
 			if ( $startStamp !== '' ) {
 				$startTimestamp = MWTimestamp::getInstance( $startStamp );
-				$startTimestamp->setTimezone( $this->getConfig()->get( 'Localtimezone' ) );
 				$startOffset = $this->mDb->timestamp( $startTimestamp->getTimestamp() );
 				$this->rangeConds[] = $this->mIndexField . '>=' . $this->mDb->addQuotes( $startOffset );
 			}
 
 			if ( $endStamp !== '' ) {
 				$endTimestamp = MWTimestamp::getInstance( $endStamp );
-				$endTimestamp->setTimezone( $this->getConfig()->get( 'Localtimezone' ) );
 				$endOffset = $this->mDb->timestamp( $endTimestamp->getTimestamp() );
 				$this->rangeConds[] = $this->mIndexField . '<=' . $this->mDb->addQuotes( $endOffset );
 
@@ -95,14 +94,14 @@ abstract class RangeChronologicalPager extends ReverseChronologicalPager {
 	 *
 	 * @param string $offset Index offset, inclusive
 	 * @param int $limit Exact query limit
-	 * @param bool $descending Query direction, false for ascending, true for descending
+	 * @param bool $order IndexPager::QUERY_ASCENDING or IndexPager::QUERY_DESCENDING
 	 * @return array
 	 */
-	protected function buildQueryInfo( $offset, $limit, $descending ) {
+	protected function buildQueryInfo( $offset, $limit, $order ) {
 		list( $tables, $fields, $conds, $fname, $options, $join_conds ) = parent::buildQueryInfo(
 			$offset,
 			$limit,
-			$descending
+			$order
 		);
 
 		if ( $this->rangeConds ) {

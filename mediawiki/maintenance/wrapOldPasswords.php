@@ -1,7 +1,4 @@
 <?php
-
-use MediaWiki\MediaWikiServices;
-
 /**
  * Maintenance script to wrap all old-style passwords in a layered type
  *
@@ -23,7 +20,10 @@ use MediaWiki\MediaWikiServices;
  * @file
  * @ingroup Maintenance
  */
+
 require_once __DIR__ . '/Maintenance.php';
+
+use MediaWiki\MediaWikiServices;
 
 /**
  * Maintenance script to wrap all passwords of a certain type in a specified layered
@@ -43,8 +43,7 @@ class WrapOldPasswords extends Maintenance {
 	}
 
 	public function execute() {
-		$passwordFactory = new PasswordFactory();
-		$passwordFactory->init( RequestContext::getMain()->getConfig() );
+		$passwordFactory = MediaWikiServices::getInstance()->getPasswordFactory();
 
 		$typeInfo = $passwordFactory->getTypes();
 		$layeredType = $this->getOption( 'type' );
@@ -96,8 +95,10 @@ class WrapOldPasswords extends Maintenance {
 				$user = User::newFromId( $row->user_id );
 				/** @var ParameterizedPassword $password */
 				$password = $passwordFactory->newFromCiphertext( $row->user_password );
+				'@phan-var ParameterizedPassword $password';
 				/** @var LayeredParameterizedPassword $layeredPassword */
 				$layeredPassword = $passwordFactory->newFromType( $layeredType );
+				'@phan-var LayeredParameterizedPassword $layeredPassword';
 				$layeredPassword->partialCrypt( $password );
 
 				$updateUsers[] = $user;
@@ -115,7 +116,7 @@ class WrapOldPasswords extends Maintenance {
 
 			// Clear memcached so old passwords are wiped out
 			foreach ( $updateUsers as $user ) {
-				$user->clearSharedCache();
+				$user->clearSharedCache( 'refresh' );
 			}
 		} while ( $res->numRows() );
 	}

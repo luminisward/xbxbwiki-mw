@@ -24,6 +24,7 @@
 use MediaWiki\Auth\AuthManager;
 use MediaWiki\Linker\LinkRenderer;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Navigation\PrevNextNavigationRenderer;
 
 /**
  * Parent class for all special pages.
@@ -95,7 +96,8 @@ class SpecialPage implements MessageLocalizer {
 	 * @return TitleValue
 	 */
 	public static function getTitleValueFor( $name, $subpage = false, $fragment = '' ) {
-		$name = SpecialPageFactory::getLocalNameFor( $name, $subpage );
+		$name = MediaWikiServices::getInstance()->getSpecialPageFactory()->
+			getLocalNameFor( $name, $subpage );
 
 		return new TitleValue( NS_SPECIAL, $name, $fragment );
 	}
@@ -108,7 +110,8 @@ class SpecialPage implements MessageLocalizer {
 	 * @return Title|null Title object or null if the page doesn't exist
 	 */
 	public static function getSafeTitleFor( $name, $subpage = false ) {
-		$name = SpecialPageFactory::getLocalNameFor( $name, $subpage );
+		$name = MediaWikiServices::getInstance()->getSpecialPageFactory()->
+			getLocalNameFor( $name, $subpage );
 		if ( $name ) {
 			return Title::makeTitleSafe( NS_SPECIAL, $name );
 		} else {
@@ -160,6 +163,7 @@ class SpecialPage implements MessageLocalizer {
 	}
 
 	// @todo FIXME: Decide which syntax to use for this, and stick to it
+
 	/**
 	 * Whether this special page is listed in Special:SpecialPages
 	 * @since 1.3 (r3583)
@@ -182,7 +186,7 @@ class SpecialPage implements MessageLocalizer {
 	/**
 	 * Get or set whether this special page is listed in Special:SpecialPages
 	 * @since 1.6
-	 * @param bool $x
+	 * @param bool|null $x
 	 * @return bool
 	 */
 	function listed( $x = null ) {
@@ -220,7 +224,7 @@ class SpecialPage implements MessageLocalizer {
 
 	/**
 	 * Whether the special page is being evaluated via transclusion
-	 * @param bool $x
+	 * @param bool|null $x
 	 * @return bool
 	 */
 	function including( $x = null ) {
@@ -233,7 +237,8 @@ class SpecialPage implements MessageLocalizer {
 	 */
 	function getLocalName() {
 		if ( !isset( $this->mLocalName ) ) {
-			$this->mLocalName = SpecialPageFactory::getLocalNameFor( $this->mName );
+			$this->mLocalName = MediaWikiServices::getInstance()->getSpecialPageFactory()->
+				getLocalNameFor( $this->mName );
 		}
 
 		return $this->mLocalName;
@@ -273,7 +278,9 @@ class SpecialPage implements MessageLocalizer {
 	 */
 	public function isRestricted() {
 		// DWIM: If anons can do something, then it is not restricted
-		return $this->mRestriction != '' && !User::groupHasPermission( '*', $this->mRestriction );
+		return $this->mRestriction != '' && !MediaWikiServices::getInstance()
+				->getPermissionManager()
+				->groupHasPermission( '*', $this->mRestriction );
 	}
 
 	/**
@@ -285,7 +292,9 @@ class SpecialPage implements MessageLocalizer {
 	 * @return bool Does the user have permission to view the page?
 	 */
 	public function userCanExecute( User $user ) {
-		return $user->isAllowed( $this->mRestriction );
+		return MediaWikiServices::getInstance()
+			->getPermissionManager()
+			->userHasRight( $user, $this->mRestriction );
 	}
 
 	/**
@@ -388,7 +397,8 @@ class SpecialPage implements MessageLocalizer {
 	 * Note that this does not in any way check that the user is authorized to use this special page
 	 * (use checkPermissions() for that).
 	 *
-	 * @param string $level A security level. Can be an arbitrary string, defaults to the page name.
+	 * @param string|null $level A security level. Can be an arbitrary string, defaults to the page
+	 *   name.
 	 * @return bool False means a redirect to the reauthentication page has been set and processing
 	 *   of the special page should be aborted.
 	 * @throws ErrorPageError If the security level cannot be met, even with reauthentication.
@@ -402,7 +412,7 @@ class SpecialPage implements MessageLocalizer {
 		if ( $securityStatus === AuthManager::SEC_OK ) {
 			$uniqueId = $request->getVal( 'postUniqueId' );
 			if ( $uniqueId ) {
-				$key = $key . ':' . $uniqueId;
+				$key .= ':' . $uniqueId;
 				$session = $request->getSession();
 				$data = $session->getSecret( $key );
 				if ( $data ) {
@@ -420,7 +430,7 @@ class SpecialPage implements MessageLocalizer {
 				if ( $data ) {
 					// unique ID in case the same special page is open in multiple browser tabs
 					$uniqueId = MWCryptRand::generateHex( 6 );
-					$key = $key . ':' . $uniqueId;
+					$key .= ':' . $uniqueId;
 					$queryParams['postUniqueId'] = $uniqueId;
 					$session = $request->getSession();
 					$session->persist(); // Just in case
@@ -450,10 +460,10 @@ class SpecialPage implements MessageLocalizer {
 	 * For example, if a page supports subpages "foo", "bar" and "baz" (as in Special:PageName/foo,
 	 * etc.):
 	 *
-	 *   - `prefixSearchSubpages( "ba" )` should return `array( "bar", "baz" )`
-	 *   - `prefixSearchSubpages( "f" )` should return `array( "foo" )`
-	 *   - `prefixSearchSubpages( "z" )` should return `array()`
-	 *   - `prefixSearchSubpages( "" )` should return `array( foo", "bar", "baz" )`
+	 *   - `prefixSearchSubpages( "ba" )` should return `[ "bar", "baz" ]`
+	 *   - `prefixSearchSubpages( "f" )` should return `[ "foo" ]`
+	 *   - `prefixSearchSubpages( "z" )` should return `[]`
+	 *   - `prefixSearchSubpages( "" )` should return `[ foo", "bar", "baz" ]`
 	 *
 	 * @param string $search Prefix to search for
 	 * @param int $limit Maximum number of results to return (usually 10)
@@ -627,10 +637,9 @@ class SpecialPage implements MessageLocalizer {
 	 * @param string $summaryMessageKey Message key of the summary
 	 */
 	function outputHeader( $summaryMessageKey = '' ) {
-		global $wgContLang;
-
 		if ( $summaryMessageKey == '' ) {
-			$msg = $wgContLang->lc( $this->getName() ) . '-summary';
+			$msg = MediaWikiServices::getInstance()->getContentLanguage()->lc( $this->getName() ) .
+				'-summary';
 		} else {
 			$msg = $summaryMessageKey;
 		}
@@ -651,18 +660,6 @@ class SpecialPage implements MessageLocalizer {
 	 */
 	function getDescription() {
 		return $this->msg( strtolower( $this->mName ) )->text();
-	}
-
-	/**
-	 * Get a self-referential title object
-	 *
-	 * @param string|bool $subpage
-	 * @return Title
-	 * @deprecated since 1.23, use SpecialPage::getPageTitle
-	 */
-	function getTitle( $subpage = false ) {
-		wfDeprecated( __METHOD__, '1.23' );
-		return $this->getPageTitle( $subpage );
 	}
 
 	/**
@@ -787,14 +784,13 @@ class SpecialPage implements MessageLocalizer {
 	 * Wrapper around wfMessage that sets the current context.
 	 *
 	 * @since 1.16
+	 * @param string|string[]|MessageSpecifier $key
+	 * @param mixed ...$params
 	 * @return Message
 	 * @see wfMessage
 	 */
-	public function msg( $key /* $args */ ) {
-		$message = call_user_func_array(
-			[ $this->getContext(), 'msg' ],
-			func_get_args()
-		);
+	public function msg( $key, ...$params ) {
+		$message = $this->getContext()->msg( $key, ...$params );
 		// RequestContext passes context to wfMessage, and the language is set from
 		// the context, but setting the language for Message class removes the
 		// interface message status, which breaks for example usernameless gender
@@ -834,8 +830,9 @@ class SpecialPage implements MessageLocalizer {
 			return;
 		}
 
-		global $wgContLang;
-		$msg = $this->msg( $wgContLang->lc( $this->getName() ) . '-helppage' );
+		$msg = $this->msg(
+			MediaWikiServices::getInstance()->getContentLanguage()->lc( $this->getName() ) .
+			'-helppage' );
 
 		if ( !$msg->isDisabled() ) {
 			$helpUrl = Skin::makeUrl( $msg->plain() );
@@ -918,5 +915,24 @@ class SpecialPage implements MessageLocalizer {
 	 */
 	public function setLinkRenderer( LinkRenderer $linkRenderer ) {
 		$this->linkRenderer = $linkRenderer;
+	}
+
+	/**
+	 * Generate (prev x| next x) (20|50|100...) type links for paging
+	 *
+	 * @param int $offset
+	 * @param int $limit
+	 * @param array $query Optional URL query parameter string
+	 * @param bool $atend Optional param for specified if this is the last page
+	 * @param string|bool $subpage Optional param for specifying subpage
+	 * @return string
+	 */
+	protected function buildPrevNextNavigation( $offset, $limit,
+											 array $query = [], $atend = false, $subpage = false
+	) {
+		$title = $this->getPageTitle( $subpage );
+		$prevNext = new PrevNextNavigationRenderer( $this );
+
+		return $prevNext->buildPrevNextNavigation( $title, $offset, $limit, $query,  $atend );
 	}
 }

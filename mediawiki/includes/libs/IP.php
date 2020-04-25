@@ -120,19 +120,6 @@ class IP {
 	 * SIIT IPv4-translated addresses are rejected.
 	 * @note canonicalize() tries to convert translated addresses to IPv4.
 	 *
-	 * @deprecated since 1.30. Use the equivalent IP::isValidRange().
-	 * @param string $ipRange
-	 * @return bool True if it is valid
-	 */
-	public static function isValidBlock( $ipRange ) {
-		return self::isValidRange( $ipRange );
-	}
-
-	/**
-	 * Validate an IP range (valid address with a valid CIDR prefix).
-	 * SIIT IPv4-translated addresses are rejected.
-	 * @note canonicalize() tries to convert translated addresses to IPv4.
-	 *
 	 * @param string $ipRange
 	 * @return bool True if it is valid
 	 * @since 1.30
@@ -164,7 +151,7 @@ class IP {
 		}
 		if ( self::isIPv4( $ip ) ) {
 			// Remove leading 0's from octet representation of IPv4 address
-			$ip = preg_replace( '/(?:^|(?<=\.))0+(?=[1-9]|0\.|0$)/', '', $ip );
+			$ip = preg_replace( '!(?:^|(?<=\.))0+(?=[1-9]|0[./]|0$)!', '', $ip );
 			return $ip;
 		}
 		// Remove any whitespaces, convert to upper case
@@ -425,7 +412,7 @@ class IP {
 			$ip = self::sanitizeIP( $ip );
 			$n = ip2long( $ip );
 			if ( $n < 0 ) {
-				$n += pow( 2, 32 );
+				$n += 2 ** 32;
 				# On 32-bit platforms (and on Windows), 2^32 does not fit into an int,
 				# so $n becomes a float. We convert it to string instead.
 				if ( is_float( $n ) ) {
@@ -467,7 +454,7 @@ class IP {
 	 * to an integer network and a number of bits
 	 *
 	 * @param string $range IP with CIDR prefix
-	 * @return array(int or string, int)
+	 * @return array [int or string, int]
 	 */
 	public static function parseCIDR( $range ) {
 		if ( self::isIPv6( $range ) ) {
@@ -487,7 +474,7 @@ class IP {
 			}
 			# Convert to unsigned
 			if ( $network < 0 ) {
-				$network += pow( 2, 32 );
+				$network += 2 ** 32;
 			}
 		} else {
 			$network = false;
@@ -523,7 +510,7 @@ class IP {
 				$start = $end = false;
 			} else {
 				$start = sprintf( '%08X', $network );
-				$end = sprintf( '%08X', $network + pow( 2, ( 32 - $bits ) ) - 1 );
+				$end = sprintf( '%08X', $network + 2 ** ( 32 - $bits ) - 1 );
 			}
 		// Explicit range
 		} elseif ( strpos( $range, '-' ) !== false ) {
@@ -557,7 +544,7 @@ class IP {
 	 *
 	 * @param string $range
 	 *
-	 * @return array(string, int)
+	 * @return array [string, int]
 	 */
 	private static function parseCIDR6( $range ) {
 		# Explode into <expanded IP,range>
@@ -598,7 +585,7 @@ class IP {
 	 *
 	 * @param string $range
 	 *
-	 * @return array(string, string)
+	 * @return array [string, string]
 	 */
 	private static function parseRange6( $range ) {
 		# Expand any IPv6 IP

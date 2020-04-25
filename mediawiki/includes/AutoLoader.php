@@ -28,13 +28,13 @@
 require_once __DIR__ . '/../autoload.php';
 
 class AutoLoader {
-	static protected $autoloadLocalClassesLower = null;
+	protected static $autoloadLocalClassesLower = null;
 
 	/**
 	 * @private Only public for ExtensionRegistry
 	 * @var string[] Namespace (ends with \) => Path (ends with /)
 	 */
-	static public $psr4Namespaces = [];
+	public static $psr4Namespaces = [];
 
 	/**
 	 * autoload - take a class name and attempt to load it
@@ -123,12 +123,30 @@ class AutoLoader {
 	 *
 	 * @see <http://www.php-fig.org/psr/psr-4/>
 	 * @private Only public for usage in AutoloadGenerator
+	 * @codeCoverageIgnore
 	 * @since 1.31
 	 * @return string[]
 	 */
 	public static function getAutoloadNamespaces() {
 		return [
-			'MediaWiki\\Linker\\' => __DIR__ .'/linker/'
+			'MediaWiki\\Auth\\' => __DIR__ . '/auth/',
+			'MediaWiki\\Block\\' => __DIR__ . '/block/',
+			'MediaWiki\\Edit\\' => __DIR__ . '/edit/',
+			'MediaWiki\\EditPage\\' => __DIR__ . '/editpage/',
+			'MediaWiki\\Linker\\' => __DIR__ . '/linker/',
+			'MediaWiki\\Message\\' => __DIR__ . '/Message',
+			'MediaWiki\\Permissions\\' => __DIR__ . '/Permissions/',
+			'MediaWiki\\Preferences\\' => __DIR__ . '/preferences/',
+			'MediaWiki\\Rest\\' => __DIR__ . '/Rest/',
+			'MediaWiki\\Revision\\' => __DIR__ . '/Revision/',
+			'MediaWiki\\Session\\' => __DIR__ . '/session/',
+			'MediaWiki\\Shell\\' => __DIR__ . '/shell/',
+			'MediaWiki\\Sparql\\' => __DIR__ . '/sparql/',
+			'MediaWiki\\Storage\\' => __DIR__ . '/Storage/',
+			'MediaWiki\\Tidy\\' => __DIR__ . '/tidy/',
+			'Wikimedia\\Message\\' => __DIR__ . '/libs/Message/',
+			'Wikimedia\\ParamValidator\\' => __DIR__ . '/libs/ParamValidator/',
+			'Wikimedia\\Services\\' => __DIR__ . '/libs/services/',
 		];
 	}
 }

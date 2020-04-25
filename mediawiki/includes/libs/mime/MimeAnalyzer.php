@@ -21,6 +21,7 @@
  */
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 /**
  * Implements functions related to MIME types such as detection and mapping to file extension
@@ -195,21 +196,11 @@ EOT;
 		$this->typeFile = $params['typeFile'];
 		$this->infoFile = $params['infoFile'];
 		$this->xmlTypes = $params['xmlTypes'];
-		$this->initCallback = isset( $params['initCallback'] )
-			? $params['initCallback']
-			: null;
-		$this->detectCallback = isset( $params['detectCallback'] )
-			? $params['detectCallback']
-			: null;
-		$this->guessCallback = isset( $params['guessCallback'] )
-			? $params['guessCallback']
-			: null;
-		$this->extCallback = isset( $params['extCallback'] )
-			? $params['extCallback']
-			: null;
-		$this->logger = isset( $params['logger'] )
-			? $params['logger']
-			: new \Psr\Log\NullLogger();
+		$this->initCallback = $params['initCallback'] ?? null;
+		$this->detectCallback = $params['detectCallback'] ?? null;
+		$this->guessCallback = $params['guessCallback'] ?? null;
+		$this->extCallback = $params['extCallback'] ?? null;
+		$this->logger = $params['logger'] ?? new NullLogger();
 
 		$this->loadFiles();
 	}
@@ -437,7 +428,7 @@ EOT;
 	public function getTypesForExtension( $ext ) {
 		$ext = strtolower( $ext );
 
-		$r = isset( $this->mExtToMime[$ext] ) ? $this->mExtToMime[$ext] : null;
+		$r = $this->mExtToMime[$ext] ?? null;
 		return $r;
 	}
 
@@ -663,7 +654,6 @@ EOT;
 				"Seeking $tailLength bytes from EOF failed in " . __METHOD__ );
 		}
 		$tail = $tailLength ? fread( $f, $tailLength ) : '';
-		fclose( $f );
 
 		$this->logger->info( __METHOD__ .
 			": analyzing head and tail of $file for magic numbers.\n" );
@@ -734,6 +724,12 @@ EOT;
 			return "image/webp";
 		}
 
+		/* Look for MS Compound Binary (OLE) files */
+		if ( strncmp( $head, "\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", 8 ) == 0 ) {
+			$this->logger->info( __METHOD__ . ': recognized MS CFB (OLE) file' );
+			return $this->detectMicrosoftBinaryType( $f );
+		}
+
 		/**
 		 * Look for PHP.  Check for this before HTML/XML...  Warning: this is a
 		 * heuristic, and won't match a file with a lot of non-PHP before.  It
@@ -765,11 +761,7 @@ EOT;
 		Wikimedia\restoreWarnings();
 		if ( $xml->wellFormed ) {
 			$xmlTypes = $this->xmlTypes;
-			if ( isset( $xmlTypes[$xml->getRootElement()] ) ) {
-				return $xmlTypes[$xml->getRootElement()];
-			} else {
-				return 'application/xml';
-			}
+			return $xmlTypes[$xml->getRootElement()] ?? 'application/xml';
 		}
 
 		/**
@@ -813,9 +805,16 @@ EOT;
 		}
 
 		// Check for ZIP variants (before getimagesize)
-		if ( strpos( $tail, "PK\x05\x06" ) !== false ) {
-			$this->logger->info( __METHOD__ . ": ZIP header present in $file\n" );
-			return $this->detectZipType( $head, $tail, $ext );
+		$eocdrPos = strpos( $tail, "PK\x05\x06" );
+		if ( $eocdrPos !== false && $eocdrPos <= strlen( $tail ) - 22 ) {
+			$this->logger->info( __METHOD__ . ": ZIP signature present in $file\n" );
+			// Check if it really is a ZIP file, make sure the EOCDR is at the end (T40432)
+			$commentLength = unpack( "n", substr( $tail, $eocdrPos + 20 ) )[1];
+			if ( $eocdrPos + 22 + $commentLength !== strlen( $tail ) ) {
+				$this->logger->info( __METHOD__ . ": ZIP EOCDR not at end. Not a ZIP file." );
+			} else {
+				return $this->detectZipType( $head, $tail, $ext );
+			}
 		}
 
 		// Check for STL (3D) files
@@ -853,7 +852,7 @@ EOT;
 		$callback = $this->guessCallback;
 		if ( $callback ) {
 			$callback( $this, $head, $tail, $file, $mime /* by reference */ );
-		};
+		}
 
 		return $mime;
 	}
@@ -880,6 +879,14 @@ EOT;
 
 		$mime = 'application/zip';
 		$opendocTypes = [
+			# In OASIS Open Document Format v1.2, Database front end document
+			# has a recommended MIME type of:
+			# application/vnd.oasis.opendocument.base
+			# Despite the type registered at the IANA being 'database' which is
+			# supposed to be normative.
+			# T35515
+			'base',
+
 			'chart-template',
 			'chart',
 			'formula-template',
@@ -897,7 +904,10 @@ EOT;
 			'text-web',
 			'text' ];
 
-		// https://lists.oasis-open.org/archives/office/200505/msg00006.html
+		// The list of document types is available in OASIS Open Document
+		// Format version 1.2 under Appendix C. It is not normative though,
+		// supposedly types registered at the IANA should be.
+		// http://docs.oasis-open.org/office/v1.2/os/OpenDocument-v1.2-os-part1.html
 		$types = '(?:' . implode( '|', $opendocTypes ) . ')';
 		$opendocRegex = "/^mimetype(application\/vnd\.oasis\.opendocument\.$types)/";
 
@@ -959,6 +969,26 @@ EOT;
 			$this->logger->info( __METHOD__ . ": unable to identify type of ZIP archive\n" );
 		}
 		return $mime;
+	}
+
+	/**
+	 * Detect the type of a Microsoft Compound Binary a.k.a. OLE file.
+	 * These are old style pre-ODF files such as .doc and .xls
+	 *
+	 * @param resource $handle An opened seekable file handle
+	 * @return string The detected MIME type
+	 */
+	function detectMicrosoftBinaryType( $handle ) {
+		$info = MSCompoundFileReader::readHandle( $handle );
+		if ( !$info['valid'] ) {
+			$this->logger->info( __METHOD__ . ': invalid file format' );
+			return 'unknown/unknown';
+		}
+		if ( !$info['mime'] ) {
+			$this->logger->info( __METHOD__ . ": unrecognised document subtype" );
+			return 'unknown/unknown';
+		}
+		return $info['mime'];
 	}
 
 	/**
@@ -1041,9 +1071,9 @@ EOT;
 	 * @todo analyse file if need be
 	 * @todo look at multiple extension, separately and together.
 	 *
-	 * @param string $path Full path to the image file, in case we have to look at the contents
+	 * @param string|null $path Full path to the image file, in case we have to look at the contents
 	 *        (if null, only the MIME type is used to determine the media type code).
-	 * @param string $mime MIME type. If null it will be guessed using guessMimeType.
+	 * @param string|null $mime MIME type. If null it will be guessed using guessMimeType.
 	 *
 	 * @return string A value to be used with the MEDIATYPE_xxx constants.
 	 */
@@ -1059,7 +1089,7 @@ EOT;
 
 		// Special code for ogg - detect if it's video (theora),
 		// else label it as sound.
-		if ( $mime == 'application/ogg' && file_exists( $path ) ) {
+		if ( $mime == 'application/ogg' && is_string( $path ) && file_exists( $path ) ) {
 			// Read a chunk of the file
 			$f = fopen( $path, "rt" );
 			if ( !$f ) {
@@ -1132,7 +1162,7 @@ EOT;
 	 * distinguish them from MIME types.
 	 *
 	 * This function relies on the mapping defined by $this->mMediaTypes
-	 * @access private
+	 * @private
 	 * @param string $extMime
 	 * @return int|string
 	 */

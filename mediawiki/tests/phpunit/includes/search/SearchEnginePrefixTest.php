@@ -45,6 +45,9 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 		$this->insertPage( 'Talk:Example' );
 
 		$this->insertPage( 'User:Example' );
+		$this->insertPage( 'Barcelona' );
+		$this->insertPage( 'Barbara' );
+		$this->insertPage( 'External' );
 	}
 
 	protected function setUp() {
@@ -65,16 +68,12 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 
 		$this->originalHandlers = TestingAccessWrapper::newFromClass( Hooks::class )->handlers;
 		TestingAccessWrapper::newFromClass( Hooks::class )->handlers = [];
-
-		SpecialPageFactory::resetList();
 	}
 
 	public function tearDown() {
 		parent::tearDown();
 
 		TestingAccessWrapper::newFromClass( Hooks::class )->handlers = $this->originalHandlers;
-
-		SpecialPageFactory::resetList();
 	}
 
 	protected function searchProvision( array $results = null ) {
@@ -238,7 +237,7 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 				],
 			] ],
 			[ [
-				'Exact match not on top (T72958)',
+				'Exact match not in first result should be moved to the first result (T72958)',
 				'provision' => [
 					'Barcelona',
 					'Bar',
@@ -252,7 +251,7 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 				],
 			] ],
 			[ [
-				'Exact match missing (T72958)',
+				'Exact match missing from results should be added as first result (T72958)',
 				'provision' => [
 					'Barcelona',
 					'Barbara',
@@ -266,7 +265,7 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 				],
 			] ],
 			[ [
-				'Exact match missing and not existing',
+				'Exact match missing and not existing pages should be dropped',
 				'provision' => [
 					'Exile',
 					'Exist',
@@ -274,8 +273,6 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 				],
 				'query' => 'Ex',
 				'results' => [
-					'Exile',
-					'Exist',
 					'External',
 				],
 			] ],
@@ -329,6 +326,21 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 					'Redirect test',
 				],
 			] ],
+			[ [
+				"Extra results must not be returned",
+				'provision' => [
+					'Example',
+					'Example Bar',
+					'Example Foo',
+					'Example Foo/Bar'
+				],
+				'query' => 'foo',
+				'results' => [
+					'Example',
+					'Example Bar',
+					'Example Foo',
+				],
+			] ],
 		];
 	}
 
@@ -337,16 +349,7 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 	 * @covers PrefixSearch::searchBackend
 	 */
 	public function testSearchBackend( array $case ) {
-		$search = $stub = $this->getMockBuilder( SearchEngine::class )
-			->setMethods( [ 'completionSearchBackend' ] )->getMock();
-
-		$return = SearchSuggestionSet::fromStrings( $case['provision'] );
-
-		$search->expects( $this->any() )
-			->method( 'completionSearchBackend' )
-			->will( $this->returnValue( $return ) );
-
-		$search->setLimitOffset( 3 );
+		$search = $this->mockSearchWithResults( $case['provision'] );
 		$results = $search->completionSearch( $case['query'] );
 
 		$results = $results->map( function ( SearchSuggestion $s ) {
@@ -358,5 +361,45 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 			$results,
 			$case[0]
 		);
+	}
+
+	public function paginationProvider() {
+		$res = [ 'Example', 'Example Bar', 'Example Foo', 'Example Foo/Bar' ];
+		return [
+			'With less than requested results no pagination' => [
+				false, array_slice( $res, 0, 2 ),
+			],
+			'With same as requested results no pagination' => [
+				false, array_slice( $res, 0, 3 ),
+			],
+			'With extra result returned offer pagination' => [
+				true, $res,
+			],
+		];
+	}
+
+	/**
+	 * @dataProvider paginationProvider
+	 * @covers SearchSuggestionSet::hasMoreResults
+	 */
+	public function testPagination( $hasMoreResults, $provision ) {
+		$search = $this->mockSearchWithResults( $provision );
+		$results = $search->completionSearch( 'irrelevant' );
+
+		$this->assertEquals( $hasMoreResults, $results->hasMoreResults() );
+	}
+
+	private function mockSearchWithResults( $titleStrings, $limit = 3 ) {
+		$search = $stub = $this->getMockBuilder( SearchEngine::class )
+			->setMethods( [ 'completionSearchBackend' ] )->getMock();
+
+		$return = SearchSuggestionSet::fromStrings( $titleStrings );
+
+		$search->expects( $this->any() )
+			->method( 'completionSearchBackend' )
+			->will( $this->returnValue( $return ) );
+
+		$search->setLimitOffset( $limit );
+		return $search;
 	}
 }

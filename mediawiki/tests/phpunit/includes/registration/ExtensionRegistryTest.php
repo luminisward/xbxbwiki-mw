@@ -1,5 +1,7 @@
 <?php
 
+use Wikimedia\ScopedCallback;
+
 /**
  * @covers ExtensionRegistry
  */
@@ -17,7 +19,7 @@ class ExtensionRegistryTest extends MediaWikiTestCase {
 		$path = __DIR__ . '/doesnotexist.json';
 		$this->setExpectedException(
 			Exception::class,
-			"$path does not exist!"
+			"file $path"
 		);
 		$registry->queue( $path );
 	}
@@ -49,6 +51,56 @@ class ExtensionRegistryTest extends MediaWikiTestCase {
 			"The following paths tried to load late: {$this->dataDir}/good.json"
 		);
 		$registry->loadFromQueue();
+	}
+
+	public function testLoadFromQueue() {
+		$registry = new ExtensionRegistry();
+		$registry->queue( "{$this->dataDir}/good.json" );
+		$registry->loadFromQueue();
+		$this->assertArrayHasKey( 'FooBar', $registry->getAllThings() );
+		$this->assertTrue( $registry->isLoaded( 'FooBar' ) );
+		$this->assertTrue( $registry->isLoaded( 'FooBar', '*' ) );
+		$this->assertSame( [ 'test' ], $registry->getAttribute( 'FooBarAttr' ) );
+		$this->assertSame( [], $registry->getAttribute( 'NotLoadedAttr' ) );
+	}
+
+	public function testLoadFromQueueWithConstraintWithVersion() {
+		$registry = new ExtensionRegistry();
+		$registry->queue( "{$this->dataDir}/good_with_version.json" );
+		$registry->loadFromQueue();
+		$this->assertTrue( $registry->isLoaded( 'FooBar', '>= 1.2.0' ) );
+		$this->assertFalse( $registry->isLoaded( 'FooBar', '^1.3.0' ) );
+	}
+
+	/**
+	 * @expectedException LogicException
+	 */
+	public function testLoadFromQueueWithConstraintWithoutVersion() {
+		$registry = new ExtensionRegistry();
+		$registry->queue( "{$this->dataDir}/good.json" );
+		$registry->loadFromQueue();
+		$registry->isLoaded( 'FooBar', '>= 1.2.0' );
+	}
+
+	/**
+	 * @expectedException PHPUnit_Framework_Error
+	 */
+	public function testReadFromQueue_nonexistent() {
+		$registry = new ExtensionRegistry();
+		$registry->readFromQueue( [
+			__DIR__ . '/doesnotexist.json' => 1
+		] );
+	}
+
+	public function testReadFromQueueInitializeAutoloaderWithPsr4Namespaces() {
+		$registry = new ExtensionRegistry();
+		$registry->readFromQueue( [
+			"{$this->dataDir}/autoload_namespaces.json" => 1
+		] );
+		$this->assertTrue(
+			class_exists( 'Test\\MediaWiki\\AutoLoader\\TestFooBar' ),
+			"Registry initializes Autoloader from AutoloadNamespaces"
+		);
 	}
 
 	/**
@@ -348,5 +400,29 @@ class ExtensionRegistryTest extends MediaWikiTestCase {
 				],
 			],
 		];
+	}
+
+	public function testSetAttributeForTest() {
+		$registry = new ExtensionRegistry();
+		$registry->queue( "{$this->dataDir}/good.json" );
+		$registry->loadFromQueue();
+		// Sanity check that it worked
+		$this->assertSame( [ 'test' ], $registry->getAttribute( 'FooBarAttr' ) );
+		$reset = $registry->setAttributeForTest( 'FooBarAttr', [ 'override' ] );
+		// overridden properly
+		$this->assertSame( [ 'override' ], $registry->getAttribute( 'FooBarAttr' ) );
+		ScopedCallback::consume( $reset );
+		// reset properly
+		$this->assertSame( [ 'test' ], $registry->getAttribute( 'FooBarAttr' ) );
+	}
+
+	/**
+	 * @expectedException Exception
+	 * @expectedExceptionMessage The attribute 'foo' has already been overridden
+	 */
+	public function testSetAttributeForTestDuplicate() {
+		$registry = new ExtensionRegistry();
+		$reset1 = $registry->setAttributeForTest( 'foo', [ 'val1' ] );
+		$reset2 = $registry->setAttributeForTest( 'foo', [ 'val2' ] );
 	}
 }

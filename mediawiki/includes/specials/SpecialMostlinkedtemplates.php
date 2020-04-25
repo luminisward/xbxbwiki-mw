@@ -31,7 +31,7 @@ use Wikimedia\Rdbms\IDatabase;
  *
  * @ingroup SpecialPage
  */
-class MostlinkedTemplatesPage extends QueryPage {
+class SpecialMostLinkedTemplates extends QueryPage {
 	function __construct( $name = 'Mostlinkedtemplates' ) {
 		parent::__construct( $name );
 	}

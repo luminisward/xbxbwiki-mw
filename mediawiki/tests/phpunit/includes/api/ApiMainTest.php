@@ -1,6 +1,8 @@
 <?php
 
+use Wikimedia\Rdbms\DBQueryError;
 use Wikimedia\TestingAccessWrapper;
+use Wikimedia\Timestamp\ConvertibleTimestamp;
 
 /**
  * @group API
@@ -149,7 +151,6 @@ class ApiMainTest extends ApiTestCase {
 
 	public function testSetCacheModePrivateWiki() {
 		$this->setGroupPermissions( '*', 'read', false );
-
 		$wrappedApi = TestingAccessWrapper::newFromObject( new ApiMain() );
 		$wrappedApi->setCacheMode( 'public' );
 		$this->assertSame( 'private', $wrappedApi->mCacheMode );
@@ -169,6 +170,10 @@ class ApiMainTest extends ApiTestCase {
 	}
 
 	public function testAddRequestedFieldsCurTimestamp() {
+		// Fake timestamp for better testability, CI can sometimes take
+		// unreasonably long to run the simple test request here.
+		$reset = ConvertibleTimestamp::setFakeTime( '20190102030405' );
+
 		$req = new FauxRequest( [
 			'action' => 'query',
 			'meta' => 'siteinfo',
@@ -177,7 +182,7 @@ class ApiMainTest extends ApiTestCase {
 		$api = new ApiMain( $req );
 		$api->execute();
 		$timestamp = $api->getResult()->getResultData()['curtimestamp'];
-		$this->assertLessThanOrEqual( 1, abs( strtotime( $timestamp ) - time() ) );
+		$this->assertSame( '2019-01-02T03:04:05Z', $timestamp );
 	}
 
 	public function testAddRequestedFieldsResponseLangInfo() {
@@ -242,11 +247,12 @@ class ApiMainTest extends ApiTestCase {
 		$mock->method( 'needsToken' )->willReturn( true );
 
 		$api = new ApiMain( new FauxRequest( [ 'action' => 'testmodule' ] ) );
-		$api->getModuleManager()->addModule( 'testmodule', 'action', get_class( $mock ),
-			function () use ( $mock ) {
+		$api->getModuleManager()->addModule( 'testmodule', 'action', [
+			'class' => get_class( $mock ),
+			'factory' => function () use ( $mock ) {
 				return $mock;
 			}
-		);
+		] );
 		$api->execute();
 	}
 
@@ -260,11 +266,12 @@ class ApiMainTest extends ApiTestCase {
 		$mock->method( 'mustBePosted' )->willReturn( false );
 
 		$api = new ApiMain( new FauxRequest( [ 'action' => 'testmodule' ] ) );
-		$api->getModuleManager()->addModule( 'testmodule', 'action', get_class( $mock ),
-			function () use ( $mock ) {
+		$api->getModuleManager()->addModule( 'testmodule', 'action', [
+			'class' => get_class( $mock ),
+			'factory' => function () use ( $mock ) {
 				return $mock;
 			}
-		);
+		] );
 		$api->execute();
 	}
 
@@ -309,11 +316,12 @@ class ApiMainTest extends ApiTestCase {
 		$req->setRequestURL( "http://localhost" );
 
 		$api = new ApiMain( $req );
-		$api->getModuleManager()->addModule( 'testmodule', 'action', get_class( $mock ),
-			function () use ( $mock ) {
+		$api->getModuleManager()->addModule( 'testmodule', 'action', [
+			'class' => get_class( $mock ),
+			'factory' => function () use ( $mock ) {
 				return $mock;
 			}
-		);
+		] );
 
 		$wrapper = TestingAccessWrapper::newFromObject( $api );
 		$wrapper->mInternalMode = false;
@@ -400,7 +408,7 @@ class ApiMainTest extends ApiTestCase {
 		} else {
 			$user = new User();
 		}
-		$user->mRights = $rights;
+		$this->overrideUserPermissions( $user, $rights );
 		try {
 			$this->doApiRequest( [
 				'action' => 'query',
@@ -435,6 +443,35 @@ class ApiMainTest extends ApiTestCase {
 	}
 
 	/**
+	 * Test that 'assert' is processed before module errors
+	 */
+	public function testAssertBeforeModule() {
+		// Sanity check that the query without assert throws too-many-titles
+		try {
+			$this->doApiRequest( [
+				'action' => 'query',
+				'titles' => implode( '|', range( 1, ApiBase::LIMIT_SML1 + 1 ) ),
+			], null, null, new User );
+			$this->fail( 'Expected exception not thrown' );
+		} catch ( ApiUsageException $e ) {
+			$this->assertTrue( self::apiExceptionHasCode( $e, 'too-many-titles' ), 'sanity check' );
+		}
+
+		// Now test that the assert happens first
+		try {
+			$this->doApiRequest( [
+				'action' => 'query',
+				'titles' => implode( '|', range( 1, ApiBase::LIMIT_SML1 + 1 ) ),
+				'assert' => 'user',
+			], null, null, new User );
+			$this->fail( 'Expected exception not thrown' );
+		} catch ( ApiUsageException $e ) {
+			$this->assertTrue( self::apiExceptionHasCode( $e, 'assertuserfailed' ),
+				"Error '{$e->getMessage()}' matched expected 'assertuserfailed'" );
+		}
+	}
+
+	/**
 	 * Test if all classes in the main module manager exists
 	 */
 	public function testClassNamesInModuleManager() {
@@ -460,7 +497,7 @@ class ApiMainTest extends ApiTestCase {
 	 * @param int $status Expected response status
 	 * @param array $options Array of options:
 	 *   post => true Request is a POST
-	 *   cdn => true CDN is enabled ($wgUseSquid)
+	 *   cdn => true CDN is enabled ($wgUseCdn)
 	 */
 	public function testCheckConditionalRequestHeaders(
 		$headers, $conditions, $status, $options = []
@@ -478,7 +515,7 @@ class ApiMainTest extends ApiTestCase {
 		$priv->mInternalMode = false;
 
 		if ( !empty( $options['cdn'] ) ) {
-			$this->setMwGlobals( 'wgUseSquid', true );
+			$this->setMwGlobals( 'wgUseCdn', true );
 		}
 
 		// Can't do this in TestSetup.php because Setup.php will override it
@@ -491,7 +528,7 @@ class ApiMainTest extends ApiTestCase {
 		$module->expects( $this->any() )
 			->method( 'getConditionalRequestData' )
 			->will( $this->returnCallback( function ( $condition ) use ( $conditions ) {
-				return isset( $conditions[$condition] ) ? $conditions[$condition] : null;
+				return $conditions[$condition] ?? null;
 			} ) );
 
 		$ret = $priv->checkConditionalRequestHeaders( $module );
@@ -501,7 +538,7 @@ class ApiMainTest extends ApiTestCase {
 	}
 
 	public static function provideCheckConditionalRequestHeaders() {
-		global $wgSquidMaxage;
+		global $wgCdnMaxAge;
 		$now = time();
 
 		return [
@@ -584,15 +621,15 @@ class ApiMainTest extends ApiTestCase {
 				[ [ 'If-Modified-Since' => 'a potato' ],
 					[ 'last-modified' => wfTimestamp( TS_MW, $now - 1 ) ], 200 ],
 
-			// Anything before $wgSquidMaxage seconds ago should be considered
+			// Anything before $wgCdnMaxAge seconds ago should be considered
 			// expired.
 			'If-Modified-Since with CDN post-expiry' =>
-				[ [ 'If-Modified-Since' => wfTimestamp( TS_RFC2822, $now - $wgSquidMaxage * 2 ) ],
-					[ 'last-modified' => wfTimestamp( TS_MW, $now - $wgSquidMaxage * 3 ) ],
+				[ [ 'If-Modified-Since' => wfTimestamp( TS_RFC2822, $now - $wgCdnMaxAge * 2 ) ],
+					[ 'last-modified' => wfTimestamp( TS_MW, $now - $wgCdnMaxAge * 3 ) ],
 					200, [ 'cdn' => true ] ],
 			'If-Modified-Since with CDN pre-expiry' =>
-				[ [ 'If-Modified-Since' => wfTimestamp( TS_RFC2822, $now - $wgSquidMaxage / 2 ) ],
-					[ 'last-modified' => wfTimestamp( TS_MW, $now - $wgSquidMaxage * 3 ) ],
+				[ [ 'If-Modified-Since' => wfTimestamp( TS_RFC2822, $now - $wgCdnMaxAge / 2 ) ],
+					[ 'last-modified' => wfTimestamp( TS_MW, $now - $wgCdnMaxAge * 3 ) ],
 					304, [ 'cdn' => true ] ],
 		];
 	}
@@ -622,7 +659,7 @@ class ApiMainTest extends ApiTestCase {
 		$module->expects( $this->any() )
 			->method( 'getConditionalRequestData' )
 			->will( $this->returnCallback( function ( $condition ) use ( $conditions ) {
-				return isset( $conditions[$condition] ) ? $conditions[$condition] : null;
+				return $conditions[$condition] ?? null;
 			} ) );
 		$priv->mModule = $module;
 
@@ -630,7 +667,7 @@ class ApiMainTest extends ApiTestCase {
 
 		foreach ( [ 'Last-Modified', 'ETag' ] as $header ) {
 			$this->assertEquals(
-				isset( $headers[$header] ) ? $headers[$header] : null,
+				$headers[$header] ?? null,
 				$response->getHeader( $header ),
 				$header
 			);
@@ -938,8 +975,7 @@ class ApiMainTest extends ApiTestCase {
 		$context->setLanguage( 'en' );
 		$context->setConfig( new MultiConfig( [
 			new HashConfig( [
-				'ShowHostnames' => true, 'ShowSQLErrors' => false,
-				'ShowExceptionDetails' => true, 'ShowDBErrorBacktrace' => true,
+				'ShowHostnames' => true, 'ShowExceptionDetails' => true,
 			] ),
 			$context->getConfig()
 		] ) );
@@ -982,9 +1018,14 @@ class ApiMainTest extends ApiTestCase {
 			MWExceptionHandler::getRedactedTraceAsString( $dbex )
 		)->inLanguage( 'en' )->useDatabase( false )->text();
 
-		Wikimedia\suppressWarnings();
-		$usageEx = new UsageException( 'Usage exception!', 'ue', 0, [ 'foo' => 'bar' ] );
-		Wikimedia\restoreWarnings();
+		// The specific exception doesn't matter, as long as it's namespaced.
+		$nsex = new MediaWiki\ShellDisabledError();
+		$nstrace = wfMessage( 'api-exception-trace',
+			get_class( $nsex ),
+			$nsex->getFile(),
+			$nsex->getLine(),
+			MWExceptionHandler::getRedactedTraceAsString( $nsex )
+		)->inLanguage( 'en' )->useDatabase( false )->text();
 
 		$apiEx1 = new ApiUsageException( null,
 			StatusValue::newFatal( new ApiRawMessage( 'An error', 'sv-error1' ) ) );
@@ -992,6 +1033,13 @@ class ApiMainTest extends ApiTestCase {
 		$apiEx1->getStatusValue()->warning( new ApiRawMessage( 'A warning', 'sv-warn1' ) );
 		$apiEx1->getStatusValue()->warning( new ApiRawMessage( 'Another warning', 'sv-warn2' ) );
 		$apiEx1->getStatusValue()->fatal( new ApiRawMessage( 'Another error', 'sv-error2' ) );
+
+		$badMsg = $this->getMockBuilder( ApiRawMessage::class )
+			 ->setConstructorArgs( [ 'An error', 'ignored' ] )
+			 ->setMethods( [ 'getApiCode' ] )
+			 ->getMock();
+		$badMsg->method( 'getApiCode' )->willReturn( "bad\nvalue" );
+		$apiEx2 = new ApiUsageException( null, StatusValue::newFatal( $badMsg ) );
 
 		return [
 			[
@@ -1006,6 +1054,9 @@ class ApiMainTest extends ApiTestCase {
 						[
 							'code' => 'internal_api_error_InvalidArgumentException',
 							'text' => "[$reqId] Exception caught: Random exception",
+							'data' => [
+								'errorclass' => InvalidArgumentException::class,
+							],
 						]
 					],
 					'trace' => $trace,
@@ -1023,7 +1074,11 @@ class ApiMainTest extends ApiTestCase {
 						[ 'code' => 'existing-error', 'text' => 'existing error', 'module' => 'main' ],
 						[
 							'code' => 'internal_api_error_DBQueryError',
-							'text' => "[$reqId] Database query error.",
+							'text' => "[$reqId] Exception caught: A database query error has occurred. " .
+								"This may indicate a bug in the software.",
+							'data' => [
+								'errorclass' => DBQueryError::class,
+							],
 						]
 					],
 					'trace' => $dbtrace,
@@ -1031,19 +1086,23 @@ class ApiMainTest extends ApiTestCase {
 				]
 			],
 			[
-				$usageEx,
-				[ 'existing-error', 'ue' ],
+				$nsex,
+				[ 'existing-error', 'internal_api_error_MediaWiki\ShellDisabledError' ],
 				[
 					'warnings' => [
 						[ 'code' => 'existing-warning', 'text' => 'existing warning', 'module' => 'main' ],
 					],
 					'errors' => [
 						[ 'code' => 'existing-error', 'text' => 'existing error', 'module' => 'main' ],
-						[ 'code' => 'ue', 'text' => "Usage exception!", 'data' => [ 'foo' => 'bar' ] ]
+						[
+							'code' => 'internal_api_error_MediaWiki\ShellDisabledError',
+							'text' => "[$reqId] Exception caught: " . $nsex->getMessage(),
+							'data' => [
+								'errorclass' => MediaWiki\ShellDisabledError::class,
+							],
+						]
 					],
-					'docref' => "See $doclink for API usage. Subscribe to the mediawiki-api-announce mailing " .
-						"list at &lt;https://lists.wikimedia.org/mailman/listinfo/mediawiki-api-announce&gt; " .
-						"for notice of API deprecations and breaking changes.",
+					'trace' => $nstrace,
 					'servedby' => wfHostname(),
 				]
 			],
@@ -1067,6 +1126,40 @@ class ApiMainTest extends ApiTestCase {
 					'servedby' => wfHostname(),
 				]
 			],
+			[
+				$apiEx2,
+				[ 'existing-error', '<invalid-code>' ],
+				[
+					'warnings' => [
+						[ 'code' => 'existing-warning', 'text' => 'existing warning', 'module' => 'main' ],
+					],
+					'errors' => [
+						[ 'code' => 'existing-error', 'text' => 'existing error', 'module' => 'main' ],
+						[ 'code' => "bad\nvalue", 'text' => 'An error' ],
+					],
+					'docref' => "See $doclink for API usage. Subscribe to the mediawiki-api-announce mailing " .
+						"list at &lt;https://lists.wikimedia.org/mailman/listinfo/mediawiki-api-announce&gt; " .
+						"for notice of API deprecations and breaking changes.",
+					'servedby' => wfHostname(),
+				]
+			]
 		];
+	}
+
+	public function testPrinterParameterValidationError() {
+		$api = $this->getNonInternalApiMain( [
+			'action' => 'query', 'meta' => 'siteinfo', 'format' => 'json', 'formatversion' => 'bogus',
+		] );
+
+		ob_start();
+		$api->execute();
+		$txt = ob_get_clean();
+
+		// Test that the actual output is valid JSON, not just the format of the ApiResult.
+		$data = FormatJson::decode( $txt, true );
+		$this->assertInternalType( 'array', $data );
+		$this->assertArrayHasKey( 'error', $data );
+		$this->assertArrayHasKey( 'code', $data['error'] );
+		$this->assertSame( 'unknown_formatversion', $data['error']['code'] );
 	}
 }

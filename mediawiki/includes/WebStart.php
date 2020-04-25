@@ -25,21 +25,10 @@
  * @file
  */
 
-if ( ini_get( 'mbstring.func_overload' ) ) {
-	die( 'MediaWiki does not support installations where mbstring.func_overload is non-zero.' );
-}
-
 # T17461: Make IE8 turn off content sniffing. Everybody else should ignore this
 # We're adding it here so that it's *always* set, even for alternate entry
 # points and when $wgOut gets disabled or overridden.
 header( 'X-Content-Type-Options: nosniff' );
-
-/**
- * @var float Request start time as fractional seconds since epoch
- * @deprecated since 1.25; use $_SERVER['REQUEST_TIME_FLOAT'] or
- *   WebRequest::getElapsedTime() instead.
- */
-$wgRequestTime = $_SERVER['REQUEST_TIME_FLOAT'];
 
 # Valid web server entry point, enable includes.
 # Please don't move this line to includes/Defines.php. This line essentially
@@ -61,6 +50,7 @@ if ( !defined( 'MW_CONFIG_CALLBACK' ) ) {
 		define( 'MW_CONFIG_FILE', "$IP/LocalSettings.php" );
 	}
 	if ( !is_readable( MW_CONFIG_FILE ) ) {
+
 		function wfWebStartNoLocalSettings() {
 			# LocalSettings.php is the per-site customization file. If it does not exist
 			# the wiki installer needs to be launched or the generated file uploaded to
@@ -69,12 +59,14 @@ if ( !defined( 'MW_CONFIG_CALLBACK' ) ) {
 			require_once "$IP/includes/NoLocalSettings.php";
 			die();
 		}
+
 		define( 'MW_CONFIG_CALLBACK', 'wfWebStartNoLocalSettings' );
 	}
 }
 
 // Custom setup for WebStart entry point
 if ( !defined( 'MW_SETUP_CALLBACK' ) ) {
+
 	function wfWebStartSetup() {
 		// Initialise output buffering
 		// Check for previously set up buffers, to avoid a mix of gzip and non-gzip output.
@@ -82,6 +74,7 @@ if ( !defined( 'MW_SETUP_CALLBACK' ) ) {
 			ob_start( 'MediaWiki\\OutputHandler::handle' );
 		}
 	}
+
 	define( 'MW_SETUP_CALLBACK', 'wfWebStartSetup' );
 }
 
@@ -98,17 +91,20 @@ if ( !defined( 'MW_API' ) &&
 	header( 'Cache-Control: no-cache' );
 	header( 'Content-Type: text/html; charset=utf-8' );
 	HttpStatus::header( 400 );
-	$error = wfMessage( 'nonwrite-api-promise-error' )->escaped();
-	$content = <<<EOT
+	$errorHtml = wfMessage( 'nonwrite-api-promise-error' )
+		->useDatabase( false )
+		->inContentLanguage()
+		->escaped();
+	$content = <<<HTML
 <!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8" /></head>
 <body>
-$error
+$errorHtml
 </body>
 </html>
 
-EOT;
+HTML;
 	header( 'Content-Length: ' . strlen( $content ) );
 	echo $content;
 	die();

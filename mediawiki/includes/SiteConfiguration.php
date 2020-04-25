@@ -180,7 +180,7 @@ class SiteConfiguration {
 	 * Retrieves a configuration setting for a given wiki.
 	 * @param string $settingName ID of the setting name to retrieve
 	 * @param string $wiki Wiki ID of the wiki in question.
-	 * @param string $suffix The suffix of the wiki in question.
+	 * @param string|null $suffix The suffix of the wiki in question.
 	 * @param array $params List of parameters. $.'key' is replaced by $value in all returned data.
 	 * @param array $wikiTags The tags assigned to the wiki.
 	 * @return mixed The value of the setting requested.
@@ -294,7 +294,7 @@ class SiteConfiguration {
 	/**
 	 * Gets all settings for a wiki
 	 * @param string $wiki Wiki ID of the wiki in question.
-	 * @param string $suffix The suffix of the wiki in question.
+	 * @param string|null $suffix The suffix of the wiki in question.
 	 * @param array $params List of parameters. $.'key' is replaced by $value in all returned data.
 	 * @param array $wikiTags The tags assigned to the wiki.
 	 * @return array Array of settings requested.
@@ -325,7 +325,7 @@ class SiteConfiguration {
 	 * Retrieves a configuration setting for a given wiki, forced to a boolean.
 	 * @param string $setting ID of the setting name to retrieve
 	 * @param string $wiki Wiki ID of the wiki in question.
-	 * @param string $suffix The suffix of the wiki in question.
+	 * @param string|null $suffix The suffix of the wiki in question.
 	 * @param array $wikiTags The tags assigned to the wiki.
 	 * @return bool The value of the setting requested.
 	 */
@@ -364,7 +364,7 @@ class SiteConfiguration {
 	 * Retrieves the value of a given setting, and places it in its corresponding global variable.
 	 * @param string $setting ID of the setting name to retrieve
 	 * @param string $wiki Wiki ID of the wiki in question.
-	 * @param string $suffix The suffix of the wiki in question.
+	 * @param string|null $suffix The suffix of the wiki in question.
 	 * @param array $params List of parameters. $.'key' is replaced by $value in all returned data.
 	 * @param array $wikiTags The tags assigned to the wiki.
 	 */
@@ -399,7 +399,7 @@ class SiteConfiguration {
 	/**
 	 * Retrieves the values of all settings, and places them in their corresponding global variables.
 	 * @param string $wiki Wiki ID of the wiki in question.
-	 * @param string $suffix The suffix of the wiki in question.
+	 * @param string|null $suffix The suffix of the wiki in question.
 	 * @param array $params List of parameters. $.'key' is replaced by $value in all returned data.
 	 * @param array $wikiTags The tags assigned to the wiki.
 	 */
@@ -432,7 +432,7 @@ class SiteConfiguration {
 			return $default;
 		}
 
-		$ret = call_user_func_array( $this->siteParamsCallback, [ $this, $wiki ] );
+		$ret = ( $this->siteParamsCallback )( $this, $wiki );
 		# Validate the returned value
 		if ( !is_array( $ret ) ) {
 			return $default;
@@ -483,13 +483,13 @@ class SiteConfiguration {
 
 	/**
 	 * Work out the site and language name from a database name
-	 * @param string $db
+	 * @param string $wiki Wiki ID
 	 *
 	 * @return array
 	 */
-	public function siteFromDB( $db ) {
+	public function siteFromDB( $wiki ) {
 		// Allow override
-		$def = $this->getWikiParams( $db );
+		$def = $this->getWikiParams( $wiki );
 		if ( !is_null( $def['suffix'] ) && !is_null( $def['lang'] ) ) {
 			return [ $def['suffix'], $def['lang'] ];
 		}
@@ -499,15 +499,16 @@ class SiteConfiguration {
 		foreach ( $this->suffixes as $altSite => $suffix ) {
 			if ( $suffix === '' ) {
 				$site = '';
-				$lang = $db;
+				$lang = $wiki;
 				break;
-			} elseif ( substr( $db, -strlen( $suffix ) ) == $suffix ) {
+			} elseif ( substr( $wiki, -strlen( $suffix ) ) == $suffix ) {
 				$site = is_numeric( $altSite ) ? $suffix : $altSite;
-				$lang = substr( $db, 0, strlen( $db ) - strlen( $suffix ) );
+				$lang = substr( $wiki, 0, strlen( $wiki ) - strlen( $suffix ) );
 				break;
 			}
 		}
 		$lang = str_replace( '_', '-', $lang );
+
 		return [ $site, $lang ];
 	}
 
@@ -527,7 +528,7 @@ class SiteConfiguration {
 
 		$multi = is_array( $settings );
 		$settings = (array)$settings;
-		if ( $wiki === wfWikiID() ) { // $wiki is this wiki
+		if ( WikiMap::isCurrentWikiId( $wiki ) ) { // $wiki is this wiki
 			$res = [];
 			foreach ( $settings as $name ) {
 				if ( !preg_match( '/^wg[A-Z]/', $name ) ) {
@@ -561,7 +562,7 @@ class SiteConfiguration {
 				->execute();
 
 			$data = trim( $result->getStdout() );
-			if ( $result->getExitCode() != 0 || !strlen( $data ) ) {
+			if ( $result->getExitCode() || $data === '' ) {
 				throw new MWException( "Failed to run getConfiguration.php: {$result->getStdout()}" );
 			}
 			$res = unserialize( $data );
@@ -581,14 +582,14 @@ class SiteConfiguration {
 	 * which is not fun
 	 *
 	 * @param array $array1
+	 * @param array ...$arrays
 	 *
 	 * @return array
 	 */
-	static function arrayMerge( $array1/* ... */ ) {
+	static function arrayMerge( array $array1, ...$arrays ) {
 		$out = $array1;
-		$argsCount = func_num_args();
-		for ( $i = 1; $i < $argsCount; $i++ ) {
-			foreach ( func_get_arg( $i ) as $key => $value ) {
+		foreach ( $arrays as $array ) {
+			foreach ( $array as $key => $value ) {
 				if ( isset( $out[$key] ) && is_array( $out[$key] ) && is_array( $value ) ) {
 					$out[$key] = self::arrayMerge( $out[$key], $value );
 				} elseif ( !isset( $out[$key] ) || !$out[$key] && !is_numeric( $key ) ) {
@@ -606,7 +607,7 @@ class SiteConfiguration {
 
 	public function loadFullData() {
 		if ( $this->fullLoadCallback && !$this->fullLoadDone ) {
-			call_user_func( $this->fullLoadCallback, $this );
+			( $this->fullLoadCallback )( $this );
 			$this->fullLoadDone = true;
 		}
 	}

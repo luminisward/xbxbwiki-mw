@@ -26,7 +26,7 @@
  *
  * @ingroup SpecialPage
  */
-class UncategorizedCategoriesPage extends UncategorizedPagesPage {
+class SpecialUncategorizedCategories extends SpecialUncategorizedPages {
 	/**
 	 * Holds a list of categories, which shouldn't be listed on this special page,
 	 * even if it is uncategorized.
@@ -47,6 +47,7 @@ class UncategorizedCategoriesPage extends UncategorizedPagesPage {
 	 */
 	private function getExceptionList() {
 		if ( $this->exceptionList === null ) {
+			$this->exceptionList = [];
 			$exList = $this->msg( 'uncategorized-categories-exceptionlist' )
 				->inContentLanguage()->plain();
 			$proposedTitles = explode( "\n", $exList );

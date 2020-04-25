@@ -29,6 +29,7 @@ class SpecialListFiles extends IncludableSpecialPage {
 	public function execute( $par ) {
 		$this->setHeaders();
 		$this->outputHeader();
+		$this->addHelpLink( 'Help:Managing_files' );
 
 		if ( $this->including() ) {
 			$userName = $par;
@@ -39,16 +40,24 @@ class SpecialListFiles extends IncludableSpecialPage {
 			$search = $this->getRequest()->getText( 'ilsearch', '' );
 			$showAll = $this->getRequest()->getBool( 'ilshowall', false );
 		}
+		if ( $userName ) {
+			$pageTitle = $this->msg( 'listfiles_subpage', $userName );
+		} else {
+			$pageTitle = $this->msg( 'listfiles' );
+		}
 
 		$pager = new ImageListPager(
 			$this->getContext(),
 			$userName,
 			$search,
 			$this->including(),
-			$showAll
+			$showAll,
+			$this->getLinkRenderer()
 		);
 
 		$out = $this->getOutput();
+		$out->setPageTitle( $pageTitle );
+		$out->addModuleStyles( 'mediawiki.special' );
 		if ( $this->including() ) {
 			$out->addParserOutputContent( $pager->getBodyOutput() );
 		} else {

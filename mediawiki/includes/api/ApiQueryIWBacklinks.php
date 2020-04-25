@@ -42,7 +42,7 @@ class ApiQueryIWBacklinks extends ApiQueryGeneratorBase {
 	}
 
 	/**
-	 * @param ApiPageSet $resultPageSet
+	 * @param ApiPageSet|null $resultPageSet
 	 * @return void
 	 */
 	public function run( $resultPageSet = null ) {
@@ -67,7 +67,7 @@ class ApiQueryIWBacklinks extends ApiQueryGeneratorBase {
 			$op = $params['dir'] == 'descending' ? '<' : '>';
 			$prefix = $db->addQuotes( $cont[0] );
 			$title = $db->addQuotes( $cont[1] );
-			$from = intval( $cont[2] );
+			$from = (int)$cont[2];
 			$this->addWhere(
 				"iwl_prefix $op $prefix OR " .
 				"(iwl_prefix = $prefix AND " .

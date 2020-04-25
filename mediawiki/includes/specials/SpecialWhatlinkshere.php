@@ -21,6 +21,7 @@
  * @todo Use some variant of Pager or something; the pagination here is lousy.
  */
 
+use MediaWiki\MediaWikiServices;
 use Wikimedia\Rdbms\IDatabase;
 
 /**
@@ -117,6 +118,7 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 		$fetchlinks = ( !$hidelinks || !$hideredirs );
 
 		// Build query conds in concert for all three tables...
+		$conds = [];
 		$conds['pagelinks'] = [
 			'pl_namespace' => $target->getNamespace(),
 			'pl_title' => $target->getDBkey(),
@@ -170,7 +172,7 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 				// Force JOIN order per T106682 to avoid large filesorts
 				[ 'ORDER BY' => $fromCol, 'LIMIT' => 2 * $queryLimit, 'STRAIGHT_JOIN' ],
 				[
-					'page' => [ 'INNER JOIN', "$fromCol = page_id" ],
+					'page' => [ 'JOIN', "$fromCol = page_id" ],
 					'redirect' => [ 'LEFT JOIN', $on ]
 				]
 			);
@@ -180,7 +182,7 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 				[],
 				__CLASS__ . '::showIndirectLinks',
 				[ 'ORDER BY' => 'page_id', 'LIMIT' => $queryLimit ],
-				[ 'page' => [ 'INNER JOIN', "$fromCol = page_id" ] ]
+				[ 'page' => [ 'JOIN', "$fromCol = page_id" ] ]
 			);
 		};
 
@@ -200,18 +202,27 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 			&& ( $hidetrans || !$tlRes->numRows() )
 			&& ( $hideimages || !$ilRes->numRows() )
 		) {
-			if ( 0 == $level ) {
-				if ( !$this->including() ) {
-					$out->addHTML( $this->whatlinkshereForm() );
+			if ( $level == 0 && !$this->including() ) {
+				$out->addHTML( $this->whatlinkshereForm() );
 
-					// Show filters only if there are links
-					if ( $hidelinks || $hidetrans || $hideredirs || $hideimages ) {
-						$out->addHTML( $this->getFilterPanel() );
-					}
-					$errMsg = is_int( $namespace ) ? 'nolinkshere-ns' : 'nolinkshere';
-					$out->addWikiMsg( $errMsg, $this->target->getPrefixedText() );
-					$out->setStatusCode( 404 );
+				// Show filters only if there are links
+				if ( $hidelinks || $hidetrans || $hideredirs || $hideimages ) {
+					$out->addHTML( $this->getFilterPanel() );
 				}
+				$msgKey = is_int( $namespace ) ? 'nolinkshere-ns' : 'nolinkshere';
+				$link = $this->getLinkRenderer()->makeLink(
+					$this->target,
+					null,
+					[],
+					$this->target->isRedirect() ? [ 'redirect' => 'no' ] : []
+				);
+
+				$errMsg = $this->msg( $msgKey )
+					->params( $this->target->getPrefixedText() )
+					->rawParams( $link )
+					->parseAsBlock();
+				$out->addHTML( $errMsg );
+				$out->setStatusCode( 404 );
 			}
 
 			return;
@@ -220,6 +231,7 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 		// Read the rows into an array and remove duplicates
 		// templatelinks comes second so that the templatelinks row overwrites the
 		// pagelinks row, so we get (inclusion) rather than nothing
+		$rows = [];
 		if ( $fetchlinks ) {
 			foreach ( $plRes as $row ) {
 				$row->is_template = 0;
@@ -269,15 +281,25 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 		}
 		$lb->execute();
 
-		if ( $level == 0 ) {
-			if ( !$this->including() ) {
-				$out->addHTML( $this->whatlinkshereForm() );
-				$out->addHTML( $this->getFilterPanel() );
-				$out->addWikiMsg( 'linkshere', $this->target->getPrefixedText() );
+		if ( $level == 0 && !$this->including() ) {
+			$out->addHTML( $this->whatlinkshereForm() );
+			$out->addHTML( $this->getFilterPanel() );
 
-				$prevnext = $this->getPrevNext( $prevId, $nextId );
-				$out->addHTML( $prevnext );
-			}
+			$link = $this->getLinkRenderer()->makeLink(
+				$this->target,
+				null,
+				[],
+				$this->target->isRedirect() ? [ 'redirect' => 'no' ] : []
+			);
+
+			$msg = $this->msg( 'linkshere' )
+				->params( $this->target->getPrefixedText() )
+				->rawParams( $link )
+				->parseAsBlock();
+			$out->addHTML( $msg );
+
+			$prevnext = $this->getPrevNext( $prevId, $nextId );
+			$out->addHTML( $prevnext );
 		}
 		$out->addHTML( $this->listStart( $level ) );
 		foreach ( $rows as $row ) {
@@ -298,10 +320,8 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 
 		$out->addHTML( $this->listEnd() );
 
-		if ( $level == 0 ) {
-			if ( !$this->including() ) {
-				$out->addHTML( $prevnext );
-			}
+		if ( $level == 0 && !$this->including() ) {
+			$out->addHTML( $prevnext );
 		}
 	}
 
@@ -397,7 +417,9 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 		// if the page is editable, add an edit link
 		if (
 			// check user permissions
-			$this->getUser()->isAllowed( 'edit' ) &&
+			MediaWikiServices::getInstance()
+				->getPermissionManager()
+				->userHasRight( $this->getUser(), 'edit' ) &&
 			// check, if the content model is editable through action=edit
 			ContentHandler::getForTitle( $target )->supportsDirectEditing()
 		) {
@@ -438,11 +460,11 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 		$changed = $this->opts->getChangedValues();
 		unset( $changed['target'] ); // Already in the request title
 
-		if ( 0 != $prevId ) {
+		if ( $prevId != 0 ) {
 			$overrides = [ 'from' => $this->opts->getValue( 'back' ) ];
 			$prev = $this->makeSelfLink( $prev, array_merge( $changed, $overrides ) );
 		}
-		if ( 0 != $nextId ) {
+		if ( $nextId != 0 ) {
 			$overrides = [ 'from' => $nextId, 'back' => $prevId ];
 			$next = $this->makeSelfLink( $next, array_merge( $changed, $overrides ) );
 		}
@@ -492,7 +514,8 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 			[
 				'selected' => $namespace,
 				'all' => '',
-				'label' => $this->msg( 'namespace' )->text()
+				'label' => $this->msg( 'namespace' )->text(),
+				'in-user-lang' => true,
 			], [
 				'name' => 'namespace',
 				'id' => 'namespace',
@@ -500,7 +523,7 @@ class SpecialWhatLinksHere extends IncludableSpecialPage {
 			]
 		);
 
-		$f .= '&#160;' .
+		$f .= "\u{00A0}" .
 			Xml::checkLabel(
 				$this->msg( 'invert' )->text(),
 				'invert',

@@ -149,16 +149,8 @@ class ApiQueryRecentChangesIntegrationTest extends ApiTestCase {
 		return $response[0]['query']['recentchanges'];
 	}
 
-	private function getTitleFormatter() {
-		return new MediaWikiTitleCodec(
-			Language::factory( 'en' ),
-			MediaWikiServices::getInstance()->getGenderCache()
-		);
-	}
-
 	private function getPrefixedText( LinkTarget $target ) {
-		$formatter = $this->getTitleFormatter();
-		return $formatter->getPrefixedText( $target );
+		return MediaWikiServices::getInstance()->getTitleFormatter()->getPrefixedText( $target );
 	}
 
 	public function testListRecentChanges_returnsRCInfo() {
@@ -860,6 +852,65 @@ class ApiQueryRecentChangesIntegrationTest extends ApiTestCase {
 				],
 			],
 			$this->getItemsFromApiResponse( $resultDirNewer )
+		);
+	}
+
+	public function testTitleParams() {
+		$page1 = new TitleValue( 0, 'ApiQueryRecentChangesIntegrationTestPage' );
+		$page2 = new TitleValue( 1, 'ApiQueryRecentChangesIntegrationTestPage2' );
+		$page3 = new TitleValue( 0, 'ApiQueryRecentChangesIntegrationTestPage3' );
+		$this->doPageEdits(
+			$this->getLoggedInTestUser(),
+			[
+				[
+					'target' => $page1,
+					'summary' => 'Create the page',
+				],
+				[
+					'target' => $page2,
+					'summary' => 'Create the page',
+				],
+				[
+					'target' => $page3,
+					'summary' => 'Create the page',
+				],
+			]
+		);
+
+		$result = $this->doListRecentChangesRequest(
+			[
+				'rctitle' => 'ApiQueryRecentChangesIntegrationTestPage',
+				'rcprop' => 'title'
+			]
+		);
+
+		$result2 = $this->doListRecentChangesRequest(
+			[
+				'rctitle' => 'Talk:ApiQueryRecentChangesIntegrationTestPage2',
+				'rcprop' => 'title'
+			]
+		);
+
+		$this->assertEquals(
+			[
+				[
+					'type' => 'new',
+					'ns' => $page1->getNamespace(),
+					'title' => $this->getPrefixedText( $page1 )
+				],
+			],
+			$this->getItemsFromApiResponse( $result )
+		);
+
+		$this->assertEquals(
+			[
+				[
+					'type' => 'new',
+					'ns' => $page2->getNamespace(),
+					'title' => $this->getPrefixedText( $page2 )
+				],
+			],
+			$this->getItemsFromApiResponse( $result2 )
 		);
 	}
 

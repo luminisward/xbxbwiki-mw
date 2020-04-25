@@ -21,6 +21,8 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * A special page that expands submitted templates, parser functions,
  * and variables, allowing easier debugging of these.
@@ -53,8 +55,6 @@ class SpecialExpandTemplates extends SpecialPage {
 	 * @param string|null $subpage
 	 */
 	function execute( $subpage ) {
-		global $wgParser;
-
 		$this->setHeaders();
 		$this->addHelpLink( 'Help:ExpandTemplates' );
 
@@ -77,18 +77,21 @@ class SpecialExpandTemplates extends SpecialPage {
 			$options->setTidy( true );
 			$options->setMaxIncludeSize( self::MAX_INCLUDE_SIZE );
 
+			$parser = MediaWikiServices::getInstance()->getParser();
 			if ( $this->generateXML ) {
-				$wgParser->startExternalParse( $title, $options, Parser::OT_PREPROCESS );
-				$dom = $wgParser->preprocessToDom( $input );
+				$parser->startExternalParse( $title, $options, Parser::OT_PREPROCESS );
+				$dom = $parser->preprocessToDom( $input );
 
 				if ( method_exists( $dom, 'saveXML' ) ) {
+					// @phan-suppress-next-line PhanUndeclaredMethod
 					$xml = $dom->saveXML();
 				} else {
+					// @phan-suppress-next-line PhanUndeclaredMethod
 					$xml = $dom->__toString();
 				}
 			}
 
-			$output = $wgParser->preprocess( $input, $title, $options );
+			$output = $parser->preprocess( $input, $title, $options );
 		} else {
 			$this->removeComments = $request->getBool( 'wpRemoveComments', true );
 			$this->removeNowiki = $request->getBool( 'wpRemoveNowiki', false );
@@ -115,8 +118,10 @@ class SpecialExpandTemplates extends SpecialPage {
 			}
 
 			$config = $this->getConfig();
-			if ( $config->get( 'UseTidy' ) && $options->getTidy() ) {
+			if ( MWTidy::isEnabled() && $options->getTidy() ) {
 				$tmp = MWTidy::tidy( $tmp );
+			} else {
+				wfDeprecated( 'disabling tidy', '1.33' );
 			}
 
 			$out->addHTML( $tmp );
@@ -152,7 +157,6 @@ class SpecialExpandTemplates extends SpecialPage {
 	 *
 	 * @param string $title Value for context title field
 	 * @param string $input Value for input textbox
-	 * @return string
 	 */
 	private function makeForm( $title, $input ) {
 		$fields = [
@@ -245,11 +249,9 @@ class SpecialExpandTemplates extends SpecialPage {
 	 * @return ParserOutput
 	 */
 	private function generateHtml( Title $title, $text ) {
-		global $wgParser;
-
 		$popts = ParserOptions::newFromContext( $this->getContext() );
 		$popts->setTargetLanguage( $title->getPageLanguage() );
-		return $wgParser->parse( $text, $title, $popts );
+		return MediaWikiServices::getInstance()->getParser()->parse( $text, $title, $popts );
 	}
 
 	/**
@@ -271,7 +273,10 @@ class SpecialExpandTemplates extends SpecialPage {
 			// allowed and a valid edit token is not provided (T73111). However, MediaWiki
 			// does not currently provide logged-out users with CSRF protection; in that case,
 			// do not show the preview unless anonymous editing is allowed.
-			if ( $user->isAnon() && !$user->isAllowed( 'edit' ) ) {
+			if ( $user->isAnon() && !MediaWikiServices::getInstance()
+					->getPermissionManager()
+					->userHasRight( $user, 'edit' )
+			) {
 				$error = [ 'expand_templates_preview_fail_html_anon' ];
 			} elseif ( !$user->matchEditToken( $request->getVal( 'wpEditToken' ), '', $request ) ) {
 				$error = [ 'expand_templates_preview_fail_html' ];
@@ -280,7 +285,7 @@ class SpecialExpandTemplates extends SpecialPage {
 			}
 
 			if ( $error ) {
-				$out->wrapWikiMsg( "<div class='previewnote'>\n$1\n</div>", $error );
+				$out->wrapWikiMsg( "<div class='previewnote errorbox'>\n$1\n</div>", $error );
 				return;
 			}
 		}

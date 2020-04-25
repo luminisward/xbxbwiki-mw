@@ -35,6 +35,7 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 	protected static $savedQueriesPreferenceName = 'rcfilters-saved-queries';
 	protected static $daysPreferenceName = 'rcdays'; // Use general RecentChanges preference
 	protected static $limitPreferenceName = 'rcfilters-limit'; // Use RCFilters-specific preference
+	protected static $collapsedPreferenceName = 'rcfilters-rc-collapsed';
 
 	private $watchlistFilterGroupDefinition;
 
@@ -135,9 +136,7 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 	}
 
 	/**
-	 * Main execution point
-	 *
-	 * @param string $subpage
+	 * @param string|null $subpage
 	 */
 	public function execute( $subpage ) {
 		// Backwards-compatibility: redirect to new feed URLs
@@ -160,7 +159,7 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 		}
 
 		$this->addHelpLink(
-			'//meta.wikimedia.org/wiki/Special:MyLanguage/Help:Recent_changes',
+			'https://meta.wikimedia.org/wiki/Special:MyLanguage/Help:Recent_changes',
 			true
 		);
 		parent::execute( $subpage );
@@ -186,7 +185,9 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 		if (
 			!$this->including() &&
 			$this->getUser()->isLoggedIn() &&
-			$this->getUser()->isAllowed( 'viewmywatchlist' )
+			MediaWikiServices::getInstance()
+				->getPermissionManager()
+				->userHasRight( $this->getUser(), 'viewmywatchlist' )
 		) {
 			$this->registerFiltersFromDefinitions( [ $this->watchlistFilterGroupDefinition ] );
 			$watchlistGroup = $this->getFilterGroup( 'watchlist' );
@@ -198,44 +199,40 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 		$user = $this->getUser();
 
 		$significance = $this->getFilterGroup( 'significance' );
+		/** @var ChangesListBooleanFilter $hideMinor */
 		$hideMinor = $significance->getFilter( 'hideminor' );
+		'@phan-var ChangesListBooleanFilter $hideMinor';
 		$hideMinor->setDefault( $user->getBoolOption( 'hideminor' ) );
 
 		$automated = $this->getFilterGroup( 'automated' );
+		/** @var ChangesListBooleanFilter $hideBots */
 		$hideBots = $automated->getFilter( 'hidebots' );
+		'@phan-var ChangesListBooleanFilter $hideBots';
 		$hideBots->setDefault( true );
 
+		/** @var ChangesListStringOptionsFilterGroup|null $reviewStatus */
 		$reviewStatus = $this->getFilterGroup( 'reviewStatus' );
+		'@phan-var ChangesListStringOptionsFilterGroup|null $reviewStatus';
 		if ( $reviewStatus !== null ) {
 			// Conditional on feature being available and rights
 			if ( $user->getBoolOption( 'hidepatrolled' ) ) {
 				$reviewStatus->setDefault( 'unpatrolled' );
 				$legacyReviewStatus = $this->getFilterGroup( 'legacyReviewStatus' );
+				/** @var ChangesListBooleanFilter $legacyHidePatrolled */
 				$legacyHidePatrolled = $legacyReviewStatus->getFilter( 'hidepatrolled' );
+				'@phan-var ChangesListBooleanFilter $legacyHidePatrolled';
 				$legacyHidePatrolled->setDefault( true );
 			}
 		}
 
 		$changeType = $this->getFilterGroup( 'changeType' );
+		/** @var ChangesListBooleanFilter $hideCategorization */
 		$hideCategorization = $changeType->getFilter( 'hidecategorization' );
+		'@phan-var ChangesListBooleanFilter $hideCategorization';
 		if ( $hideCategorization !== null ) {
 			// Conditional on feature being available
 			$hideCategorization->setDefault( $user->getBoolOption( 'hidecategorization' ) );
 		}
-	}
-
-	/**
-	 * Get all custom filters
-	 *
-	 * @return array Map of filter URL param names to properties (msg/default)
-	 */
-	protected function getCustomFilters() {
-		if ( $this->customFilters === null ) {
-			$this->customFilters = parent::getCustomFilters();
-			Hooks::run( 'SpecialRecentChangesFilters', [ $this, &$this->customFilters ], '1.23' );
-		}
-
-		return $this->customFilters;
 	}
 
 	/**
@@ -284,7 +281,10 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 		$join_conds = array_merge( $join_conds, $rcQuery['joins'] );
 
 		// JOIN on watchlist for users
-		if ( $user->isLoggedIn() && $user->isAllowed( 'viewmywatchlist' ) ) {
+		if ( $user->isLoggedIn() && MediaWikiServices::getInstance()
+				->getPermissionManager()
+				->userHasRight( $user, 'viewmywatchlist' )
+		) {
 			$tables[] = 'watchlist';
 			$fields[] = 'wl_user';
 			$fields[] = 'wl_notificationtimestamp';
@@ -350,17 +350,6 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 		);
 
 		return $rows;
-	}
-
-	protected function runMainQueryHook( &$tables, &$fields, &$conds,
-		&$query_options, &$join_conds, $opts
-	) {
-		return parent::runMainQueryHook( $tables, $fields, $conds, $query_options, $join_conds, $opts )
-			&& Hooks::run(
-				'SpecialRecentChangesQuery',
-				[ &$conds, &$tables, &$join_conds, $opts, &$query_options, &$fields ],
-				'1.23'
-			);
 	}
 
 	protected function getDB() {
@@ -541,15 +530,16 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 		if ( $this->isStructuredFilterUiEnabled() ) {
 			$rcfilterContainer = Html::element(
 				'div',
-				[ 'class' => 'rcfilters-container' ]
+				// TODO: Remove deprecated rcfilters-container class
+				[ 'class' => 'rcfilters-container mw-rcfilters-container' ]
 			);
 
 			$loadingContainer = Html::rawElement(
 				'div',
-				[ 'class' => 'rcfilters-spinner' ],
+				[ 'class' => 'mw-rcfilters-spinner' ],
 				Html::element(
 					'div',
-					[ 'class' => 'rcfilters-spinner-bounce' ]
+					[ 'class' => 'mw-rcfilters-spinner-bounce' ]
 				)
 			);
 
@@ -557,7 +547,8 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 			$this->getOutput()->addHTML(
 				Html::rawElement(
 					'div',
-					[ 'class' => 'rcfilters-head' ],
+					// TODO: Remove deprecated rcfilters-head class
+					[ 'class' => 'rcfilters-head mw-rcfilters-head' ],
 					$rcfilterContainer . $rcoptions
 				)
 			);
@@ -577,10 +568,9 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 	 * @param FormOptions $opts Unused
 	 */
 	function setTopText( FormOptions $opts ) {
-		global $wgContLang;
-
 		$message = $this->msg( 'recentchangestext' )->inContentLanguage();
 		if ( !$message->isDisabled() ) {
+			$contLang = MediaWikiServices::getInstance()->getContentLanguage();
 			// Parse the message in this weird ugly way to preserve the ability to include interlanguage
 			// links in it (T172461). In the future when T66969 is resolved, perhaps we can just use
 			// $message->parse() instead. This code is copied from Message::parseText().
@@ -591,7 +581,7 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 				// Message class sets the interface flag to false when parsing in a language different than
 				// user language, and this is wiki content language
 				/*interface*/false,
-				$wgContLang
+				$contLang
 			);
 			$content = $parserOutput->getText( [
 				'enableSectionEditLinks' => false,
@@ -600,8 +590,8 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 			$this->getOutput()->addParserOutputMetadata( $parserOutput );
 
 			$langAttributes = [
-				'lang' => $wgContLang->getHtmlCode(),
-				'dir' => $wgContLang->getDir(),
+				'lang' => $contLang->getHtmlCode(),
+				'dir' => $contLang->getDir(),
 			];
 
 			$topLinksAttributes = [ 'class' => 'mw-recentchanges-toplinks' ];
@@ -699,24 +689,29 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 	 * Creates the choose namespace selection
 	 *
 	 * @param FormOptions $opts
-	 * @return string
+	 * @return string[]
 	 */
 	protected function namespaceFilterForm( FormOptions $opts ) {
 		$nsSelect = Html::namespaceSelector(
-			[ 'selected' => $opts['namespace'], 'all' => '' ],
+			[ 'selected' => $opts['namespace'], 'all' => '', 'in-user-lang' => true ],
 			[ 'name' => 'namespace', 'id' => 'namespace' ]
 		);
 		$nsLabel = Xml::label( $this->msg( 'namespace' )->text(), 'namespace' );
-		$invert = Xml::checkLabel(
+		$attribs = [ 'class' => [ 'mw-input-with-label' ] ];
+		// Hide the checkboxes when the namespace filter is set to 'all'.
+		if ( $opts['namespace'] === '' ) {
+			$attribs['class'][] = 'mw-input-hidden';
+		}
+		$invert = Html::rawElement( 'span', $attribs, Xml::checkLabel(
 			$this->msg( 'invert' )->text(), 'invert', 'nsinvert',
 			$opts['invert'],
 			[ 'title' => $this->msg( 'tooltip-invert' )->text() ]
-		);
-		$associated = Xml::checkLabel(
+		) );
+		$associated = Html::rawElement( 'span', $attribs, Xml::checkLabel(
 			$this->msg( 'namespace_association' )->text(), 'associated', 'nsassociated',
 			$opts['associated'],
 			[ 'title' => $this->msg( 'tooltip-namespace_association' )->text() ]
-		);
+		) );
 
 		return [ $nsLabel, "$nsSelect $invert $associated" ];
 	}
@@ -734,7 +729,7 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 
 		$categories = array_map( 'trim', explode( '|', $opts['categories'] ) );
 
-		if ( !count( $categories ) ) {
+		if ( $categories === [] ) {
 			return;
 		}
 
@@ -769,7 +764,7 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 		}
 
 		# Shortcut?
-		if ( !count( $articles ) || !count( $cats ) ) {
+		if ( $articles === [] || $cats === [] ) {
 			return;
 		}
 
@@ -825,7 +820,11 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 		$note = '';
 		$msg = $this->msg( 'rclegend' );
 		if ( !$msg->isDisabled() ) {
-			$note .= '<div class="mw-rclegend">' . $msg->parse() . "</div>\n";
+			$note .= Html::rawElement(
+				'div',
+				[ 'class' => 'mw-rclegend' ],
+				$msg->parse()
+			);
 		}
 
 		$lang = $this->getLanguage();
@@ -863,7 +862,7 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 		sort( $linkLimits );
 		$linkLimits = array_unique( $linkLimits );
 
-		$linkDays = $config->get( 'RCLinkDays' );
+		$linkDays = $this->getLinkDays();
 		$linkDays[] = $options['days'];
 		sort( $linkDays );
 		$linkDays = array_unique( $linkDays );
@@ -923,14 +922,21 @@ class SpecialRecentChanges extends ChangesListSpecialPage {
 		$datenow = $lang->userDate( $timestamp, $user );
 		$pipedLinks = '<span class="rcshowhide">' . $lang->pipeList( $links ) . '</span>';
 
-		$rclinks = '<span class="rclinks">' . $this->msg( 'rclinks' )->rawParams( $cl, $dl, '' )
-			->parse() . '</span>';
+		$rclinks = Html::rawElement(
+			'span',
+			[ 'class' => 'rclinks' ],
+			$this->msg( 'rclinks' )->rawParams( $cl, $dl, '' )->parse()
+		);
 
-		$rclistfrom = '<span class="rclistfrom">' . $this->makeOptionsLink(
-			$this->msg( 'rclistfrom' )->rawParams( $now, $timenow, $datenow )->parse(),
-			[ 'from' => $timestamp ],
-			$nondefaults
-		) . '</span>';
+		$rclistfrom = Html::rawElement(
+			'span',
+			[ 'class' => 'rclistfrom' ],
+			$this->makeOptionsLink(
+				$this->msg( 'rclistfrom' )->plaintextParams( $now, $timenow, $datenow )->parse(),
+				[ 'from' => $timestamp, 'fromFormatted' => $now ],
+				$nondefaults
+			)
+		);
 
 		return "{$note}$rclinks<br />$pipedLinks<br />$rclistfrom";
 	}

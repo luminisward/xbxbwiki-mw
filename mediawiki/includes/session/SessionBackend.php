@@ -27,6 +27,7 @@ use CachedBagOStuff;
 use Psr\Log\LoggerInterface;
 use User;
 use WebRequest;
+use Wikimedia\AtEase\AtEase;
 
 /**
  * This is the actual workhorse for Session.
@@ -50,15 +51,25 @@ final class SessionBackend {
 	/** @var SessionId */
 	private $id;
 
+	/** @var bool */
 	private $persist = false;
+
+	/** @var bool */
 	private $remember = false;
+
+	/** @var bool */
 	private $forceHTTPS = false;
 
 	/** @var array|null */
 	private $data = null;
 
+	/** @var bool */
 	private $forcePersist = false;
+
+	/** @var bool */
 	private $metaDirty = false;
+
+	/** @var bool */
 	private $dataDirty = false;
 
 	/** @var string Used to detect subarray modifications */
@@ -76,6 +87,7 @@ final class SessionBackend {
 	/** @var User */
 	private $user;
 
+	/** @var int */
 	private $curIndex = 0;
 
 	/** @var WebRequest[] Session requests */
@@ -87,13 +99,21 @@ final class SessionBackend {
 	/** @var array|null provider-specified metadata */
 	private $providerMetadata = null;
 
+	/** @var int */
 	private $expires = 0;
+
+	/** @var int */
 	private $loggedOut = 0;
+
+	/** @var int */
 	private $delaySave = 0;
 
+	/** @var bool */
 	private $usePhpSessionHandling = true;
+	/** @var bool */
 	private $checkPHPSessionRecursionGuard = false;
 
+	/** @var bool */
 	private $shutdown = false;
 
 	/**
@@ -243,7 +263,7 @@ final class SessionBackend {
 
 			if ( $restart ) {
 				session_id( (string)$this->id );
-				\Wikimedia\quietCall( 'session_start' );
+				AtEase::quietCall( 'session_start' );
 			}
 
 			$this->autosave();
@@ -251,6 +271,8 @@ final class SessionBackend {
 			// Delete the data for the old session ID now
 			$this->store->delete( $this->store->makeKey( 'MWSession', $oldId ) );
 		}
+
+		return $this->id;
 	}
 
 	/**
@@ -457,7 +479,7 @@ final class SessionBackend {
 
 	/**
 	 * Set the "logged out" timestamp
-	 * @param int $ts
+	 * @param int|null $ts
 	 */
 	public function setLoggedOutTimestamp( $ts = null ) {
 		$ts = (int)$ts;
@@ -612,7 +634,7 @@ final class SessionBackend {
 	 * Save the session
 	 *
 	 * Update both the backend data and the associated WebRequest(s) to
-	 * reflect the state of the the SessionBackend. This might include
+	 * reflect the state of the SessionBackend. This might include
 	 * persisting or unpersisting the session.
 	 *
 	 * @param bool $closing Whether the session is being closed
@@ -764,7 +786,7 @@ final class SessionBackend {
 						'session' => $this->id,
 				] );
 				session_id( (string)$this->id );
-				\Wikimedia\quietCall( 'session_start' );
+				AtEase::quietCall( 'session_start' );
 			}
 		}
 	}

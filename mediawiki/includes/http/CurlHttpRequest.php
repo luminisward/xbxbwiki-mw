@@ -28,6 +28,18 @@ class CurlHttpRequest extends MWHttpRequest {
 	protected $headerText = "";
 
 	/**
+	 * @throws RuntimeException
+	 */
+	public function __construct() {
+		if ( !function_exists( 'curl_init' ) ) {
+			throw new RuntimeException(
+				__METHOD__ . ': curl (https://www.php.net/curl) is not installed' );
+		}
+
+		parent::__construct( ...func_get_args() );
+	}
+
+	/**
 	 * @param resource $fh
 	 * @param string $content
 	 * @return int
@@ -52,12 +64,7 @@ class CurlHttpRequest extends MWHttpRequest {
 
 		$this->curlOptions[CURLOPT_PROXY] = $this->proxy;
 		$this->curlOptions[CURLOPT_TIMEOUT] = $this->timeout;
-
-		// Only supported in curl >= 7.16.2
-		if ( defined( 'CURLOPT_CONNECTTIMEOUT_MS' ) ) {
-			$this->curlOptions[CURLOPT_CONNECTTIMEOUT_MS] = $this->connectTimeout * 1000;
-		}
-
+		$this->curlOptions[CURLOPT_CONNECTTIMEOUT_MS] = $this->connectTimeout * 1000;
 		$this->curlOptions[CURLOPT_HTTP_VERSION] = CURL_HTTP_VERSION_1_0;
 		$this->curlOptions[CURLOPT_WRITEFUNCTION] = $this->callback;
 		$this->curlOptions[CURLOPT_HEADERFUNCTION] = [ $this, "readHeader" ];
@@ -98,6 +105,7 @@ class CurlHttpRequest extends MWHttpRequest {
 		$curlHandle = curl_init( $this->url );
 
 		if ( !curl_setopt_array( $curlHandle, $this->curlOptions ) ) {
+			$this->status->fatal( 'http-internal-error' );
 			throw new InvalidArgumentException( "Error setting curl options." );
 		}
 
@@ -147,13 +155,6 @@ class CurlHttpRequest extends MWHttpRequest {
 		if ( $curlVersionInfo['version_number'] < 0x071304 ) {
 			$this->logger->debug( "Cannot follow redirects with libcurl < 7.19.4 due to CVE-2009-0037\n" );
 			return false;
-		}
-
-		if ( version_compare( PHP_VERSION, '5.6.0', '<' ) ) {
-			if ( strval( ini_get( 'open_basedir' ) ) !== '' ) {
-				$this->logger->debug( "Cannot follow redirects when open_basedir is set\n" );
-				return false;
-			}
 		}
 
 		return true;

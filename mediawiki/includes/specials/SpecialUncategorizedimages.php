@@ -28,9 +28,10 @@
  * @ingroup SpecialPage
  * @todo FIXME: Use an instance of UncategorizedPagesPage or something
  */
-class UncategorizedImagesPage extends ImageQueryPage {
+class SpecialUncategorizedImages extends ImageQueryPage {
 	function __construct( $name = 'Uncategorizedimages' ) {
 		parent::__construct( $name );
+		$this->addHelpLink( 'Help:Categories' );
 	}
 
 	function sortDescending() {

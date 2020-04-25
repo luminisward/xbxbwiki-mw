@@ -27,13 +27,13 @@
 
 class XmlTypeCheck {
 	/**
-	 * Will be set to true or false to indicate whether the file is
+	 * @var bool|null Will be set to true or false to indicate whether the file is
 	 * well-formed XML. Note that this doesn't check schema validity.
 	 */
 	public $wellFormed = null;
 
 	/**
-	 * Will be set to true if the optional element filter returned
+	 * @var bool Will be set to true if the optional element filter returned
 	 * a match at some point.
 	 */
 	public $filterMatch = false;
@@ -46,33 +46,36 @@ class XmlTypeCheck {
 	public $filterMatchType = false;
 
 	/**
-	 * Name of the document's root element, including any namespace
+	 * @var string Name of the document's root element, including any namespace
 	 * as an expanded URL.
 	 */
 	public $rootElement = '';
 
 	/**
-	 * A stack of strings containing the data of each xml element as it's processed. Append
-	 * data to the top string of the stack, then pop off the string and process it when the
+	 * @var string[] A stack of strings containing the data of each xml element as it's processed.
+	 * Append data to the top string of the stack, then pop off the string and process it when the
 	 * element is closed.
 	 */
 	protected $elementData = [];
 
 	/**
-	 * A stack of element names and attributes, as we process them.
+	 * @var array A stack of element names and attributes, as we process them.
 	 */
 	protected $elementDataContext = [];
 
 	/**
-	 * Current depth of the data stack.
+	 * @var int Current depth of the data stack.
 	 */
 	protected $stackDepth = 0;
 
+	/** @var callable|null */
+	protected $filterCallback;
+
 	/**
-	 * Additional parsing options
+	 * @var array Additional parsing options
 	 */
 	private $parserOptions = [
-		'processing_instruction_handler' => '',
+		'processing_instruction_handler' => null,
 		'external_dtd_handler' => '',
 		'dtd_handler' => '',
 		'require_safe_dtd' => true
@@ -91,7 +94,7 @@ class XmlTypeCheck {
 	 *  result stored in $this->filterMatchType.
 	 *
 	 * @param string $input a filename or string containing the XML element
-	 * @param callable $filterCallback (optional)
+	 * @param callable|null $filterCallback (optional)
 	 *        Function to call to do additional custom validity checks from the
 	 *        SAX element handler event. This gives you access to the element
 	 *        namespace, name, attributes, and text contents.
@@ -114,7 +117,7 @@ class XmlTypeCheck {
 	 * Alternative constructor: from filename
 	 *
 	 * @param string $fname the filename of an XML document
-	 * @param callable $filterCallback (optional)
+	 * @param callable|null $filterCallback (optional)
 	 *        Function to call to do additional custom validity checks from the
 	 *        SAX element handler event. This gives you access to the element
 	 *        namespace, name, and attributes, but not to text contents.
@@ -129,7 +132,7 @@ class XmlTypeCheck {
 	 * Alternative constructor: from string
 	 *
 	 * @param string $string a string containing an XML element
-	 * @param callable $filterCallback (optional)
+	 * @param callable|null $filterCallback (optional)
 	 *        Function to call to do additional custom validity checks from the
 	 *        SAX element handler event. This gives you access to the element
 	 *        namespace, name, and attributes, but not to text contents.
@@ -150,7 +153,8 @@ class XmlTypeCheck {
 	}
 
 	/**
-	 * @param string $fname the filename
+	 * @param string $xml
+	 * @param bool $isFile
 	 */
 	private function validateFromInput( $xml, $isFile ) {
 		$reader = new XMLReader();
@@ -308,7 +312,7 @@ class XmlTypeCheck {
 
 	/**
 	 * @param string $name
-	 * @param string $attribs
+	 * @param array $attribs
 	 */
 	private function elementOpen( $name, $attribs ) {
 		$this->elementDataContext[] = [ $name, $attribs ];
@@ -364,6 +368,7 @@ class XmlTypeCheck {
 			$this->filterMatchType = $callbackReturn;
 		}
 	}
+
 	/**
 	 * Handle coming across a <!DOCTYPE declaration.
 	 *
@@ -394,8 +399,8 @@ class XmlTypeCheck {
 			$callbackReturn = call_user_func(
 				$externalCallback,
 				$parsedDTD['type'],
-				isset( $parsedDTD['publicid'] ) ? $parsedDTD['publicid'] : null,
-				isset( $parsedDTD['systemid'] ) ? $parsedDTD['systemid'] : null
+				$parsedDTD['publicid'] ?? null,
+				$parsedDTD['systemid'] ?? null
 			);
 		}
 		if ( $callbackReturn ) {
@@ -405,10 +410,10 @@ class XmlTypeCheck {
 			$callbackReturn = false;
 		}
 
-		if ( $checkIfSafe && isset( $parsedDTD['internal'] ) ) {
-			if ( !$this->checkDTDIsSafe( $parsedDTD['internal'] ) ) {
-				$this->wellFormed = false;
-			}
+		if ( $checkIfSafe && isset( $parsedDTD['internal'] ) &&
+			!$this->checkDTDIsSafe( $parsedDTD['internal'] )
+		) {
+			$this->wellFormed = false;
 		}
 	}
 
@@ -418,10 +423,10 @@ class XmlTypeCheck {
 	 * We whitelist an extremely restricted subset of DTD features.
 	 *
 	 * Safe is defined as:
-	 *  * Only contains entity defintions (e.g. No <!ATLIST )
+	 *  * Only contains entity definitions (e.g. No <!ATLIST )
 	 *  * Entity definitions are not "system" entities
 	 *  * Entity definitions are not "parameter" (i.e. %) entities
-	 *  * Entity definitions do not reference other entites except &amp;
+	 *  * Entity definitions do not reference other entities except &amp;
 	 *    and quotes. Entity aliases (where the entity contains only
 	 *    another entity are allowed)
 	 *  * Entity references aren't overly long (>255 bytes).

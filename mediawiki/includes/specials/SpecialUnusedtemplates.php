@@ -29,7 +29,7 @@
  *
  * @ingroup SpecialPage
  */
-class UnusedtemplatesPage extends QueryPage {
+class SpecialUnusedTemplates extends QueryPage {
 	function __construct( $name = 'Unusedtemplates' ) {
 		parent::__construct( $name );
 	}

@@ -21,13 +21,15 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * Special page for listing the articles with the fewest revisions.
  *
  * @ingroup SpecialPage
  * @author Martin Drashkov
  */
-class FewestrevisionsPage extends QueryPage {
+class SpecialFewestRevisions extends QueryPage {
 	function __construct( $name = 'Fewestrevisions' ) {
 		parent::__construct( $name );
 	}
@@ -47,13 +49,15 @@ class FewestrevisionsPage extends QueryPage {
 				'namespace' => 'page_namespace',
 				'title' => 'page_title',
 				'value' => 'COUNT(*)',
-				'redirect' => 'page_is_redirect'
 			],
 			'conds' => [
-				'page_namespace' => MWNamespace::getContentNamespaces(),
-				'page_id = rev_page' ],
+				'page_namespace' => MediaWikiServices::getInstance()->getNamespaceInfo()->
+					getContentNamespaces(),
+				'page_id = rev_page',
+				'page_is_redirect = 0',
+			],
 			'options' => [
-				'GROUP BY' => [ 'page_namespace', 'page_title', 'page_is_redirect' ]
+				'GROUP BY' => [ 'page_namespace', 'page_title' ]
 			]
 		];
 	}
@@ -68,8 +72,6 @@ class FewestrevisionsPage extends QueryPage {
 	 * @return string
 	 */
 	function formatResult( $skin, $result ) {
-		global $wgContLang;
-
 		$nt = Title::makeTitleSafe( $result->namespace, $result->title );
 		if ( !$nt ) {
 			return Html::element(
@@ -83,8 +85,9 @@ class FewestrevisionsPage extends QueryPage {
 			);
 		}
 		$linkRenderer = $this->getLinkRenderer();
-		$text = $wgContLang->convert( $nt->getPrefixedText() );
-		$plink = $linkRenderer->makeLink( $nt, $text );
+		$text = MediaWikiServices::getInstance()->getContentLanguage()->
+			convert( htmlspecialchars( $nt->getPrefixedText() ) );
+		$plink = $linkRenderer->makeLink( $nt, new HtmlArmor( $text ) );
 
 		$nl = $this->msg( 'nrevisions' )->numParams( $result->value )->text();
 		$redirect = isset( $result->redirect ) && $result->redirect ?

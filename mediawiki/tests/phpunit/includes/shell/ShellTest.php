@@ -10,8 +10,6 @@ use Wikimedia\TestingAccessWrapper;
  */
 class ShellTest extends MediaWikiTestCase {
 
-	use MediaWikiCoversValidator;
-
 	public function testIsDisabled() {
 		$this->assertInternalType( 'bool', Shell::isDisabled() ); // sanity
 	}
@@ -45,11 +43,12 @@ class ShellTest extends MediaWikiTestCase {
 	 * @param string[] $options
 	 * @param callable|null $hook
 	 */
-	public function testMakeScriptCommand( $expected,
-										   $script,
-										   $parameters,
-										   $options = [],
-										   $hook = null
+	public function testMakeScriptCommand(
+		$expected,
+		$script,
+		$parameters,
+		$options = [],
+		$hook = null
 	) {
 		// Running tests under Vagrant involves MWMultiVersion that uses the below hook
 		$this->setMwGlobals( 'wgHooks', [] );
@@ -66,7 +65,7 @@ class ShellTest extends MediaWikiTestCase {
 
 		$wrapper = TestingAccessWrapper::newFromObject( $command );
 		$this->assertEquals( $expected, $wrapper->command );
-		$this->assertEquals( 0, $wrapper->restrictions & Shell::NO_LOCALSETTINGS );
+		$this->assertSame( 0, $wrapper->restrictions & Shell::NO_LOCALSETTINGS );
 	}
 
 	public function provideMakeScriptCommand() {

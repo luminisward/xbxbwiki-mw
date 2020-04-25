@@ -18,7 +18,7 @@ class HTMLFormFieldWithButton extends HTMLFormField {
 	/** @var string $mButtonType Value for the button in this field */
 	protected $mButtonValue;
 
-	/** @var string $mButtonType Value for the button in this field */
+	/** @var string[] $mButtonType Value for the button in this field */
 	protected $mButtonFlags = [ 'progressive' ];
 
 	public function __construct( $info ) {
@@ -59,6 +59,7 @@ class HTMLFormFieldWithButton extends HTMLFormField {
 			'type' => $this->mButtonType,
 			'label' => $this->mButtonValue,
 			'flags' => $this->mButtonFlags,
+			'id' => $this->mButtonId ?: null,
 		] + OOUI\Element::configFromHtmlAttributes(
 			$this->getAttributes( [ 'disabled', 'tabindex' ] )
 		) );
@@ -66,10 +67,10 @@ class HTMLFormFieldWithButton extends HTMLFormField {
 
 	/**
 	 * Combines the passed element with a button.
-	 * @param String $element Element to combine the button with.
-	 * @return String
+	 * @param string $element Element to combine the button with.
+	 * @return string
 	 */
 	public function getElement( $element ) {
-		return $element . '&#160;' . $this->getInputHTML( '' );
+		return $element . "\u{00A0}" . $this->getInputHTML( '' );
 	}
 }

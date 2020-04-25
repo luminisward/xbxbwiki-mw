@@ -21,17 +21,21 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * A special page looking for page without any category.
  *
  * @ingroup SpecialPage
  * @todo FIXME: Make $requestedNamespace selectable, unify all subclasses into one
  */
-class UncategorizedPagesPage extends PageQueryPage {
+class SpecialUncategorizedPages extends PageQueryPage {
+	/** @var int|false */
 	protected $requestedNamespace = false;
 
 	function __construct( $name = 'Uncategorizedpages' ) {
 		parent::__construct( $name );
+		$this->addHelpLink( 'Help:Categories' );
 	}
 
 	function sortDescending() {
@@ -59,7 +63,8 @@ class UncategorizedPagesPage extends PageQueryPage {
 				'cl_from IS NULL',
 				'page_namespace' => $this->requestedNamespace !== false
 						? $this->requestedNamespace
-						: MWNamespace::getContentNamespaces(),
+						: MediaWikiServices::getInstance()->getNamespaceInfo()->
+							getContentNamespaces(),
 				'page_is_redirect' => 0
 			],
 			'join_conds' => [
@@ -71,7 +76,10 @@ class UncategorizedPagesPage extends PageQueryPage {
 	function getOrderFields() {
 		// For some crazy reason ordering by a constant
 		// causes a filesort
-		if ( $this->requestedNamespace === false && count( MWNamespace::getContentNamespaces() ) > 1 ) {
+		if ( $this->requestedNamespace === false &&
+			count( MediaWikiServices::getInstance()->getNamespaceInfo()->
+				getContentNamespaces() ) > 1
+		) {
 			return [ 'page_namespace', 'page_title' ];
 		}
 

@@ -32,7 +32,7 @@ use Wikimedia\Rdbms\IDatabase;
  */
 class MergeHistory {
 
-	/** @const int Maximum number of revisions that can be merged at once */
+	/** Maximum number of revisions that can be merged at once */
 	const REVISION_LIMIT = 5000;
 
 	/** @var Title Page from which history will be merged */
@@ -167,7 +167,7 @@ class MergeHistory {
 		// Convert into a Status object
 		if ( $errors ) {
 			foreach ( $errors as $error ) {
-				call_user_func_array( [ $status, 'fatal' ], $error );
+				$status->fatal( ...$error );
 			}
 		}
 
@@ -178,7 +178,8 @@ class MergeHistory {
 		}
 
 		// Check mergehistory permission
-		if ( !$user->isAllowed( 'mergehistory' ) ) {
+		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
+		if ( !$permissionManager->userHasRight( $user, 'mergehistory' ) ) {
 			// User doesn't have the right to merge histories
 			$status->fatal( 'mergehistory-fail-permission' );
 		}
@@ -254,6 +255,8 @@ class MergeHistory {
 			return $permCheck;
 		}
 
+		$this->dbw->startAtomic( __METHOD__ );
+
 		$this->dbw->update(
 			'revision',
 			[ 'rev_page' => $this->dest->getArticleID() ],
@@ -264,17 +267,29 @@ class MergeHistory {
 		// Check if this did anything
 		$this->revisionsMerged = $this->dbw->affectedRows();
 		if ( $this->revisionsMerged < 1 ) {
+			$this->dbw->endAtomic( __METHOD__ );
 			$status->fatal( 'mergehistory-fail-no-change' );
+
 			return $status;
 		}
 
+		// Update denormalized revactor_page too
+		$this->dbw->update(
+			'revision_actor_temp',
+			[ 'revactor_page' => $this->dest->getArticleID() ],
+			[
+				'revactor_page' => $this->source->getArticleID(),
+				// Slightly hacky, but should work given the values assigned in this class
+				str_replace( 'rev_timestamp', 'revactor_timestamp', $this->timeWhere )
+			],
+			__METHOD__
+		);
+
 		// Make the source page a redirect if no revisions are left
-		$haveRevisions = $this->dbw->selectField(
+		$haveRevisions = $this->dbw->lockForUpdate(
 			'revision',
-			'rev_timestamp',
 			[ 'rev_page' => $this->source->getArticleID() ],
-			__METHOD__,
-			[ 'FOR UPDATE' ]
+			__METHOD__
 		);
 		if ( !$haveRevisions ) {
 			if ( $reason ) {
@@ -349,6 +364,8 @@ class MergeHistory {
 		$logEntry->publish( $logId );
 
 		Hooks::run( 'ArticleMergeComplete', [ $this->source, $this->dest ] );
+
+		$this->dbw->endAtomic( __METHOD__ );
 
 		return $status;
 	}

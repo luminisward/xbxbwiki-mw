@@ -22,12 +22,13 @@
  * @author Trevor Parscal
  */
 
-use MediaWiki\Logger\LoggerFactory;
 use MediaWiki\MediaWikiServices;
 
 // This endpoint is supposed to be independent of request cookies and other
 // details of the session. Enforce this constraint with respect to session use.
 define( 'MW_NO_SESSION', 1 );
+
+define( 'MW_ENTRY_POINT', 'load' );
 
 require __DIR__ . '/includes/WebStart.php';
 
@@ -40,17 +41,13 @@ if ( !$wgRequest->checkUrlExtension() ) {
 // writes when getting database connections for ResourceLoader. (T192611)
 MediaWikiServices::getInstance()->getDBLoadBalancerFactory()->disableChronologyProtection();
 
-// Set up ResourceLoader
-$resourceLoader = new ResourceLoader(
-	ConfigFactory::getDefaultInstance()->makeConfig( 'main' ),
-	LoggerFactory::getInstance( 'resourceloader' )
-);
+$resourceLoader = MediaWikiServices::getInstance()->getResourceLoader();
 $context = new ResourceLoaderContext( $resourceLoader, $wgRequest );
 
 // Respond to ResourceLoader request
 $resourceLoader->respond( $context );
 
-Profiler::instance()->setTemplated( true );
+Profiler::instance()->setAllowOutput();
 
 $mediawiki = new MediaWiki();
 $mediawiki->doPostOutputShutdown( 'fast' );

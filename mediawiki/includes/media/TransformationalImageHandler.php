@@ -26,6 +26,7 @@
  * @ingroup Media
  */
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Shell\Shell;
 
 /**
  * Handler for images that need to be transformed
@@ -41,7 +42,7 @@ abstract class TransformationalImageHandler extends ImageHandler {
 	 * 'physicalWidth' and 'physicalHeight' indicate the thumbnail dimensions.
 	 * @return bool
 	 */
-	function normaliseParams( $image, &$params ) {
+	public function normaliseParams( $image, &$params ) {
 		if ( !parent::normaliseParams( $image, $params ) ) {
 			return false;
 		}
@@ -127,7 +128,7 @@ abstract class TransformationalImageHandler extends ImageHandler {
 			'mimeType' => $image->getMimeType(),
 			'dstPath' => $dstPath,
 			'dstUrl' => $dstUrl,
-			'interlace' => isset( $params['interlace'] ) ? $params['interlace'] : false,
+			'interlace' => $params['interlace'] ?? false,
 		];
 
 		if ( isset( $params['quality'] ) && $params['quality'] === 'low' ) {
@@ -230,7 +231,7 @@ abstract class TransformationalImageHandler extends ImageHandler {
 		}
 
 		// $scaler will return a MediaTransformError on failure, or false on success.
-		// If the scaler is succesful, it will have created a thumbnail at the destination
+		// If the scaler is successful, it will have created a thumbnail at the destination
 		// path.
 		if ( is_array( $scaler ) && is_callable( $scaler ) ) {
 			// Allow subclasses to specify their own rendering methods.
@@ -517,7 +518,7 @@ abstract class TransformationalImageHandler extends ImageHandler {
 			function () use ( $method ) {
 				global $wgImageMagickConvertCommand;
 
-				$cmd = wfEscapeShellArg( $wgImageMagickConvertCommand ) . ' -version';
+				$cmd = Shell::escape( $wgImageMagickConvertCommand ) . ' -version';
 				wfDebug( $method . ": Running convert -version\n" );
 				$retval = '';
 				$return = wfShellExecWithStderr( $cmd, $retval );

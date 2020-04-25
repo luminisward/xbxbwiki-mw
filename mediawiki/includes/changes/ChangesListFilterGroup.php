@@ -32,6 +32,7 @@ use Wikimedia\Rdbms\IDatabase;
  * Represents a filter group (used on ChangesListSpecialPage and descendants)
  *
  * @since 1.29
+ * @method registerFilter($filter)
  */
 abstract class ChangesListFilterGroup {
 	/**
@@ -174,11 +175,7 @@ abstract class ChangesListFilterGroup {
 		}
 
 		$this->type = $groupDefinition['type'];
-		if ( isset( $groupDefinition['priority'] ) ) {
-			$this->priority = $groupDefinition['priority'];
-		} else {
-			$this->priority = self::DEFAULT_PRIORITY;
-		}
+		$this->priority = $groupDefinition['priority'] ?? self::DEFAULT_PRIORITY;
 
 		$this->isFullCoverage = $groupDefinition['isFullCoverage'];
 
@@ -322,7 +319,7 @@ abstract class ChangesListFilterGroup {
 	 * @return ChangesListFilter|null Specified filter, or null if it is not registered
 	 */
 	public function getFilter( $name ) {
-		return isset( $this->filters[$name] ) ? $this->filters[$name] : null;
+		return $this->filters[$name] ?? null;
 	}
 
 	/**
@@ -358,7 +355,7 @@ abstract class ChangesListFilterGroup {
 		}
 
 		usort( $this->filters, function ( $a, $b ) {
-			return $b->getPriority() - $a->getPriority();
+			return $b->getPriority() <=> $a->getPriority();
 		} );
 
 		foreach ( $this->filters as $filterName => $filter ) {
@@ -433,7 +430,7 @@ abstract class ChangesListFilterGroup {
 	 * @return bool
 	 */
 	public function anySelected( FormOptions $opts ) {
-		return !!count( array_filter(
+		return (bool)count( array_filter(
 			$this->getFilters(),
 			function ( ChangesListFilter $filter ) use ( $opts ) {
 				return $filter->isSelected( $opts );

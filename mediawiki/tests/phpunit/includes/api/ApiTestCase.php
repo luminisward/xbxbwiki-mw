@@ -26,7 +26,6 @@ abstract class ApiTestCase extends MediaWikiLangTestCase {
 		];
 
 		$this->setMwGlobals( [
-			'wgAuth' => new MediaWiki\Auth\AuthManagerAuthPlugin,
 			'wgRequest' => new FauxRequest( [] ),
 			'wgUser' => self::$users['sysop']->getUser(),
 		] );
@@ -39,43 +38,6 @@ abstract class ApiTestCase extends MediaWikiLangTestCase {
 		MediaWiki\Session\SessionManager::getGlobalSession()->clear();
 
 		parent::tearDown();
-	}
-
-	/**
-	 * Edits or creates a page/revision
-	 * @param string $pageName Page title
-	 * @param string $text Content of the page
-	 * @param string $summary Optional summary string for the revision
-	 * @param int $defaultNs Optional namespace id
-	 * @return array Array as returned by WikiPage::doEditContent()
-	 */
-	protected function editPage( $pageName, $text, $summary = '', $defaultNs = NS_MAIN ) {
-		$title = Title::newFromText( $pageName, $defaultNs );
-		$page = WikiPage::factory( $title );
-
-		return $page->doEditContent( ContentHandler::makeContent( $text, $title ), $summary );
-	}
-
-	/**
-	 * Revision-deletes a revision.
-	 *
-	 * @param Revision|int $rev Revision to delete
-	 * @param array $value Keys are Revision::DELETED_* flags.  Values are 1 to set the bit, 0 to
-	 *   clear, -1 to leave alone.  (All other values also clear the bit.)
-	 * @param string $comment Deletion comment
-	 */
-	protected function revisionDelete(
-		$rev, array $value = [ Revision::DELETED_TEXT => 1 ], $comment = ''
-	) {
-		if ( is_int( $rev ) ) {
-			$rev = Revision::newFromId( $rev );
-		}
-		RevisionDeleter::createList(
-			'revision', RequestContext::getMain(), $rev->getTitle(), [ $rev->getId() ]
-		)->setVisibility( [
-			'value' => $value,
-			'comment' => $comment,
-		] );
 	}
 
 	/**

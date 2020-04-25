@@ -24,6 +24,7 @@
  * @author Ævar Arnfjörð Bjarmason <avarab@gmail.com>
  */
 
+use MediaWiki\MediaWikiServices;
 use Wikimedia\Rdbms\IResultWrapper;
 use Wikimedia\Rdbms\IDatabase;
 
@@ -32,7 +33,7 @@ use Wikimedia\Rdbms\IDatabase;
  *
  * @ingroup SpecialPage
  */
-class MostcategoriesPage extends QueryPage {
+class SpecialMostCategories extends QueryPage {
 	function __construct( $name = 'Mostcategories' ) {
 		parent::__construct( $name );
 	}
@@ -53,7 +54,8 @@ class MostcategoriesPage extends QueryPage {
 				'title' => 'page_title',
 				'value' => 'COUNT(*)'
 			],
-			'conds' => [ 'page_namespace' => MWNamespace::getContentNamespaces() ],
+			'conds' => [ 'page_namespace' =>
+				MediaWikiServices::getInstance()->getNamespaceInfo()->getContentNamespaces() ],
 			'options' => [
 				'HAVING' => 'COUNT(*) > 1',
 				'GROUP BY' => [ 'page_namespace', 'page_title' ]

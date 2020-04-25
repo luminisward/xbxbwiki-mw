@@ -21,7 +21,7 @@ namespace Wikimedia\Rdbms;
 
 use InvalidArgumentException;
 use Wikimedia\ScopedCallback;
-use RuntimeException;
+use Exception;
 use stdClass;
 
 /**
@@ -32,7 +32,7 @@ use stdClass;
 /**
  * Basic database interface for live and lazy-loaded relation database handles
  *
- * @note: IDatabase and DBConnRef should be updated to reflect any changes
+ * @note IDatabase and DBConnRef should be updated to reflect any changes
  * @ingroup Database
  */
 interface IDatabase {
@@ -42,6 +42,8 @@ interface IDatabase {
 	const TRIGGER_COMMIT = 2;
 	/** @var int Callback triggered by ROLLBACK */
 	const TRIGGER_ROLLBACK = 3;
+	/** @var int Callback triggered by atomic section cancel (ROLLBACK TO SAVEPOINT) */
+	const TRIGGER_CANCEL = 4;
 
 	/** @var string Transaction is requested by regular caller outside of the DB layer */
 	const TRANSACTION_EXPLICIT = '';
@@ -58,7 +60,7 @@ interface IDatabase {
 	/** @var string Commit/rollback is from the connection manager for the IDatabase handle */
 	const FLUSHING_ALL_PEERS = 'flush';
 	/** @var string Commit/rollback is from the IDatabase handle internally */
-	const FLUSHING_INTERNAL = 'flush';
+	const FLUSHING_INTERNAL = 'flush-internal';
 
 	/** @var string Do not remember the prior flags */
 	const REMEMBER_NOTHING = '';
@@ -85,11 +87,11 @@ interface IDatabase {
 	/** @var int Combine list with OR clauses */
 	const LIST_OR = 4;
 
-	/** @var int Enable debug logging */
+	/** @var int Enable debug logging of all SQL queries */
 	const DBO_DEBUG = 1;
-	/** @var int Disable query buffering (only one result set can be iterated at a time) */
+	/** @var int Unused since 1.34 */
 	const DBO_NOBUFFER = 2;
-	/** @var int Ignore query errors (internal use only!) */
+	/** @var int Unused since 1.31 */
 	const DBO_IGNORE = 4;
 	/** @var int Automatically start a transaction before running a query if none is active */
 	const DBO_TRX = 8;
@@ -97,45 +99,44 @@ interface IDatabase {
 	const DBO_DEFAULT = 16;
 	/** @var int Use DB persistent connections if possible */
 	const DBO_PERSISTENT = 32;
-	/** @var int DBA session mode; mostly for Oracle */
+	/** @var int DBA session mode; was used by Oracle */
 	const DBO_SYSDBA = 64;
-	/** @var int Schema file mode; mostly for Oracle */
+	/** @var int Schema file mode; was used by Oracle */
 	const DBO_DDLMODE = 128;
 	/** @var int Enable SSL/TLS in connection protocol */
 	const DBO_SSL = 256;
 	/** @var int Enable compression in connection protocol */
 	const DBO_COMPRESS = 512;
 
+	/** @var int Idiom for "no special flags" */
+	const QUERY_NORMAL = 0;
+	/** @var int Ignore query errors and return false when they happen */
+	const QUERY_SILENCE_ERRORS = 1; // b/c for 1.32 query() argument; note that (int)true = 1
 	/**
-	 * A string describing the current software version, and possibly
-	 * other details in a user-friendly way. Will be listed on Special:Version, etc.
+	 * @var int Treat the TEMPORARY table from the given CREATE query as if it is
+	 *   permanent as far as write tracking is concerned. This is useful for testing.
+	 */
+	const QUERY_PSEUDO_PERMANENT = 2;
+	/** @var int Enforce that a query does not make effective writes */
+	const QUERY_REPLICA_ROLE = 4;
+	/** @var int Ignore the current presence of any DBO_TRX flag */
+	const QUERY_IGNORE_DBO_TRX = 8;
+	/** @var int Do not try to retry the query if the connection was lost */
+	const QUERY_NO_RETRY = 16;
+
+	/** @var bool Parameter to unionQueries() for UNION ALL */
+	const UNION_ALL = true;
+	/** @var bool Parameter to unionQueries() for UNION DISTINCT */
+	const UNION_DISTINCT = false;
+
+	/**
+	 * Get a human-readable string describing the current software version
+	 *
 	 * Use getServerVersion() to get machine-friendly information.
 	 *
 	 * @return string Version information from the database server
 	 */
 	public function getServerInfo();
-
-	/**
-	 * Turns buffering of SQL result sets on (true) or off (false). Default is "on".
-	 *
-	 * Unbuffered queries are very troublesome in MySQL:
-	 *
-	 *   - If another query is executed while the first query is being read
-	 *     out, the first query is killed. This means you can't call normal
-	 *     Database functions while you are reading an unbuffered query result
-	 *     from a normal Database connection.
-	 *
-	 *   - Unbuffered queries cause the MySQL server to use large amounts of
-	 *     memory and to hold broad locks which block other queries.
-	 *
-	 * If you want to limit client-side memory, it's almost always better to
-	 * split up queries into batches using a LIMIT clause than to switch off
-	 * buffering.
-	 *
-	 * @param null|bool $buffer
-	 * @return null|bool The previous value of the flag
-	 */
-	public function bufferResults( $buffer = null );
 
 	/**
 	 * Gets the current transaction level.
@@ -150,8 +151,10 @@ interface IDatabase {
 	/**
 	 * Get the UNIX timestamp of the time that the transaction was established
 	 *
-	 * This can be used to reason about the staleness of SELECT data
-	 * in REPEATABLE-READ transaction isolation level.
+	 * This can be used to reason about the staleness of SELECT data in REPEATABLE-READ
+	 * transaction isolation level. Callers can assume that if a view-snapshot isolation
+	 * is used, then the data read by SQL queries is *at least* up to date to that point
+	 * (possibly more up-to-date since the first SELECT defines the snapshot).
 	 *
 	 * @return float|null Returns null if there is not active transaction
 	 * @since 1.25
@@ -165,39 +168,44 @@ interface IDatabase {
 	public function explicitTrxActive();
 
 	/**
-	 * Get/set the table prefix.
-	 * @param string $prefix The table prefix to set, or omitted to leave it unchanged.
-	 * @return string The previous table prefix.
+	 * Assert that all explicit transactions or atomic sections have been closed
+	 *
+	 * @throws DBTransactionError
+	 * @since 1.32
+	 */
+	public function assertNoOpenTransactions();
+
+	/**
+	 * Get/set the table prefix
+	 *
+	 * @param string|null $prefix The table prefix to set, or omitted to leave it unchanged
+	 * @return string The previous table prefix
 	 */
 	public function tablePrefix( $prefix = null );
 
 	/**
-	 * Get/set the db schema.
-	 * @param string $schema The database schema to set, or omitted to leave it unchanged.
-	 * @return string The previous db schema.
+	 * Get/set the db schema
+	 *
+	 * @param string|null $schema The database schema to set, or omitted to leave it unchanged
+	 * @return string The previous db schema
 	 */
 	public function dbSchema( $schema = null );
 
 	/**
-	 * Get properties passed down from the server info array of the load
-	 * balancer.
+	 * Get properties passed down from the server info array of the load balancer
 	 *
-	 * @param string $name The entry of the info array to get, or null to get the
-	 *   whole array
-	 *
+	 * @param string|null $name The entry of the info array to get, or null to get the whole array
 	 * @return array|mixed|null
 	 */
 	public function getLBInfo( $name = null );
 
 	/**
-	 * Set the LB info array, or a member of it. If called with one parameter,
-	 * the LB info array is set to that parameter. If it is called with two
-	 * parameters, the member with the given name is set to the given value.
+	 * Set the entire array or a particular key of the managing load balancer info array
 	 *
-	 * @param string $name
-	 * @param array $value
+	 * @param array|string $nameOrArray The new array or the name of a key to set
+	 * @param array|null $value If $nameOrArray is a string, the new key value (null to unset)
 	 */
-	public function setLBInfo( $name, $value = null );
+	public function setLBInfo( $nameOrArray, $value = null );
 
 	/**
 	 * Set a lazy-connecting DB handle to the master DB (for replication status purposes)
@@ -208,14 +216,6 @@ interface IDatabase {
 	public function setLazyMasterHandle( IDatabase $conn );
 
 	/**
-	 * Returns true if this database does an implicit sort when doing GROUP BY
-	 *
-	 * @return bool
-	 * @deprecated Since 1.30; only use grouped or aggregated fields in the SELECT
-	 */
-	public function implicitGroupby();
-
-	/**
 	 * Returns true if this database does an implicit order by when the column has an index
 	 * For example: SELECT page_title FROM page LIMIT 1
 	 *
@@ -224,23 +224,14 @@ interface IDatabase {
 	public function implicitOrderby();
 
 	/**
-	 * Return the last query that went through IDatabase::query()
-	 * @return string
+	 * Get the last query that sent on account of IDatabase::query()
+	 *
+	 * @return string SQL text or empty string if there was no such query
 	 */
 	public function lastQuery();
 
 	/**
-	 * Returns true if the connection may have been used for write queries.
-	 * Should return true if unsure.
-	 *
-	 * @return bool
-	 * @deprecated Since 1.31; use lastDoneWrites()
-	 */
-	public function doneWrites();
-
-	/**
-	 * Returns the last time the connection may have been used for write queries.
-	 * Should return a timestamp if unsure.
+	 * Get the last time the connection may have been used for a write query
 	 *
 	 * @return int|float UNIX timestamp or false
 	 * @since 1.24
@@ -254,8 +245,15 @@ interface IDatabase {
 	public function writesPending();
 
 	/**
-	 * Returns true if there is a transaction/round open with possible write
-	 * queries or transaction pre-commit/idle callbacks waiting on it to finish.
+	 * @return bool Whether there is a transaction open with pre-commit callbacks pending
+	 * @since 1.32
+	 */
+	public function preCommitCallbacksPending();
+
+	/**
+	 * Whether there is a transaction open with either possible write queries
+	 * or unresolved pre-commit/commit/resolution callbacks pending
+	 *
 	 * This does *not* count recurring callbacks, e.g. from setTransactionListener().
 	 *
 	 * @return bool
@@ -265,7 +263,7 @@ interface IDatabase {
 	/**
 	 * Get the time spend running write queries for this transaction
 	 *
-	 * High times could be due to scanning, updates, locking, and such
+	 * High values could be due to scanning, updates, locking, and such.
 	 *
 	 * @param string $type IDatabase::ESTIMATE_* constant [default: ESTIMATE_ALL]
 	 * @return float|bool Returns false if not transaction is active
@@ -290,21 +288,14 @@ interface IDatabase {
 	public function pendingWriteRowsAffected();
 
 	/**
-	 * Is a connection to the database open?
-	 * @return bool
+	 * @return bool Whether a connection to the database open
 	 */
 	public function isOpen();
 
 	/**
 	 * Set a flag for this connection
 	 *
-	 * @param int $flag DBO_* constants from Defines.php:
-	 *   - DBO_DEBUG: output some debug info (same as debug())
-	 *   - DBO_NOBUFFER: don't buffer results (inverse of bufferResults())
-	 *   - DBO_TRX: automatically start transactions
-	 *   - DBO_DEFAULT: automatically sets DBO_TRX if not in command line mode
-	 *       and removes it in command line mode
-	 *   - DBO_PERSISTENT: use persistant database connection
+	 * @param int $flag One of (IDatabase::DBO_DEBUG, IDatabase::DBO_TRX)
 	 * @param string $remember IDatabase::REMEMBER_* constant [default: REMEMBER_NOTHING]
 	 */
 	public function setFlag( $flag, $remember = self::REMEMBER_NOTHING );
@@ -312,13 +303,7 @@ interface IDatabase {
 	/**
 	 * Clear a flag for this connection
 	 *
-	 * @param int $flag DBO_* constants from Defines.php:
-	 *   - DBO_DEBUG: output some debug info (same as debug())
-	 *   - DBO_NOBUFFER: don't buffer results (inverse of bufferResults())
-	 *   - DBO_TRX: automatically start transactions
-	 *   - DBO_DEFAULT: automatically sets DBO_TRX if not in command line mode
-	 *       and removes it in command line mode
-	 *   - DBO_PERSISTENT: use persistant database connection
+	 * @param int $flag One of (IDatabase::DBO_DEBUG, IDatabase::DBO_TRX)
 	 * @param string $remember IDatabase::REMEMBER_* constant [default: REMEMBER_NOTHING]
 	 */
 	public function clearFlag( $flag, $remember = self::REMEMBER_NOTHING );
@@ -334,72 +319,53 @@ interface IDatabase {
 	/**
 	 * Returns a boolean whether the flag $flag is set for this connection
 	 *
-	 * @param int $flag DBO_* constants from Defines.php:
-	 *   - DBO_DEBUG: output some debug info (same as debug())
-	 *   - DBO_NOBUFFER: don't buffer results (inverse of bufferResults())
-	 *   - DBO_TRX: automatically start transactions
-	 *   - DBO_PERSISTENT: use persistant database connection
+	 * @param int $flag One of the class IDatabase::DBO_* constants
 	 * @return bool
 	 */
 	public function getFlag( $flag );
 
 	/**
+	 * Return the currently selected domain ID
+	 *
+	 * Null components (database/schema) might change once a connection is established
+	 *
 	 * @return string
 	 */
 	public function getDomainID();
 
 	/**
-	 * Alias for getDomainID()
-	 *
-	 * @return string
-	 * @deprecated 1.30
-	 */
-	public function getWikiID();
-
-	/**
-	 * Get the type of the DBMS, as it appears in $wgDBtype.
+	 * Get the type of the DBMS (e.g. "mysql", "sqlite")
 	 *
 	 * @return string
 	 */
 	public function getType();
 
 	/**
-	 * Open a new connection to the database (closing any existing one)
+	 * Fetch the next row from the given result object, in object form
 	 *
-	 * @param string $server Database server host
-	 * @param string $user Database user name
-	 * @param string $password Database user password
-	 * @param string $dbName Database name
-	 * @return bool
-	 * @throws DBConnectionError
-	 */
-	public function open( $server, $user, $password, $dbName );
-
-	/**
-	 * Fetch the next row from the given result object, in object form.
 	 * Fields can be retrieved with $row->fieldname, with fields acting like
-	 * member variables.
-	 * If no more rows are available, false is returned.
+	 * member variables. If no more rows are available, false is returned.
 	 *
 	 * @param IResultWrapper|stdClass $res Object as returned from IDatabase::query(), etc.
 	 * @return stdClass|bool
-	 * @throws DBUnexpectedError Thrown if the database returns an error
 	 */
 	public function fetchObject( $res );
 
 	/**
-	 * Fetch the next row from the given result object, in associative array
-	 * form. Fields are retrieved with $row['fieldname'].
+	 * Fetch the next row from the given result object, in associative array form
+	 *
+	 * Fields are retrieved with $row['fieldname'].
 	 * If no more rows are available, false is returned.
 	 *
 	 * @param IResultWrapper $res Result object as returned from IDatabase::query(), etc.
 	 * @return array|bool
-	 * @throws DBUnexpectedError Thrown if the database returns an error
 	 */
 	public function fetchRow( $res );
 
 	/**
-	 * Get the number of rows in a result object
+	 * Get the number of rows in a query result
+	 *
+	 * Returns zero if the query did not return any rows or was a write query.
 	 *
 	 * @param mixed $res A SQL result
 	 * @return int
@@ -408,7 +374,7 @@ interface IDatabase {
 
 	/**
 	 * Get the number of fields in a result object
-	 * @see https://secure.php.net/mysql_num_fields
+	 * @see https://www.php.net/mysql_num_fields
 	 *
 	 * @param mixed $res A SQL result
 	 * @return int
@@ -417,7 +383,7 @@ interface IDatabase {
 
 	/**
 	 * Get a field name in a result object
-	 * @see https://secure.php.net/mysql_field_name
+	 * @see https://www.php.net/mysql_field_name
 	 *
 	 * @param mixed $res A SQL result
 	 * @param int $n
@@ -438,7 +404,7 @@ interface IDatabase {
 
 	/**
 	 * Change the position of the cursor in a result object
-	 * @see https://secure.php.net/mysql_data_seek
+	 * @see https://www.php.net/mysql_data_seek
 	 *
 	 * @param mixed $res A SQL result
 	 * @param int $row
@@ -447,7 +413,7 @@ interface IDatabase {
 
 	/**
 	 * Get the last error number
-	 * @see https://secure.php.net/mysql_errno
+	 * @see https://www.php.net/mysql_errno
 	 *
 	 * @return int
 	 */
@@ -455,33 +421,33 @@ interface IDatabase {
 
 	/**
 	 * Get a description of the last error
-	 * @see https://secure.php.net/mysql_error
+	 * @see https://www.php.net/mysql_error
 	 *
 	 * @return string
 	 */
 	public function lastError();
 
 	/**
-	 * Get the number of rows affected by the last write query
-	 * @see https://secure.php.net/mysql_affected_rows
+	 * Get the number of rows affected by the last write query.
+	 * Similar to https://www.php.net/mysql_affected_rows but includes rows matched
+	 * but not changed (ie. an UPDATE which sets all fields to the same value they already have).
+	 * To get the old mysql_affected_rows behavior, include non-equality of the fields in WHERE.
 	 *
 	 * @return int
 	 */
 	public function affectedRows();
 
 	/**
-	 * Returns a wikitext link to the DB's website, e.g.,
-	 *   return "[https://www.mysql.com/ MySQL]";
-	 * Should at least contain plain text, if for some reason
-	 * your database has no website.
+	 * Returns a wikitext style link to the DB's website (e.g. "[https://www.mysql.com/ MySQL]")
+	 *
+	 * Should at least contain plain text, if for some reason your database has no website.
 	 *
 	 * @return string Wikitext of a link to the server software's web site
 	 */
 	public function getSoftwareLink();
 
 	/**
-	 * A string describing the current software version, like from
-	 * mysql_get_server_info().
+	 * A string describing the current software version, like from mysql_get_server_info()
 	 *
 	 * @return string Version information from the database server.
 	 */
@@ -491,17 +457,18 @@ interface IDatabase {
 	 * Close the database connection
 	 *
 	 * This should only be called after any transactions have been resolved,
-	 * aside from read-only transactions (assuming no callbacks are registered).
-	 * If a transaction is still open anyway, it will be committed if possible.
+	 * aside from read-only automatic transactions (assuming no callbacks are registered).
+	 * If a transaction is still open anyway, it will be rolled back.
 	 *
+	 * @param string $fname Caller name
+	 * @param int|null $owner ID of the calling instance (e.g. the LBFactory ID)
+	 * @return bool Success
 	 * @throws DBError
-	 * @return bool Operation success. true if already closed.
 	 */
-	public function close();
+	public function close( $fname = __METHOD__, $owner = null );
 
 	/**
-	 * Run an SQL query and return the result. Normally throws a DBQueryError
-	 * on failure. If errors are ignored, returns false instead.
+	 * Run an SQL query and return the result
 	 *
 	 * If a connection loss is detected, then an attempt to reconnect will be made.
 	 * For queries that involve no larger transactions or locks, they will be re-issued
@@ -519,28 +486,28 @@ interface IDatabase {
 	 * @param string $sql SQL query
 	 * @param string $fname Name of the calling function, for profiling/SHOW PROCESSLIST
 	 *     comment (you can use __METHOD__ or add some extra info)
-	 * @param bool $tempIgnore Whether to avoid throwing an exception on errors...
-	 *     maybe best to catch the exception instead?
+	 * @param int $flags Bitfield of IDatabase::QUERY_* constants. Note that suppression
+	 *     of errors is best handled by try/catch rather than using one of these flags.
 	 * @return bool|IResultWrapper True for a successful write query, IResultWrapper object
-	 *     for a successful read query, or false on failure if $tempIgnore set
-	 * @throws DBError
+	 *     for a successful read query, or false on failure if QUERY_SILENCE_ERRORS is set.
+	 * @throws DBQueryError If the query is issued, fails, and QUERY_SILENCE_ERRORS is not set.
+	 * @throws DBExpectedError If the query is not, and cannot, be issued yet (non-DBQueryError)
+	 * @throws DBError If the query is inherently not allowed (non-DBExpectedError)
 	 */
-	public function query( $sql, $fname = __METHOD__, $tempIgnore = false );
+	public function query( $sql, $fname = __METHOD__, $flags = 0 );
 
 	/**
-	 * Free a result object returned by query() or select(). It's usually not
-	 * necessary to call this, just use unset() or let the variable holding
-	 * the result object go out of scope.
+	 * Free a result object returned by query() or select()
+	 *
+	 * It's usually not necessary to call this, just use unset() or let the variable
+	 * holding the result object go out of scope.
 	 *
 	 * @param mixed $res A SQL result
 	 */
 	public function freeResult( $res );
 
 	/**
-	 * A SELECT wrapper which returns a single field from a single result row.
-	 *
-	 * Usually throws a DBQueryError on failure. If errors are explicitly
-	 * ignored, returns false on failure.
+	 * A SELECT wrapper which returns a single field from a single result row
 	 *
 	 * If no result rows are returned from the query, false is returned.
 	 *
@@ -551,19 +518,15 @@ interface IDatabase {
 	 * @param string $fname The function name of the caller.
 	 * @param string|array $options The query options. See IDatabase::select() for details.
 	 * @param string|array $join_conds The query join conditions. See IDatabase::select() for details.
-	 *
 	 * @return mixed The value from the field
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function selectField(
 		$table, $var, $cond = '', $fname = __METHOD__, $options = [], $join_conds = []
 	);
 
 	/**
-	 * A SELECT wrapper which returns a list of single field values from result rows.
-	 *
-	 * Usually throws a DBQueryError on failure. If errors are explicitly
-	 * ignored, returns false on failure.
+	 * A SELECT wrapper which returns a list of single field values from result rows
 	 *
 	 * If no result rows are returned from the query, false is returned.
 	 *
@@ -575,8 +538,8 @@ interface IDatabase {
 	 * @param string|array $options The query options. See IDatabase::select() for details.
 	 * @param string|array $join_conds The query join conditions. See IDatabase::select() for details.
 	 *
-	 * @return array The values from the field
-	 * @throws DBError
+	 * @return array The values from the field in the order they were returned from the DB
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 * @since 1.25
 	 */
 	public function selectFieldValues(
@@ -584,18 +547,9 @@ interface IDatabase {
 	);
 
 	/**
-	 * Execute a SELECT query constructed using the various parameters provided.
-	 * See below for full details of the parameters.
+	 * Execute a SELECT query constructed using the various parameters provided
 	 *
-	 * @param string|array $table Table name
-	 * @param string|array $vars Field names
-	 * @param string|array $conds Conditions
-	 * @param string $fname Caller function name
-	 * @param array $options Query options
-	 * @param array $join_conds Join conditions
-	 *
-	 *
-	 * @param string|array $table
+	 * @param string|array $table Table name(s)
 	 *
 	 * May be either an array of table names, or a single string holding a table
 	 * name. If an array is given, table aliases can be specified, for example:
@@ -630,7 +584,7 @@ interface IDatabase {
 	 * Do not use untrusted user input as a table name. Alias names should
 	 * not have characters outside of the Basic multilingual plane.
 	 *
-	 * @param string|array $vars
+	 * @param string|array $vars Field name(s)
 	 *
 	 * May be either a field name or an array of field names. The field names
 	 * can be complete fragments of SQL, for direct inclusion into the SELECT
@@ -675,7 +629,11 @@ interface IDatabase {
 	 * Escaping of untrusted input used in values of numeric keys should be done via
 	 * IDatabase::addQuotes()
 	 *
-	 * @param string|array $options
+	 * Use an empty array, string, or '*' to update all rows.
+	 *
+	 * @param string $fname Caller function name
+	 *
+	 * @param string|array $options Query options
 	 *
 	 * Optional: Array of query options. Boolean options are specified by
 	 * including them in the array as a string value with a numeric key, for
@@ -693,8 +651,13 @@ interface IDatabase {
 	 *     and then the first rows are taken until the limit is reached. LIMIT
 	 *     is applied to a result set after OFFSET.
 	 *
+	 *   - LOCK IN SHARE MODE: Boolean: lock the returned rows so that they can't be
+	 *     changed until the next COMMIT. Cannot be used with aggregate functions
+	 *     (COUNT, MAX, etc., but also DISTINCT).
+	 *
 	 *   - FOR UPDATE: Boolean: lock the returned rows so that they can't be
-	 *     changed until the next COMMIT.
+	 *     changed nor read with LOCK IN SHARE MODE until the next COMMIT.
+	 *     Cannot be used with aggregate functions (COUNT, MAX, etc., but also DISTINCT).
 	 *
 	 *   - DISTINCT: Boolean: return only unique result rows.
 	 *
@@ -720,18 +683,13 @@ interface IDatabase {
 	 * And also the following boolean MySQL extensions, see the MySQL manual
 	 * for documentation:
 	 *
-	 *    - LOCK IN SHARE MODE
 	 *    - STRAIGHT_JOIN
-	 *    - HIGH_PRIORITY
 	 *    - SQL_BIG_RESULT
 	 *    - SQL_BUFFER_RESULT
 	 *    - SQL_SMALL_RESULT
 	 *    - SQL_CALC_FOUND_ROWS
-	 *    - SQL_CACHE
-	 *    - SQL_NO_CACHE
 	 *
-	 *
-	 * @param string|array $join_conds
+	 * @param string|array $join_conds Join conditions
 	 *
 	 * Optional associative array of table-specific join conditions. In the
 	 * most common case, this is unnecessary, since the join condition can be
@@ -746,18 +704,23 @@ interface IDatabase {
 	 *    [ 'page' => [ 'LEFT JOIN', 'page_latest=rev_id' ] ]
 	 *
 	 * @return IResultWrapper Resulting rows
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function select(
-		$table, $vars, $conds = '', $fname = __METHOD__,
-		$options = [], $join_conds = []
+		$table,
+		$vars,
+		$conds = '',
+		$fname = __METHOD__,
+		$options = [],
+		$join_conds = []
 	);
 
 	/**
-	 * The equivalent of IDatabase::select() except that the constructed SQL
-	 * is returned, instead of being immediately executed. This can be useful for
-	 * doing UNION queries, where the SQL text of each query is needed. In general,
-	 * however, callers outside of Database classes should just use select().
+	 * Take the same arguments as IDatabase::select() and return the SQL it would use
+	 *
+	 * This can be useful for making UNION queries, where the SQL text of each query
+	 * is needed. In general, however, callers outside of Database classes should just
+	 * use select().
 	 *
 	 * @see IDatabase::select()
 	 *
@@ -770,27 +733,37 @@ interface IDatabase {
 	 * @return string SQL query string
 	 */
 	public function selectSQLText(
-		$table, $vars, $conds = '', $fname = __METHOD__,
-		$options = [], $join_conds = []
+		$table,
+		$vars,
+		$conds = '',
+		$fname = __METHOD__,
+		$options = [],
+		$join_conds = []
 	);
 
 	/**
-	 * Single row SELECT wrapper. Equivalent to IDatabase::select(), except
-	 * that a single row object is returned. If the query returns no rows,
-	 * false is returned.
+	 * Wrapper to IDatabase::select() that only fetches one row (via LIMIT)
+	 *
+	 * If the query returns no rows, false is returned.
+	 *
+	 * This method is convenient for fetching a row based on a unique key condition.
 	 *
 	 * @param string|array $table Table name
 	 * @param string|array $vars Field names
-	 * @param array $conds Conditions
+	 * @param string|array $conds Conditions
 	 * @param string $fname Caller function name
 	 * @param string|array $options Query options
 	 * @param array|string $join_conds Join conditions
-	 *
 	 * @return stdClass|bool
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
-	public function selectRow( $table, $vars, $conds, $fname = __METHOD__,
-		$options = [], $join_conds = []
+	public function selectRow(
+		$table,
+		$vars,
+		$conds,
+		$fname = __METHOD__,
+		$options = [],
+		$join_conds = []
 	);
 
 	/**
@@ -813,7 +786,7 @@ interface IDatabase {
 	 * @param array $options Options for select
 	 * @param array|string $join_conds Join conditions
 	 * @return int Row count
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function estimateRowCount(
 		$table, $var = '*', $conds = '', $fname = __METHOD__, $options = [], $join_conds = []
@@ -835,10 +808,26 @@ interface IDatabase {
 	 * @param array $options Options for select
 	 * @param array $join_conds Join conditions (since 1.27)
 	 * @return int Row count
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function selectRowCount(
 		$tables, $var = '*', $conds = '', $fname = __METHOD__, $options = [], $join_conds = []
+	);
+
+	/**
+	 * Lock all rows meeting the given conditions/options FOR UPDATE
+	 *
+	 * @param array|string $table Table names
+	 * @param array|string $conds Filters on the table
+	 * @param string $fname Function name for profiling
+	 * @param array $options Options for select ("FOR UPDATE" is added automatically)
+	 * @param array $join_conds Join conditions
+	 * @return int Number of matching rows found (and locked)
+	 * @throws DBError If an error occurs, see IDatabase::query()
+	 * @since 1.32
+	 */
+	public function lockForUpdate(
+		$table, $conds = '', $fname = __METHOD__, $options = [], $join_conds = []
 	);
 
 	/**
@@ -848,20 +837,18 @@ interface IDatabase {
 	 * @param string $field Filed to check on that table
 	 * @param string $fname Calling function name (optional)
 	 * @return bool Whether $table has filed $field
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function fieldExists( $table, $field, $fname = __METHOD__ );
 
 	/**
 	 * Determines whether an index exists
-	 * Usually throws a DBQueryError on failure
-	 * If errors are explicitly ignored, returns NULL on failure
 	 *
 	 * @param string $table
 	 * @param string $index
 	 * @param string $fname
 	 * @return bool|null
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function indexExists( $table, $index, $fname = __METHOD__ );
 
@@ -871,12 +858,12 @@ interface IDatabase {
 	 * @param string $table
 	 * @param string $fname
 	 * @return bool
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function tableExists( $table, $fname = __METHOD__ );
 
 	/**
-	 * INSERT wrapper, inserts an array into a table.
+	 * INSERT wrapper, inserts an array into a table
 	 *
 	 * $a may be either:
 	 *
@@ -887,9 +874,6 @@ interface IDatabase {
 	 *   - An array with numeric keys, holding a list of associative arrays.
 	 *     This causes a multi-row INSERT on DBMSs that support it. The keys in
 	 *     each subarray must be identical to each other, and in the same order.
-	 *
-	 * Usually throws a DBQueryError on failure. If errors are explicitly ignored,
-	 * returns success.
 	 *
 	 * $options is an array of options, with boolean options encoded as values
 	 * with numeric keys, in the same style as $options in
@@ -905,9 +889,8 @@ interface IDatabase {
 	 * @param array $a Array of rows to insert
 	 * @param string $fname Calling function name (use __METHOD__) for logs/profiling
 	 * @param array $options Array of options
-	 *
-	 * @return bool
-	 * @throws DBError
+	 * @return bool Return true if no exception was thrown (deprecated since 1.33)
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function insert( $table, $a, $fname = __METHOD__, $options = [] );
 
@@ -921,16 +904,15 @@ interface IDatabase {
 	 *   that field to. The data will be quoted by IDatabase::addQuotes().
 	 *   Values with integer keys form unquoted SET statements, which can be used for
 	 *   things like "field = field + 1" or similar computed values.
-	 * @param array $conds An array of conditions (WHERE). See
+	 * @param array|string $conds An array of conditions (WHERE). See
 	 *   IDatabase::select() for the details of the format of condition
 	 *   arrays. Use '*' to update all rows.
 	 * @param string $fname The function name of the caller (from __METHOD__),
 	 *   for logging and profiling.
 	 * @param array $options An array of UPDATE options, can be:
 	 *   - IGNORE: Ignore unique key conflicts
-	 *   - LOW_PRIORITY: MySQL-specific, see MySQL manual.
-	 * @return bool
-	 * @throws DBError
+	 * @return bool Return true if no exception was thrown (deprecated since 1.33)
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function update( $table, $values, $conds, $fname = __METHOD__, $options = [] );
 
@@ -956,7 +938,7 @@ interface IDatabase {
 	 *    - IDatabase::LIST_OR:    ORed WHERE clause (without the WHERE)
 	 *    - IDatabase::LIST_SET:   Comma separated with field names, like a SET clause
 	 *    - IDatabase::LIST_NAMES: Comma separated field names
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 * @return string
 	 */
 	public function makeList( $a, $mode = self::LIST_COMMA );
@@ -979,7 +961,8 @@ interface IDatabase {
 	 * @param array $valuedata
 	 * @param string $valuename
 	 *
-	 * @return string
+	 * @return array|string
+	 * @deprecated Since 1.33
 	 */
 	public function aggregateValue( $valuedata, $valuename = 'value' );
 
@@ -1005,8 +988,7 @@ interface IDatabase {
 
 	/**
 	 * Build a concatenation list to feed into a SQL query
-	 * @param array $stringList List of raw SQL expressions; caller is
-	 *   responsible for any quoting
+	 * @param string[] $stringList Raw SQL expression list; caller is responsible for escaping
 	 * @return string
 	 */
 	public function buildConcat( $stringList );
@@ -1032,7 +1014,7 @@ interface IDatabase {
 	);
 
 	/**
-	 * Build a SUBSTRING function.
+	 * Build a SUBSTRING function
 	 *
 	 * Behavior for non-ASCII values is undefined.
 	 *
@@ -1074,9 +1056,32 @@ interface IDatabase {
 	 * @since 1.31
 	 */
 	public function buildSelectSubquery(
-		$table, $vars, $conds = '', $fname = __METHOD__,
-		$options = [], $join_conds = []
+		$table,
+		$vars,
+		$conds = '',
+		$fname = __METHOD__,
+		$options = [],
+		$join_conds = []
 	);
+
+	/**
+	 * Construct a LIMIT query with optional offset
+	 *
+	 * The SQL should be adjusted so that only the first $limit rows
+	 * are returned. If $offset is provided as well, then the first $offset
+	 * rows should be discarded, and the next $limit rows should be returned.
+	 * If the result of the query is not ordered, then the rows to be returned
+	 * are theoretically arbitrary.
+	 *
+	 * $sql is expected to be a SELECT, if that makes a difference.
+	 *
+	 * @param string $sql SQL query we will append the limit too
+	 * @param int $limit The SQL limit
+	 * @param int|bool $offset The SQL offset (default false)
+	 * @return string
+	 * @since 1.34
+	 */
+	public function limitResult( $sql, $limit, $offset = false );
 
 	/**
 	 * Returns true if DBs are assumed to be on potentially different servers
@@ -1094,15 +1099,33 @@ interface IDatabase {
 	/**
 	 * Change the current database
 	 *
+	 * This should only be called by a load balancer or if the handle is not attached to one
+	 *
 	 * @param string $db
-	 * @return bool Success or failure
-	 * @throws DBConnectionError If databasesAreIndependent() is true and an error occurs
+	 * @return bool True unless an exception was thrown
+	 * @throws DBConnectionError If databasesAreIndependent() is true and connection change fails
+	 * @throws DBError On query error or if database changes are disallowed
+	 * @deprecated Since 1.32 Use selectDomain() instead
 	 */
 	public function selectDB( $db );
 
 	/**
+	 * Set the current domain (database, schema, and table prefix)
+	 *
+	 * This will throw an error for some database types if the database is unspecified
+	 *
+	 * This should only be called by a load balancer or if the handle is not attached to one
+	 *
+	 * @param string|DatabaseDomain $domain
+	 * @throws DBConnectionError If databasesAreIndependent() is true and connection change fails
+	 * @throws DBError On query error, if domain changes are disallowed, or the domain is invalid
+	 * @since 1.32
+	 */
+	public function selectDomain( $domain );
+
+	/**
 	 * Get the current DB name
-	 * @return string
+	 * @return string|null
 	 */
 	public function getDBname();
 
@@ -1113,7 +1136,7 @@ interface IDatabase {
 	public function getServer();
 
 	/**
-	 * Adds quotes and backslashes.
+	 * Escape and quote a raw value string for use in a SQL query
 	 *
 	 * @param string|int|null|bool|Blob $s
 	 * @return string|int
@@ -1121,11 +1144,23 @@ interface IDatabase {
 	public function addQuotes( $s );
 
 	/**
-	 * LIKE statement wrapper, receives a variable-length argument list with
-	 * parts of pattern to match containing either string literals that will be
-	 * escaped or tokens returned by anyChar() or anyString(). Alternatively,
-	 * the function could be provided with an array of aforementioned
-	 * parameters.
+	 * Escape a SQL identifier (e.g. table, column, database) for use in a SQL query
+	 *
+	 * Depending on the database this will either be `backticks` or "double quotes"
+	 *
+	 * @param string $s
+	 * @return string
+	 * @since 1.33
+	 */
+	public function addIdentifierQuotes( $s );
+
+	/**
+	 * LIKE statement wrapper
+	 *
+	 * This takes a variable-length argument list with parts of pattern to match
+	 * containing either string literals that will be escaped or tokens returned by
+	 * anyChar() or anyString(). Alternatively, the function could be provided with
+	 * an array of aforementioned parameters.
 	 *
 	 * Example: $dbr->buildLike( 'My_page_title/', $dbr->anyString() ) returns
 	 * a LIKE clause that searches for subpages of 'My page title'.
@@ -1134,9 +1169,12 @@ interface IDatabase {
 	 *   $query .= $dbr->buildLike( $pattern );
 	 *
 	 * @since 1.16
+	 * @param array[]|string|LikeMatch $param
 	 * @return string Fully built LIKE statement
+	 * @phan-suppress-next-line PhanMismatchVariadicComment
+	 * @phan-param array|string|LikeMatch ...$param T226223
 	 */
-	public function buildLike();
+	public function buildLike( $param );
 
 	/**
 	 * Returns a token for buildLike() that denotes a '_' to be used in a LIKE query
@@ -1153,12 +1191,12 @@ interface IDatabase {
 	public function anyString();
 
 	/**
-	 * Deprecated method, calls should be removed.
+	 * Deprecated method, calls should be removed
 	 *
-	 * This was formerly used for PostgreSQL and Oracle to handle
+	 * This was formerly used for PostgreSQL to handle
 	 * self::insertId() auto-incrementing fields. It is no longer necessary
 	 * since DatabasePostgres::insertId() has been reimplemented using
-	 * `lastval()` and Oracle has been reimplemented using triggers.
+	 * `lastval()`
 	 *
 	 * Implementations should return null if inserting `NULL` into an
 	 * auto-incrementing field works, otherwise it should return an instance of
@@ -1171,7 +1209,7 @@ interface IDatabase {
 	public function nextSequenceValue( $seqName );
 
 	/**
-	 * REPLACE query wrapper.
+	 * REPLACE query wrapper
 	 *
 	 * REPLACE is a very handy MySQL extension, which functions like an INSERT
 	 * except that when there is a duplicate key error, the old row is deleted
@@ -1186,12 +1224,14 @@ interface IDatabase {
 	 * errors which wouldn't have occurred in MySQL.
 	 *
 	 * @param string $table The table to replace the row(s) in.
-	 * @param array $uniqueIndexes Is an array of indexes. Each element may be either
-	 *    a field name or an array of field names
+	 * @param array[]|string[]|string $uniqueIndexes All unique indexes. One of the following:
+	 *   a) the one unique field in the table (when no composite unique key exist)
+	 *   b) a list of all unique fields in the table (when no composite unique key exist)
+	 *   c) a list of all unique indexes in the table (each as a list of the indexed fields)
 	 * @param array $rows Can be either a single row to insert, or multiple rows,
-	 *    in the same format as for IDatabase::insert()
+	 *   in the same format as for IDatabase::insert()
 	 * @param string $fname Calling function name (use __METHOD__) for logs/profiling
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function replace( $table, $uniqueIndexes, $rows, $fname = __METHOD__ );
 
@@ -1214,25 +1254,24 @@ interface IDatabase {
 	 * to collide. However if you do this, you run the risk of encountering
 	 * errors which wouldn't have occurred in MySQL.
 	 *
-	 * Usually throws a DBQueryError on failure. If errors are explicitly ignored,
-	 * returns success.
-	 *
-	 * @since 1.22
-	 *
 	 * @param string $table Table name. This will be passed through Database::tableName().
 	 * @param array $rows A single row or list of rows to insert
-	 * @param array $uniqueIndexes List of single field names or field name tuples
+	 * @param array[]|string[]|string $uniqueIndexes All unique indexes. One of the following:
+	 *   a) the one unique field in the table (when no composite unique key exist)
+	 *   b) a list of all unique fields in the table (when no composite unique key exist)
+	 *   c) a list of all unique indexes in the table (each as a list of the indexed fields)
 	 * @param array $set An array of values to SET. For each array element, the
 	 *   key gives the field name, and the value gives the data to set that
 	 *   field to. The data will be quoted by IDatabase::addQuotes().
 	 *   Values with integer keys form unquoted SET statements, which can be used for
 	 *   things like "field = field + 1" or similar computed values.
 	 * @param string $fname Calling function name (use __METHOD__) for logs/profiling
-	 * @throws DBError
-	 * @return bool
+	 * @return bool Return true if no exception was thrown (deprecated since 1.33)
+	 * @throws DBError If an error occurs, see IDatabase::query()
+	 * @since 1.22
 	 */
 	public function upsert(
-		$table, array $rows, array $uniqueIndexes, array $set, $fname = __METHOD__
+		$table, array $rows, $uniqueIndexes, array $set, $fname = __METHOD__
 	);
 
 	/**
@@ -1250,31 +1289,34 @@ interface IDatabase {
 	 * @param string $joinTable The other table.
 	 * @param string $delVar The variable to join on, in the first table.
 	 * @param string $joinVar The variable to join on, in the second table.
-	 * @param array $conds Condition array of field names mapped to variables,
+	 * @param array|string $conds Condition array of field names mapped to variables,
 	 *   ANDed together in the WHERE clause
 	 * @param string $fname Calling function name (use __METHOD__) for logs/profiling
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
-	public function deleteJoin( $delTable, $joinTable, $delVar, $joinVar, $conds,
+	public function deleteJoin(
+		$delTable,
+		$joinTable,
+		$delVar,
+		$joinVar,
+		$conds,
 		$fname = __METHOD__
 	);
 
 	/**
-	 * DELETE query wrapper.
+	 * DELETE query wrapper
 	 *
 	 * @param string $table Table name
 	 * @param string|array $conds Array of conditions. See $conds in IDatabase::select()
 	 *   for the format. Use $conds == "*" to delete all rows
 	 * @param string $fname Name of the calling function
-	 * @throws DBUnexpectedError
-	 * @return bool|IResultWrapper
-	 * @throws DBError
+	 * @return bool Return true if no exception was thrown (deprecated since 1.33)
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function delete( $table, $conds, $fname = __METHOD__ );
 
 	/**
-	 * INSERT SELECT wrapper. Takes data from a SELECT query and inserts it
-	 * into another table.
+	 * INSERT SELECT wrapper
 	 *
 	 * @warning If the insert will use an auto-increment or sequence to
 	 *  determine the value of a column, this may break replication on
@@ -1284,18 +1326,14 @@ interface IDatabase {
 	 * @param string $destTable The table name to insert into
 	 * @param string|array $srcTable May be either a table name, or an array of table names
 	 *    to include in a join.
-	 *
 	 * @param array $varMap Must be an associative array of the form
 	 *    [ 'dest1' => 'source1', ... ]. Source items may be literals
 	 *    rather than field names, but strings should be quoted with
 	 *    IDatabase::addQuotes()
-	 *
 	 * @param array $conds Condition array. See $conds in IDatabase::select() for
 	 *    the details of the format of condition arrays. May be "*" to copy the
 	 *    whole table.
-	 *
 	 * @param string $fname The function name of the caller, from __METHOD__
-	 *
 	 * @param array $insertOptions Options for the INSERT part of the query, see
 	 *    IDatabase::insert() for details. Also, one additional option is
 	 *    available: pass 'NO_AUTO_COLUMNS' to hint that the query does not use
@@ -1304,28 +1342,34 @@ interface IDatabase {
 	 *    IDatabase::select() for details.
 	 * @param array $selectJoinConds Join conditions for the SELECT part of the query, see
 	 *    IDatabase::select() for details.
-	 *
-	 * @return bool
-	 * @throws DBError
+	 * @return bool Return true if no exception was thrown (deprecated since 1.33)
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
-	public function insertSelect( $destTable, $srcTable, $varMap, $conds,
+	public function insertSelect(
+		$destTable,
+		$srcTable,
+		$varMap,
+		$conds,
 		$fname = __METHOD__,
-		$insertOptions = [], $selectOptions = [], $selectJoinConds = []
+		$insertOptions = [],
+		$selectOptions = [],
+		$selectJoinConds = []
 	);
 
 	/**
-	 * Returns true if current database backend supports ORDER BY or LIMIT for separate subqueries
-	 * within the UNION construct.
+	 * Determine if the RDBMS supports ORDER BY and LIMIT for separate subqueries within UNION
+	 *
 	 * @return bool
 	 */
 	public function unionSupportsOrderAndLimit();
 
 	/**
 	 * Construct a UNION query
+	 *
 	 * This is used for providing overload point for other DB abstractions
 	 * not compatible with the MySQL syntax.
 	 * @param array $sqls SQL statements to combine
-	 * @param bool $all Use UNION ALL
+	 * @param bool $all Either IDatabase::UNION_ALL or IDatabase::UNION_DISTINCT
 	 * @return string SQL fragment
 	 */
 	public function unionQueries( $sqls, $all );
@@ -1339,7 +1383,6 @@ interface IDatabase {
 	 * conditions and unions them all together.
 	 *
 	 * @see IDatabase::select()
-	 * @since 1.30
 	 * @param string|array $table Table name
 	 * @param string|array $vars Field names
 	 * @param array $permute_conds Conditions for the Cartesian product. Keys
@@ -1355,15 +1398,22 @@ interface IDatabase {
 	 *     instead of ORDER BY.
 	 * @param string|array $join_conds Join conditions
 	 * @return string SQL query string.
+	 * @since 1.30
 	 */
 	public function unionConditionPermutations(
-		$table, $vars, array $permute_conds, $extra_conds = '', $fname = __METHOD__,
-		$options = [], $join_conds = []
+		$table,
+		$vars,
+		array $permute_conds,
+		$extra_conds = '',
+		$fname = __METHOD__,
+		$options = [],
+		$join_conds = []
 	);
 
 	/**
-	 * Returns an SQL expression for a simple conditional. This doesn't need
-	 * to be overridden unless CASE isn't supported in your DBMS.
+	 * Returns an SQL expression for a simple conditional
+	 *
+	 * This doesn't need to be overridden unless CASE isn't supported in the RDBMS.
 	 *
 	 * @param string|array $cond SQL expression which will result in a boolean value
 	 * @param string $trueVal SQL expression to return if true
@@ -1373,13 +1423,11 @@ interface IDatabase {
 	public function conditional( $cond, $trueVal, $falseVal );
 
 	/**
-	 * Returns a command for str_replace function in SQL query.
-	 * Uses REPLACE() in MySQL
+	 * Returns a SQL expression for simple string replacement (e.g. REPLACE() in mysql)
 	 *
 	 * @param string $orig Column to modify
 	 * @param string $old Column to seek
 	 * @param string $new Column to replace with
-	 *
 	 * @return string
 	 */
 	public function strreplace( $orig, $old, $new );
@@ -1421,7 +1469,7 @@ interface IDatabase {
 	public function wasConnectionLoss();
 
 	/**
-	 * Determines if the last failure was due to the database being read-only.
+	 * Determines if the last failure was due to the database being read-only
 	 *
 	 * @return bool
 	 */
@@ -1439,12 +1487,16 @@ interface IDatabase {
 	/**
 	 * Wait for the replica DB to catch up to a given master position
 	 *
+	 * Note that this does not start any new transactions. If any existing transaction
+	 * is flushed, and this is called, then queries will reflect the point the DB was synced
+	 * up to (on success) without interference from REPEATABLE-READ snapshots.
+	 *
 	 * @param DBMasterPos $pos
 	 * @param int $timeout The maximum number of seconds to wait for synchronisation
 	 * @return int|null Zero if the replica DB was past that position already,
 	 *   greater than zero if we waited for some period of time, less than
 	 *   zero if it timed out, and null on error
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function masterPosWait( DBMasterPos $pos, $timeout );
 
@@ -1452,7 +1504,7 @@ interface IDatabase {
 	 * Get the replication position of this replica DB
 	 *
 	 * @return DBMasterPos|bool False if this is not a replica DB
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function getReplicaPos();
 
@@ -1460,7 +1512,7 @@ interface IDatabase {
 	 * Get the position of this master
 	 *
 	 * @return DBMasterPos|bool False if this is not a master
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function getMasterPos();
 
@@ -1471,27 +1523,34 @@ interface IDatabase {
 	public function serverIsReadOnly();
 
 	/**
-	 * Run a callback as soon as the current transaction commits or rolls back.
+	 * Run a callback as soon as the current transaction commits or rolls back
+	 *
 	 * An error is thrown if no transaction is pending. Queries in the function will run in
 	 * AUTOCOMMIT mode unless there are begin() calls. Callbacks must commit any transactions
 	 * that they begin.
 	 *
 	 * This is useful for combining cooperative locks and DB transactions.
 	 *
-	 * @note: do not assume that *other* IDatabase instances will be AUTOCOMMIT mode
+	 * Note this is called when the whole transaction is resolved. To take action immediately
+	 * when an atomic section is cancelled, use onAtomicSectionCancel().
 	 *
-	 * The callback takes one argument:
+	 * @note do not assume that *other* IDatabase instances will be AUTOCOMMIT mode
+	 *
+	 * The callback takes the following arguments:
 	 *   - How the transaction ended (IDatabase::TRIGGER_COMMIT or IDatabase::TRIGGER_ROLLBACK)
+	 *   - This IDatabase instance (since 1.32)
 	 *
 	 * @param callable $callback
 	 * @param string $fname Caller name
-	 * @return mixed
+	 * @throws DBError If an error occurs, see IDatabase::query()
+	 * @throws Exception If the callback runs immediately and an error occurs in it
 	 * @since 1.28
 	 */
 	public function onTransactionResolution( callable $callback, $fname = __METHOD__ );
 
 	/**
-	 * Run a callback as soon as there is no transaction pending.
+	 * Run a callback as soon as there is no transaction pending
+	 *
 	 * If there is a transaction and it is rolled back, then the callback is cancelled.
 	 *
 	 * When transaction round mode (DBO_TRX) is set, the callback will run at the end
@@ -1507,21 +1566,38 @@ interface IDatabase {
 	 * It can also be used for updates that easily suffer from lock timeouts and deadlocks,
 	 * but where atomicity is not essential.
 	 *
+	 * Avoid using IDatabase instances aside from this one in the callback, unless such instances
+	 * never have IDatabase::DBO_TRX set. This keeps callbacks from interfering with one another.
+	 *
 	 * Updates will execute in the order they were enqueued.
 	 *
-	 * @note: do not assume that *other* IDatabase instances will be AUTOCOMMIT mode
+	 * @note do not assume that *other* IDatabase instances will be AUTOCOMMIT mode
 	 *
-	 * The callback takes one argument:
+	 * The callback takes the following arguments:
 	 *   - How the transaction ended (IDatabase::TRIGGER_COMMIT or IDatabase::TRIGGER_IDLE)
+	 *   - This IDatabase instance (since 1.32)
 	 *
 	 * @param callable $callback
 	 * @param string $fname Caller name
+	 * @throws DBError If an error occurs, see IDatabase::query()
+	 * @throws Exception If the callback runs immediately and an error occurs in it
+	 * @since 1.32
+	 */
+	public function onTransactionCommitOrIdle( callable $callback, $fname = __METHOD__ );
+
+	/**
+	 * Alias for onTransactionCommitOrIdle() for backwards-compatibility
+	 *
+	 * @param callable $callback
+	 * @param string $fname
 	 * @since 1.20
+	 * @deprecated Since 1.32
 	 */
 	public function onTransactionIdle( callable $callback, $fname = __METHOD__ );
 
 	/**
-	 * Run a callback before the current transaction commits or now if there is none.
+	 * Run a callback before the current transaction commits or now if there is none
+	 *
 	 * If there is a transaction and it is rolled back, then the callback is cancelled.
 	 *
 	 * When transaction round mode (DBO_TRX) is set, the callback will run at the end
@@ -1536,25 +1612,57 @@ interface IDatabase {
 	 *
 	 * Updates will execute in the order they were enqueued.
 	 *
+	 * The callback takes the one argument:
+	 *   - This IDatabase instance (since 1.32)
+	 *
 	 * @param callable $callback
 	 * @param string $fname Caller name
+	 * @throws DBError If an error occurs, see IDatabase::query()
+	 * @throws Exception If the callback runs immediately and an error occurs in it
 	 * @since 1.22
 	 */
 	public function onTransactionPreCommitOrIdle( callable $callback, $fname = __METHOD__ );
 
 	/**
-	 * Run a callback each time any transaction commits or rolls back
+	 * Run a callback when the atomic section is cancelled
+	 *
+	 * The callback is run just after the current atomic section, any outer
+	 * atomic section, or the whole transaction is rolled back.
+	 *
+	 * An error is thrown if no atomic section is pending. The atomic section
+	 * need not have been created with the ATOMIC_CANCELABLE flag.
+	 *
+	 * Queries in the function may be running in the context of an outer
+	 * transaction or may be running in AUTOCOMMIT mode. The callback should
+	 * use atomic sections if necessary.
+	 *
+	 * @note do not assume that *other* IDatabase instances will be AUTOCOMMIT mode
+	 *
+	 * The callback takes the following arguments:
+	 *   - IDatabase::TRIGGER_CANCEL or IDatabase::TRIGGER_ROLLBACK
+	 *   - This IDatabase instance
+	 *
+	 * @param callable $callback
+	 * @param string $fname Caller name
+	 * @since 1.34
+	 */
+	public function onAtomicSectionCancel( callable $callback, $fname = __METHOD__ );
+
+	/**
+	 * Run a callback after each time any transaction commits or rolls back
 	 *
 	 * The callback takes two arguments:
 	 *   - IDatabase::TRIGGER_COMMIT or IDatabase::TRIGGER_ROLLBACK
 	 *   - This IDatabase object
 	 * Callbacks must commit any transactions that they begin.
 	 *
-	 * Registering a callback here will not affect writesOrCallbacks() pending
+	 * Registering a callback here will not affect writesOrCallbacks() pending.
+	 *
+	 * Since callbacks from this or onTransactionCommitOrIdle() can start and end transactions,
+	 * a single call to IDatabase::commit might trigger multiple runs of the listener callbacks.
 	 *
 	 * @param string $name Callback name
 	 * @param callable|null $callback Use null to unset a listener
-	 * @return mixed
 	 * @since 1.28
 	 */
 	public function setTransactionListener( $name, callable $callback = null );
@@ -1579,7 +1687,7 @@ interface IDatabase {
 	 *   - The failures are from contention solvable via onTransactionPreCommitOrIdle()
 	 *   - The failures are deadlocks; the RDBMs usually discard the whole transaction
 	 *
-	 * @note: callers must use additional measures for situations involving two or more
+	 * @note callers must use additional measures for situations involving two or more
 	 *   (peer) transactions (e.g. updating two database servers at once). The transaction
 	 *   and savepoint logic of this method only applies to this specific IDatabase instance.
 	 *
@@ -1631,7 +1739,7 @@ interface IDatabase {
 	 * @param string $cancelable Pass self::ATOMIC_CANCELABLE to use a
 	 *  savepoint and enable self::cancelAtomic() for this section.
 	 * @return AtomicSectionIdentifier section ID token
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function startAtomic( $fname = __METHOD__, $cancelable = self::ATOMIC_NOT_CANCELABLE );
 
@@ -1644,7 +1752,7 @@ interface IDatabase {
 	 * @since 1.23
 	 * @see IDatabase::startAtomic
 	 * @param string $fname
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function endAtomic( $fname = __METHOD__ );
 
@@ -1658,7 +1766,7 @@ interface IDatabase {
 	 * corresponding startAtomic() implicitly started a transaction, that
 	 * transaction is rolled back.
 	 *
-	 * @note: callers must use additional measures for situations involving two or more
+	 * @note callers must use additional measures for situations involving two or more
 	 *   (peer) transactions (e.g. updating two database servers at once). The transaction
 	 *   and savepoint logic of startAtomic() are bound to specific IDatabase instances.
 	 *
@@ -1669,9 +1777,9 @@ interface IDatabase {
 	 * @since 1.31
 	 * @see IDatabase::startAtomic
 	 * @param string $fname
-	 * @param AtomicSectionIdentifier $sectionId Section ID from startAtomic();
+	 * @param AtomicSectionIdentifier|null $sectionId Section ID from startAtomic();
 	 *   passing this enables cancellation of unclosed nested sections [optional]
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function cancelAtomic( $fname = __METHOD__, AtomicSectionIdentifier $sectionId = null );
 
@@ -1741,8 +1849,8 @@ interface IDatabase {
 	 * @param string $cancelable Pass self::ATOMIC_CANCELABLE to use a
 	 *  savepoint and enable self::cancelAtomic() for this section.
 	 * @return mixed $res Result of the callback (since 1.28)
-	 * @throws DBError
-	 * @throws RuntimeException
+	 * @throws DBError If an error occurs, see IDatabase::query()
+	 * @throws Exception If an error occurs in the callback
 	 * @since 1.27; prior to 1.31 this did a rollback() instead of
 	 *  cancelAtomic(), and assumed no callers up the stack would ever try to
 	 *  catch the exception.
@@ -1752,8 +1860,7 @@ interface IDatabase {
 	);
 
 	/**
-	 * Begin a transaction. If a transaction is already in progress,
-	 * that transaction will be committed before the new transaction is started.
+	 * Begin a transaction
 	 *
 	 * Only call this from code with outer transcation scope.
 	 * See https://www.mediawiki.org/wiki/Database_transactions for details.
@@ -1769,12 +1876,13 @@ interface IDatabase {
 	 *
 	 * @param string $fname Calling function name
 	 * @param string $mode A situationally valid IDatabase::TRANSACTION_* constant [optional]
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function begin( $fname = __METHOD__, $mode = self::TRANSACTION_EXPLICIT );
 
 	/**
-	 * Commits a transaction previously started using begin().
+	 * Commits a transaction previously started using begin()
+	 *
 	 * If no transaction is in progress, a warning is issued.
 	 *
 	 * Only call this from code with outer transcation scope.
@@ -1785,19 +1893,15 @@ interface IDatabase {
 	 * @param string $flush Flush flag, set to situationally valid IDatabase::FLUSHING_*
 	 *   constant to disable warnings about explicitly committing implicit transactions,
 	 *   or calling commit when no transaction is in progress.
-	 *
 	 *   This will trigger an exception if there is an ongoing explicit transaction.
-	 *
 	 *   Only set the flush flag if you are sure that these warnings are not applicable,
 	 *   and no explicit transactions are open.
-	 *
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
-	public function commit( $fname = __METHOD__, $flush = '' );
+	public function commit( $fname = __METHOD__, $flush = self::FLUSHING_ONE );
 
 	/**
-	 * Rollback a transaction previously started using begin().
-	 * If no transaction is in progress, a warning is issued.
+	 * Rollback a transaction previously started using begin()
 	 *
 	 * Only call this from code with outer transcation scope.
 	 * See https://www.mediawiki.org/wiki/Database_transactions for details.
@@ -1812,10 +1916,10 @@ interface IDatabase {
 	 *   constant to disable warnings about calling rollback when no transaction is in
 	 *   progress. This will silently break any ongoing explicit transaction. Only set the
 	 *   flush flag if you are sure that it is safe to ignore these warnings in your context.
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 * @since 1.23 Added $flush parameter
 	 */
-	public function rollback( $fname = __METHOD__, $flush = '' );
+	public function rollback( $fname = __METHOD__, $flush = self::FLUSHING_ONE );
 
 	/**
 	 * Commit any transaction but error out if writes or callbacks are pending
@@ -1826,14 +1930,21 @@ interface IDatabase {
 	 * useful to call on a replica DB after waiting on replication to catch up to the master.
 	 *
 	 * @param string $fname Calling function name
-	 * @throws DBError
+	 * @param string $flush Flush flag, set to situationally valid IDatabase::FLUSHING_*
+	 *   constant to disable warnings about explicitly committing implicit transactions,
+	 *   or calling commit when no transaction is in progress.
+	 *   This will trigger an exception if there is an ongoing explicit transaction.
+	 *   Only set the flush flag if you are sure that these warnings are not applicable,
+	 *   and no explicit transactions are open.
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 * @since 1.28
+	 * @since 1.34 Added $flush parameter
 	 */
-	public function flushSnapshot( $fname = __METHOD__ );
+	public function flushSnapshot( $fname = __METHOD__, $flush = self::FLUSHING_ONE );
 
 	/**
-	 * Convert a timestamp in one of the formats accepted by wfTimestamp()
-	 * to the format used for inserting into timestamp fields in this DBMS.
+	 * Convert a timestamp in one of the formats accepted by ConvertibleTimestamp
+	 * to the format used for inserting into timestamp fields in this DBMS
 	 *
 	 * The result is unquoted, and needs to be passed through addQuotes()
 	 * before it can be included in raw SQL.
@@ -1845,15 +1956,16 @@ interface IDatabase {
 	public function timestamp( $ts = 0 );
 
 	/**
-	 * Convert a timestamp in one of the formats accepted by wfTimestamp()
-	 * to the format used for inserting into timestamp fields in this DBMS. If
-	 * NULL is input, it is passed through, allowing NULL values to be inserted
+	 * Convert a timestamp in one of the formats accepted by ConvertibleTimestamp
+	 * to the format used for inserting into timestamp fields in this DBMS
+	 *
+	 * If NULL is input, it is passed through, allowing NULL values to be inserted
 	 * into timestamp fields.
 	 *
 	 * The result is unquoted, and needs to be passed through addQuotes()
 	 * before it can be included in raw SQL.
 	 *
-	 * @param string|int $ts
+	 * @param string|int|null $ts
 	 *
 	 * @return string
 	 */
@@ -1873,7 +1985,7 @@ interface IDatabase {
 	 * Callers should avoid using this method while a transaction is active
 	 *
 	 * @return int|bool Database replication lag in seconds or false on error
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function getLag();
 
@@ -1888,13 +2000,13 @@ interface IDatabase {
 	 * indication of the staleness of subsequent reads.
 	 *
 	 * @return array ('lag': seconds or false on error, 'since': UNIX timestamp of BEGIN)
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 * @since 1.27
 	 */
 	public function getSessionLagStatus();
 
 	/**
-	 * Return the maximum number of items allowed in a list, or 0 for unlimited.
+	 * Return the maximum number of items allowed in a list, or 0 for unlimited
 	 *
 	 * @return int
 	 */
@@ -1908,6 +2020,7 @@ interface IDatabase {
 	 *
 	 * @param string $b
 	 * @return string|Blob
+	 * @throws DBError
 	 */
 	public function encodeBlob( $b );
 
@@ -1918,6 +2031,7 @@ interface IDatabase {
 	 *
 	 * @param string|Blob $b
 	 * @return string
+	 * @throws DBError
 	 */
 	public function decodeBlob( $b );
 
@@ -1930,7 +2044,7 @@ interface IDatabase {
 	 *
 	 * @param array $options
 	 * @return void
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function setSessionOptions( array $options );
 
@@ -1949,7 +2063,7 @@ interface IDatabase {
 	 * @param string $lockName Name of lock to poll
 	 * @param string $method Name of method calling us
 	 * @return bool
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 * @since 1.20
 	 */
 	public function lockIsFree( $lockName, $method );
@@ -1961,9 +2075,9 @@ interface IDatabase {
 	 *
 	 * @param string $lockName Name of lock to aquire
 	 * @param string $method Name of the calling method
-	 * @param int $timeout Acquisition timeout in seconds
-	 * @return bool
-	 * @throws DBError
+	 * @param int $timeout Acquisition timeout in seconds (0 means non-blocking)
+	 * @return bool Success
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function lock( $lockName, $method, $timeout = 5 );
 
@@ -1974,12 +2088,8 @@ interface IDatabase {
 	 *
 	 * @param string $lockName Name of lock to release
 	 * @param string $method Name of the calling method
-	 *
-	 * @return int Returns 1 if the lock was released, 0 if the lock was not established
-	 * by this thread (in which case the lock is not released), and NULL if the named lock
-	 * did not exist
-	 *
-	 * @throws DBError
+	 * @return bool Success
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 */
 	public function unlock( $lockName, $method );
 
@@ -2001,7 +2111,7 @@ interface IDatabase {
 	 * @param string $fname Name of the calling method
 	 * @param int $timeout Acquisition timeout in seconds
 	 * @return ScopedCallback|null
-	 * @throws DBError
+	 * @throws DBError If an error occurs, see IDatabase::query()
 	 * @since 1.27
 	 */
 	public function getScopedLockAndFlush( $lockKey, $fname, $timeout );
@@ -2082,10 +2192,21 @@ interface IDatabase {
 	 * the aliases can be removed, and then the old X-named indexes dropped.
 	 *
 	 * @param string[] $aliases
-	 * @return mixed
 	 * @since 1.31
 	 */
 	public function setIndexAliases( array $aliases );
+
+	/**
+	 * Get a debugging string that mentions the database type, the ID of this instance,
+	 * and the ID of any underlying connection resource or driver object if one is present
+	 *
+	 * @return string "<db type> object #<X>" or "<db type> object #<X> (resource/handle id #<Y>)"
+	 * @since 1.34
+	 */
+	public function __toString();
 }
 
+/**
+ * @deprecated since 1.29
+ */
 class_alias( IDatabase::class, 'IDatabase' );

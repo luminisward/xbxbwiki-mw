@@ -43,7 +43,8 @@ class SpecialPageLanguage extends FormSpecialPage {
 	}
 
 	protected function preText() {
-		$this->getOutput()->addModules( 'mediawiki.special.pageLanguage' );
+		$this->getOutput()->addModules( 'mediawiki.misc-authed-ooui' );
+		return parent::preText();
 	}
 
 	protected function getFormFields() {
@@ -82,7 +83,6 @@ class SpecialPageLanguage extends FormSpecialPage {
 		// Building a language selector
 		$userLang = $this->getLanguage()->getCode();
 		$languages = Language::fetchLanguageNames( $userLang, 'mwfile' );
-		ksort( $languages );
 		$options = [];
 		foreach ( $languages as $code => $name ) {
 			$options["$code - $name"] = $code;
@@ -164,7 +164,7 @@ class SpecialPageLanguage extends FormSpecialPage {
 			$this->getContext(),
 			$title,
 			$newLanguage,
-			$data['reason'] === null ? '' : $data['reason']
+			$data['reason'] ?? ''
 		);
 	}
 
@@ -225,8 +225,8 @@ class SpecialPageLanguage extends FormSpecialPage {
 		}
 
 		// Hardcoded [def] if the language is set to null
-		$logOld = $oldLanguage ? $oldLanguage : $defLang . '[def]';
-		$logNew = $newLanguage ? $newLanguage : $defLang . '[def]';
+		$logOld = $oldLanguage ?: $defLang . '[def]';
+		$logNew = $newLanguage ?: $defLang . '[def]';
 
 		// Writing new page language to database
 		$dbw->update(
@@ -253,7 +253,7 @@ class SpecialPageLanguage extends FormSpecialPage {
 		$entry->setTarget( $title );
 		$entry->setParameters( $logParams );
 		$entry->setComment( $reason );
-		$entry->setTags( $tags );
+		$entry->addTags( $tags );
 
 		$logid = $entry->insert();
 		$entry->publish( $logid );

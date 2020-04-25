@@ -1,7 +1,5 @@
 <?php
 /**
- * ResourceLoader module for populating language specific data.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -19,13 +17,15 @@
  *
  * @file
  * @author Santhosh Thottingal
- * @author Timo Tijhof
  */
 
 /**
- * ResourceLoader module for populating language specific data.
+ * Module for populating language specific data, such as grammar forms.
+ *
+ * @ingroup ResourceLoader
+ * @internal
  */
-class ResourceLoaderLanguageDataModule extends ResourceLoaderModule {
+class ResourceLoaderLanguageDataModule extends ResourceLoaderFileModule {
 
 	protected $targets = [ 'desktop', 'mobile' ];
 
@@ -46,6 +46,7 @@ class ResourceLoaderLanguageDataModule extends ResourceLoaderModule {
 			'pluralRules' => $language->getPluralRules(),
 			'digitGroupingPattern' => $language->digitGroupingPattern(),
 			'fallbackLanguages' => $language->getFallbackLanguages(),
+			'bcp47Map' => LanguageCode::getNonstandardLanguageCodeMapping(),
 		];
 	}
 
@@ -54,14 +55,11 @@ class ResourceLoaderLanguageDataModule extends ResourceLoaderModule {
 	 * @return string JavaScript code
 	 */
 	public function getScript( ResourceLoaderContext $context ) {
-		return Xml::encodeJsCall(
-			'mw.language.setData',
-			[
-				$context->getLanguage(),
-				$this->getData( $context )
-			],
-			ResourceLoader::inDebugMode()
-		);
+		return parent::getScript( $context )
+			. 'mw.language.setData('
+			. $context->encodeJson( $context->getLanguage() ) . ','
+			. $context->encodeJson( $this->getData( $context ) )
+			. ');';
 	}
 
 	/**
@@ -72,10 +70,9 @@ class ResourceLoaderLanguageDataModule extends ResourceLoaderModule {
 	}
 
 	/**
-	 * @param ResourceLoaderContext $context
-	 * @return array
+	 * @return bool
 	 */
-	public function getDependencies( ResourceLoaderContext $context = null ) {
-		return [ 'mediawiki.language.init' ];
+	public function supportsURLLoading() {
+		return false;
 	}
 }

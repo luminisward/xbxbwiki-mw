@@ -20,10 +20,22 @@
  * @file
  */
 
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Revision\RevisionAccessException;
+use MediaWiki\Revision\RevisionRecord;
+use MediaWiki\Revision\RevisionStore;
+use MediaWiki\Revision\SlotRecord;
+
 /**
  * @ingroup API
  */
 class ApiFeedContributions extends ApiBase {
+
+	/** @var RevisionStore */
+	private $revisionStore;
+
+	/** @var TitleParser */
+	private $titleParser;
 
 	/**
 	 * This module uses a custom feed wrapper printer.
@@ -35,6 +47,9 @@ class ApiFeedContributions extends ApiBase {
 	}
 
 	public function execute() {
+		$this->revisionStore = MediaWikiServices::getInstance()->getRevisionStore();
+		$this->titleParser = MediaWikiServices::getInstance()->getTitleParser();
+
 		$params = $this->extractRequestParams();
 
 		$config = $this->getConfig();
@@ -56,9 +71,16 @@ class ApiFeedContributions extends ApiBase {
 			' [' . $config->get( 'LanguageCode' ) . ']';
 		$feedUrl = SpecialPage::getTitleFor( 'Contributions', $params['user'] )->getFullURL();
 
-		$target = $params['user'] == 'newbies'
-			? 'newbies'
-			: Title::makeTitleSafe( NS_USER, $params['user'] )->getText();
+		try {
+			$target = $this->titleParser
+				->parseTitle( $params['user'], NS_USER )
+				->getText();
+		} catch ( MalformedTitleException $e ) {
+			$this->dieWithError(
+				[ 'apierror-baduser', 'user', wfEscapeWikiText( $params['user'] ) ],
+				'baduser_' . $this->encodeParamName( 'user' )
+			);
+		}
 
 		$feed = new $feedClasses[$params['feedformat']] (
 			$feedTitle,
@@ -126,11 +148,13 @@ class ApiFeedContributions extends ApiBase {
 		}
 
 		// Hook completed and did not return a valid feed item
-		$title = Title::makeTitle( intval( $row->page_namespace ), $row->page_title );
-		if ( $title && $title->userCan( 'read', $this->getUser() ) ) {
+		$title = Title::makeTitle( (int)$row->page_namespace, $row->page_title );
+		$user = $this->getUser();
+
+		if ( $title && $this->getPermissionManager()->userCan( 'read', $user, $title ) ) {
 			$date = $row->rev_timestamp;
 			$comments = $title->getTalkPage()->getFullURL();
-			$revision = Revision::newFromRow( $row );
+			$revision = $this->revisionStore->newRevisionFromRow( $row );
 
 			return new FeedItem(
 				$title->getPrefixedText(),
@@ -146,39 +170,44 @@ class ApiFeedContributions extends ApiBase {
 	}
 
 	/**
-	 * @param Revision $revision
+	 * @since 1.32, takes a RevisionRecord instead of a Revision
+	 * @param RevisionRecord $revision
 	 * @return string
 	 */
-	protected function feedItemAuthor( $revision ) {
-		return $revision->getUserText();
+	protected function feedItemAuthor( RevisionRecord $revision ) {
+		$user = $revision->getUser();
+		return $user ? $user->getName() : '';
 	}
 
 	/**
-	 * @param Revision $revision
+	 * @since 1.32, takes a RevisionRecord instead of a Revision
+	 * @param RevisionRecord $revision
 	 * @return string
 	 */
-	protected function feedItemDesc( $revision ) {
-		if ( $revision ) {
-			$msg = wfMessage( 'colon-separator' )->inContentLanguage()->text();
-			$content = $revision->getContent();
-
-			if ( $content instanceof TextContent ) {
-				// only textual content has a "source view".
-				$html = nl2br( htmlspecialchars( $content->getNativeData() ) );
-			} else {
-				// XXX: we could get an HTML representation of the content via getParserOutput, but that may
-				//     contain JS magic and generally may not be suitable for inclusion in a feed.
-				//     Perhaps Content should have a getDescriptiveHtml method and/or a getSourceText method.
-				// Compare also FeedUtils::formatDiffRow.
-				$html = '';
-			}
-
-			return '<p>' . htmlspecialchars( $revision->getUserText() ) . $msg .
-				htmlspecialchars( FeedItem::stripComment( $revision->getComment() ) ) .
-				"</p>\n<hr />\n<div>" . $html . '</div>';
+	protected function feedItemDesc( RevisionRecord $revision ) {
+		$msg = wfMessage( 'colon-separator' )->inContentLanguage()->text();
+		try {
+			$content = $revision->getContent( SlotRecord::MAIN );
+		} catch ( RevisionAccessException $e ) {
+			$content = null;
 		}
 
-		return '';
+		if ( $content instanceof TextContent ) {
+			// only textual content has a "source view".
+			$html = nl2br( htmlspecialchars( $content->getText() ) );
+		} else {
+			// XXX: we could get an HTML representation of the content via getParserOutput, but that may
+			//     contain JS magic and generally may not be suitable for inclusion in a feed.
+			//     Perhaps Content should have a getDescriptiveHtml method and/or a getSourceText method.
+			// Compare also FeedUtils::formatDiffRow.
+			$html = '';
+		}
+
+		$comment = $revision->getComment();
+
+		return '<p>' . htmlspecialchars( $this->feedItemAuthor( $revision ) ) . $msg .
+			htmlspecialchars( FeedItem::stripComment( $comment ? $comment->text : '' ) ) .
+			"</p>\n<hr />\n<div>" . $html . '</div>';
 	}
 
 	public function getAllowedParams() {

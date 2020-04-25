@@ -40,6 +40,11 @@ class SpecialPagesWithProp extends QueryPage {
 	private $existingPropNames = null;
 
 	/**
+	 * @var int|null
+	 */
+	private $ns;
+
+	/**
 	 * @var bool
 	 */
 	private $reverse = false;
@@ -60,10 +65,11 @@ class SpecialPagesWithProp extends QueryPage {
 	public function execute( $par ) {
 		$this->setHeaders();
 		$this->outputHeader();
-		$this->getOutput()->addModuleStyles( 'mediawiki.special.pagesWithProp' );
+		$this->getOutput()->addModuleStyles( 'mediawiki.special' );
 
 		$request = $this->getRequest();
 		$propname = $request->getVal( 'propname', $par );
+		$this->ns = $request->getIntOrNull( 'namespace' );
 		$this->reverse = $request->getBool( 'reverse' );
 		$this->sortByValue = $request->getBool( 'sortbyvalue' );
 
@@ -77,6 +83,13 @@ class SpecialPagesWithProp extends QueryPage {
 				'default' => $propname,
 				'label-message' => 'pageswithprop-prop',
 				'required' => true,
+			],
+			'namespace' => [
+				'type' => 'namespaceselect',
+				'name' => 'namespace',
+				'label-message' => 'namespace',
+				'all' => '',
+				'default' => $this->ns,
 			],
 			'reverse' => [
 				'type' => 'check',
@@ -134,7 +147,7 @@ class SpecialPagesWithProp extends QueryPage {
 	}
 
 	public function getQueryInfo() {
-		return [
+		$query = [
 			'tables' => [ 'page_props', 'page' ],
 			'fields' => [
 				'page_id' => 'pp_page',
@@ -149,10 +162,16 @@ class SpecialPagesWithProp extends QueryPage {
 				'pp_propname' => $this->propName,
 			],
 			'join_conds' => [
-				'page' => [ 'INNER JOIN', 'page_id = pp_page' ]
+				'page' => [ 'JOIN', 'page_id = pp_page' ]
 			],
 			'options' => []
 		];
+
+		if ( $this->ns !== null ) {
+			$query['conds']['page_namespace'] = $this->ns;
+		}
+
+		return $query;
 	}
 
 	function getOrderFields() {

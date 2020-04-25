@@ -1,7 +1,5 @@
 <?php
 /**
- * Derivative context for ResourceLoader modules.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -22,9 +20,12 @@
  */
 
 /**
- * Allows changing specific properties of a context object,
- * without changing the main one. Inspired by DerivativeContext.
+ * A mutable version of ResourceLoaderContext.
  *
+ * Allows changing specific properties of a context object,
+ * without changing the main one. Inspired by MediaWiki's DerivativeContext.
+ *
+ * @ingroup ResourceLoader
  * @since 1.24
  */
 class DerivativeResourceLoaderContext extends ResourceLoaderContext {
@@ -35,6 +36,7 @@ class DerivativeResourceLoaderContext extends ResourceLoaderContext {
 	 */
 	private $context;
 
+	/** @var int|array */
 	protected $modules = self::INHERIT_VALUE;
 	protected $language = self::INHERIT_VALUE;
 	protected $direction = self::INHERIT_VALUE;
@@ -44,6 +46,7 @@ class DerivativeResourceLoaderContext extends ResourceLoaderContext {
 	protected $only = self::INHERIT_VALUE;
 	protected $version = self::INHERIT_VALUE;
 	protected $raw = self::INHERIT_VALUE;
+	protected $contentOverrideCallback = self::INHERIT_VALUE;
 
 	public function __construct( ResourceLoaderContext $context ) {
 		$this->context = $context;
@@ -53,6 +56,7 @@ class DerivativeResourceLoaderContext extends ResourceLoaderContext {
 		if ( $this->modules === self::INHERIT_VALUE ) {
 			return $this->context->getModules();
 		}
+
 		return $this->modules;
 	}
 
@@ -194,6 +198,23 @@ class DerivativeResourceLoaderContext extends ResourceLoaderContext {
 
 	public function getResourceLoader() {
 		return $this->context->getResourceLoader();
+	}
+
+	public function getContentOverrideCallback() {
+		if ( $this->contentOverrideCallback === self::INHERIT_VALUE ) {
+			return $this->context->getContentOverrideCallback();
+		}
+		return $this->contentOverrideCallback;
+	}
+
+	/**
+	 * @see self::getContentOverrideCallback
+	 * @since 1.32
+	 * @param callable|null|int $callback As per self::getContentOverrideCallback,
+	 *  or self::INHERIT_VALUE
+	 */
+	public function setContentOverrideCallback( $callback ) {
+		$this->contentOverrideCallback = $callback;
 	}
 
 }

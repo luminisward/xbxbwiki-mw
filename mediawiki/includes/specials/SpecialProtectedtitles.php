@@ -37,6 +37,7 @@ class SpecialProtectedtitles extends SpecialPage {
 	function execute( $par ) {
 		$this->setHeaders();
 		$this->outputHeader();
+		$this->addHelpLink( 'Help:Protected_pages' );
 
 		$request = $this->getRequest();
 		$type = $request->getVal( $this->IdType );
@@ -112,7 +113,7 @@ class SpecialProtectedtitles extends SpecialPage {
 	 * @return string
 	 * @private
 	 */
-	function showOptions( $namespace, $type = 'edit', $level ) {
+	function showOptions( $namespace, $type, $level ) {
 		$formDescriptor = [
 			'namespace' => [
 				'class' => 'HTMLSelectNamespace',
@@ -125,7 +126,7 @@ class SpecialProtectedtitles extends SpecialPage {
 			'levelmenu' => $this->getLevelMenu( $level )
 		];
 
-		$htmlForm = new HTMLForm( $formDescriptor, $this->getContext() );
+		$htmlForm = HTMLForm::factory( 'ooui', $formDescriptor, $this->getContext() );
 		$htmlForm
 			->setMethod( 'get' )
 			->setWrapperLegendMsg( 'protectedtitles' )
@@ -136,7 +137,7 @@ class SpecialProtectedtitles extends SpecialPage {
 
 	/**
 	 * @param string $pr_level Determines which option is selected as default
-	 * @return string Formatted HTML
+	 * @return string|array
 	 * @private
 	 */
 	function getLevelMenu( $pr_level ) {

@@ -89,13 +89,6 @@ class FauxRequest extends WebRequest {
 	/**
 	 * @return array
 	 */
-	public function getValues() {
-		return $this->data;
-	}
-
-	/**
-	 * @return array
-	 */
 	public function getQueryValues() {
 		if ( $this->wasPosted ) {
 			return [];
@@ -121,7 +114,7 @@ class FauxRequest extends WebRequest {
 			$prefix = $wgCookiePrefix;
 		}
 		$name = $prefix . $key;
-		return isset( $this->cookies[$name] ) ? $this->cookies[$name] : $default;
+		return $this->cookies[$name] ?? $default;
 	}
 
 	/**

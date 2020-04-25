@@ -2,6 +2,7 @@
 
 use MediaWiki\Linker\LinkTarget;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Revision\SlotRecord;
 
 /**
  * @group medium
@@ -89,17 +90,14 @@ class ApiQueryWatchlistIntegrationTest extends ApiTestCase {
 		User $patrollingUser
 	) {
 		$title = Title::newFromLinkTarget( $target );
+		$summary = CommentStoreComment::newUnsavedComment( trim( $summary ) );
 		$page = WikiPage::factory( $title );
-		$status = $page->doEditContent(
-			ContentHandler::makeContent( $content, $title ),
-			$summary,
-			0,
-			false,
-			$user
-		);
-		/** @var Revision $rev */
-		$rev = $status->value['revision'];
-		$rc = $rev->getRecentChange();
+
+		$updater = $page->newPageUpdater( $user );
+		$updater->setContent( SlotRecord::MAIN, ContentHandler::makeContent( $content, $title ) );
+		$rev = $updater->saveRevision( $summary );
+
+		$rc = MediaWikiServices::getInstance()->getRevisionStore()->getRecentChange( $rev );
 		$rc->doMarkPatrolled( $patrollingUser, false, [] );
 	}
 
@@ -230,16 +228,8 @@ class ApiQueryWatchlistIntegrationTest extends ApiTestCase {
 		}
 	}
 
-	private function getTitleFormatter() {
-		return new MediaWikiTitleCodec(
-			Language::factory( 'en' ),
-			MediaWikiServices::getInstance()->getGenderCache()
-		);
-	}
-
 	private function getPrefixedText( LinkTarget $target ) {
-		$formatter = $this->getTitleFormatter();
-		return $formatter->getPrefixedText( $target );
+		return MediaWikiServices::getInstance()->getTitleFormatter()->getPrefixedText( $target );
 	}
 
 	private function cleanTestUsersWatchlist() {
@@ -1585,7 +1575,7 @@ class ApiQueryWatchlistIntegrationTest extends ApiTestCase {
 		$pages = array_values( $result[0]['query']['pages'] );
 
 		$this->assertCount( 1, $pages );
-		$this->assertEquals( 0, $pages[0]['ns'] );
+		$this->assertSame( 0, $pages[0]['ns'] );
 		$this->assertEquals( $this->getPrefixedText( $target ), $pages[0]['title'] );
 		$this->assertArraySubsetsEqual(
 			$pages[0]['revisions'],

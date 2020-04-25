@@ -1,9 +1,12 @@
 <?php
 
-use Wikimedia\Rdbms\IDatabase;
 use MediaWiki\Linker\LinkTarget;
+use MediaWiki\Permissions\PermissionManager;
+use MediaWiki\Revision\RevisionRecord;
+use MediaWiki\User\UserIdentity;
 use Wikimedia\Assert\Assert;
-use Wikimedia\Rdbms\LoadBalancer;
+use Wikimedia\Rdbms\IDatabase;
+use Wikimedia\Rdbms\ILoadBalancer;
 
 /**
  * Class performing complex database queries related to WatchedItems.
@@ -13,7 +16,7 @@ use Wikimedia\Rdbms\LoadBalancer;
  * @file
  * @ingroup Watchlist
  *
- * @license GNU GPL v2+
+ * @license GPL-2.0-or-later
  */
 class WatchedItemQueryService {
 
@@ -52,7 +55,7 @@ class WatchedItemQueryService {
 	const SORT_DESC = 'DESC';
 
 	/**
-	 * @var LoadBalancer
+	 * @var ILoadBalancer
 	 */
 	private $loadBalancer;
 
@@ -65,14 +68,24 @@ class WatchedItemQueryService {
 	/** @var ActorMigration */
 	private $actorMigration;
 
+	/** @var WatchedItemStoreInterface */
+	private $watchedItemStore;
+
+	/** @var PermissionManager */
+	private $permissionManager;
+
 	public function __construct(
-		LoadBalancer $loadBalancer,
+		ILoadBalancer $loadBalancer,
 		CommentStore $commentStore,
-		ActorMigration $actorMigration
+		ActorMigration $actorMigration,
+		WatchedItemStoreInterface $watchedItemStore,
+		PermissionManager $permissionManager
 	) {
 		$this->loadBalancer = $loadBalancer;
 		$this->commentStore = $commentStore;
 		$this->actorMigration = $actorMigration;
+		$this->watchedItemStore = $watchedItemStore;
+		$this->permissionManager = $permissionManager;
 	}
 
 	/**
@@ -88,7 +101,6 @@ class WatchedItemQueryService {
 
 	/**
 	 * @return IDatabase
-	 * @throws MWException
 	 */
 	private function getConnection() {
 		return $this->loadBalancer->getConnectionRef( DB_REPLICA, [ 'watchlist' ] );
@@ -117,8 +129,8 @@ class WatchedItemQueryService {
 	 *        'end'                 => string (format accepted by wfTimestamp) requires 'dir' option,
 	 *                                 timestamp to end enumerating
 	 *        'watchlistOwner'      => User user whose watchlist items should be listed if different
-	 *                                 than the one specified with $user param,
-	 *                                 requires 'watchlistOwnerToken' option
+	 *                                 than the one specified with $user param, requires
+	 *                                 'watchlistOwnerToken' option
 	 *        'watchlistOwnerToken' => string a watchlist token used to access another user's
 	 *                                 watchlist, used with 'watchlistOwnerToken' option
 	 *        'limit'               => int maximum numbers of items to return
@@ -127,7 +139,7 @@ class WatchedItemQueryService {
 	 *                                 id fields ('rc_cur_id', 'rc_this_oldid', 'rc_last_oldid')
 	 *                                 if false (default)
 	 * @param array|null &$startFrom Continuation value: [ string $rcTimestamp, int $rcId ]
-	 * @return array of pairs ( WatchedItem $watchedItem, string[] $recentChangeInfo ),
+	 * @return array[] Array of pairs ( WatchedItem $watchedItem, string[] $recentChangeInfo ),
 	 *         where $recentChangeInfo contains the following keys:
 	 *         - 'rc_id',
 	 *         - 'rc_namespace',
@@ -220,7 +232,7 @@ class WatchedItemQueryService {
 			$joinConds
 		);
 
-		$limit = isset( $dbOptions['LIMIT'] ) ? $dbOptions['LIMIT'] : INF;
+		$limit = $dbOptions['LIMIT'] ?? INF;
 		$items = [];
 		$startFrom = null;
 		foreach ( $res as $row ) {
@@ -229,11 +241,14 @@ class WatchedItemQueryService {
 				break;
 			}
 
+			$target = new TitleValue( (int)$row->rc_namespace, $row->rc_title );
 			$items[] = [
 				new WatchedItem(
 					$user,
-					new TitleValue( (int)$row->rc_namespace, $row->rc_title ),
-					$row->wl_notificationtimestamp
+					$target,
+					$this->watchedItemStore->getLatestNotificationTimestamp(
+						$row->wl_notificationtimestamp, $user, $target
+					)
 				),
 				$this->getRecentChangeFieldsFromRow( $row )
 			];
@@ -249,7 +264,7 @@ class WatchedItemQueryService {
 	/**
 	 * For simple listing of user's watchlist items, see WatchedItemStore::getWatchedItemsForUser
 	 *
-	 * @param User $user
+	 * @param UserIdentity $user
 	 * @param array $options Allowed keys:
 	 *        'sort'         => string optional sorting by namespace ID and title
 	 *                          one of the self::SORT_* constants
@@ -265,8 +280,8 @@ class WatchedItemQueryService {
 	 *                          specified using the form option
 	 * @return WatchedItem[]
 	 */
-	public function getWatchedItemsForUser( User $user, array $options = [] ) {
-		if ( $user->isAnon() ) {
+	public function getWatchedItemsForUser( UserIdentity $user, array $options = [] ) {
+		if ( !$user->isRegistered() ) {
 			// TODO: should this just return an empty array or rather complain loud at this point
 			// as e.g. ApiBase::getWatchlistUser does?
 			return [];
@@ -308,11 +323,14 @@ class WatchedItemQueryService {
 
 		$watchedItems = [];
 		foreach ( $res as $row ) {
+			$target = new TitleValue( (int)$row->wl_namespace, $row->wl_title );
 			// todo these could all be cached at some point?
 			$watchedItems[] = new WatchedItem(
 				$user,
-				new TitleValue( (int)$row->wl_namespace, $row->wl_title ),
-				$row->wl_notificationtimestamp
+				$target,
+				$this->watchedItemStore->getLatestNotificationTimestamp(
+					$row->wl_notificationtimestamp, $user, $target
+				)
 			);
 		}
 
@@ -339,9 +357,6 @@ class WatchedItemQueryService {
 		}
 		if ( in_array( self::INCLUDE_COMMENT, $options['includeFields'] ) ) {
 			$tables += $this->commentStore->getJoin( 'rc_comment' )['tables'];
-		}
-		if ( in_array( self::INCLUDE_TAGS, $options['includeFields'] ) ) {
-			$tables[] = 'tag_summary';
 		}
 		if ( in_array( self::INCLUDE_USER, $options['includeFields'] ) ||
 			in_array( self::INCLUDE_USER_ID, $options['includeFields'] ) ||
@@ -402,7 +417,7 @@ class WatchedItemQueryService {
 		}
 		if ( in_array( self::INCLUDE_TAGS, $options['includeFields'] ) ) {
 			// prefixed with rc_ to include the field in getRecentChangeFieldsFromRow
-			$fields['rc_tags'] = 'ts_tags';
+			$fields['rc_tags'] = ChangeTags::makeTagSummarySubquery( 'recentchanges' );
 		}
 
 		return $fields;
@@ -438,11 +453,9 @@ class WatchedItemQueryService {
 
 		$conds = array_merge( $conds, $this->getStartEndConds( $db, $options ) );
 
-		if ( !isset( $options['start'] ) && !isset( $options['end'] ) ) {
-			if ( $db->getType() === 'mysql' ) {
-				// This is an index optimization for mysql
-				$conds[] = 'rc_timestamp > ' . $db->addQuotes( '' );
-			}
+		if ( !isset( $options['start'] ) && !isset( $options['end'] ) && $db->getType() === 'mysql' ) {
+			// This is an index optimization for mysql
+			$conds[] = 'rc_timestamp > ' . $db->addQuotes( '' );
 		}
 
 		$conds = array_merge( $conds, $this->getUserRelatedConds( $db, $user, $options ) );
@@ -455,11 +468,12 @@ class WatchedItemQueryService {
 		return $conds;
 	}
 
-	private function getWatchlistOwnerId( User $user, array $options ) {
+	private function getWatchlistOwnerId( UserIdentity $user, array $options ) {
 		if ( array_key_exists( 'watchlistOwner', $options ) ) {
 			/** @var User $watchlistOwner */
 			$watchlistOwner = $options['watchlistOwner'];
-			$ownersToken = $watchlistOwner->getOption( 'watchlisttoken' );
+			$ownersToken =
+				$watchlistOwner->getOption( 'watchlisttoken' );
 			$token = $options['watchlistOwnerToken'];
 			if ( $ownersToken == '' || !hash_equals( $ownersToken, $token ) ) {
 				throw ApiUsageException::newWithMessage( null, 'apierror-bad-watchlist-token', 'bad_wltoken' );
@@ -541,7 +555,7 @@ class WatchedItemQueryService {
 		return $conds;
 	}
 
-	private function getUserRelatedConds( IDatabase $db, User $user, array $options ) {
+	private function getUserRelatedConds( IDatabase $db, UserIdentity $user, array $options ) {
 		if ( !array_key_exists( 'onlyByUser', $options ) && !array_key_exists( 'notByUser', $options ) ) {
 			return [];
 		}
@@ -558,10 +572,12 @@ class WatchedItemQueryService {
 
 		// Avoid brute force searches (T19342)
 		$bitmask = 0;
-		if ( !$user->isAllowed( 'deletedhistory' ) ) {
-			$bitmask = Revision::DELETED_USER;
-		} elseif ( !$user->isAllowedAny( 'suppressrevision', 'viewsuppressed' ) ) {
-			$bitmask = Revision::DELETED_USER | Revision::DELETED_RESTRICTED;
+		if ( !$this->permissionManager->userHasRight( $user, 'deletedhistory' ) ) {
+			$bitmask = RevisionRecord::DELETED_USER;
+		} elseif ( !$this->permissionManager
+			->userHasAnyRight( $user, 'suppressrevision', 'viewsuppressed' )
+		) {
+			$bitmask = RevisionRecord::DELETED_USER | RevisionRecord::DELETED_RESTRICTED;
 		}
 		if ( $bitmask ) {
 			$conds[] = $db->bitAnd( 'rc_deleted', $bitmask ) . " != $bitmask";
@@ -570,13 +586,15 @@ class WatchedItemQueryService {
 		return $conds;
 	}
 
-	private function getExtraDeletedPageLogEntryRelatedCond( IDatabase $db, User $user ) {
+	private function getExtraDeletedPageLogEntryRelatedCond( IDatabase $db, UserIdentity $user ) {
 		// LogPage::DELETED_ACTION hides the affected page, too. So hide those
 		// entirely from the watchlist, or someone could guess the title.
 		$bitmask = 0;
-		if ( !$user->isAllowed( 'deletedhistory' ) ) {
+		if ( !$this->permissionManager->userHasRight( $user, 'deletedhistory' ) ) {
 			$bitmask = LogPage::DELETED_ACTION;
-		} elseif ( !$user->isAllowedAny( 'suppressrevision', 'viewsuppressed' ) ) {
+		} elseif ( !$this->permissionManager
+			->userHasAnyRight( $user, 'suppressrevision', 'viewsuppressed' )
+		) {
 			$bitmask = LogPage::DELETED_ACTION | LogPage::DELETED_RESTRICTED;
 		}
 		if ( $bitmask ) {
@@ -608,7 +626,9 @@ class WatchedItemQueryService {
 		);
 	}
 
-	private function getWatchedItemsForUserQueryConds( IDatabase $db, User $user, array $options ) {
+	private function getWatchedItemsForUserQueryConds(
+		IDatabase $db, UserIdentity $user, array $options
+	) {
 		$conds = [ 'wl_user' => $user->getId() ];
 		if ( $options['namespaceIds'] ) {
 			$conds['wl_namespace'] = array_map( 'intval', $options['namespaceIds'] );
@@ -697,7 +717,7 @@ class WatchedItemQueryService {
 
 	private function getWatchedItemsWithRCInfoQueryJoinConds( array $options ) {
 		$joinConds = [
-			'watchlist' => [ 'INNER JOIN',
+			'watchlist' => [ 'JOIN',
 				[
 					'wl_namespace=rc_namespace',
 					'wl_title=rc_title'
@@ -709,9 +729,6 @@ class WatchedItemQueryService {
 		}
 		if ( in_array( self::INCLUDE_COMMENT, $options['includeFields'] ) ) {
 			$joinConds += $this->commentStore->getJoin( 'rc_comment' )['joins'];
-		}
-		if ( in_array( self::INCLUDE_TAGS, $options['includeFields'] ) ) {
-			$joinConds['tag_summary'] = [ 'LEFT JOIN', [ 'rc_id=ts_rc_id' ] ];
 		}
 		if ( in_array( self::INCLUDE_USER, $options['includeFields'] ) ||
 			in_array( self::INCLUDE_USER_ID, $options['includeFields'] ) ||

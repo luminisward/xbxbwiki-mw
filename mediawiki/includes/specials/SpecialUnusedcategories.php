@@ -24,7 +24,7 @@
 /**
  * @ingroup SpecialPage
  */
-class UnusedCategoriesPage extends QueryPage {
+class SpecialUnusedCategories extends QueryPage {
 	function __construct( $name = 'Unusedcategories' ) {
 		parent::__construct( $name );
 	}
@@ -43,7 +43,7 @@ class UnusedCategoriesPage extends QueryPage {
 
 	public function getQueryInfo() {
 		return [
-			'tables' => [ 'page', 'categorylinks' ],
+			'tables' => [ 'page', 'categorylinks', 'page_props' ],
 			'fields' => [
 				'namespace' => 'page_namespace',
 				'title' => 'page_title',
@@ -51,9 +51,16 @@ class UnusedCategoriesPage extends QueryPage {
 			'conds' => [
 				'cl_from IS NULL',
 				'page_namespace' => NS_CATEGORY,
-				'page_is_redirect' => 0
+				'page_is_redirect' => 0,
+				'pp_page IS NULL'
 			],
-			'join_conds' => [ 'categorylinks' => [ 'LEFT JOIN', 'cl_to = page_title' ] ]
+			'join_conds' => [
+				'categorylinks' => [ 'LEFT JOIN', 'cl_to = page_title' ],
+				'page_props' => [ 'LEFT JOIN', [
+					'page_id = pp_page',
+					'pp_propname' => 'expectunusedcategory'
+				] ]
+			]
 		];
 	}
 

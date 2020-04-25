@@ -1,5 +1,7 @@
 <?php
 
+use MediaWiki\Block\DatabaseBlock;
+use MediaWiki\MediaWikiServices;
 use Wikimedia\TestingAccessWrapper;
 
 /**
@@ -164,13 +166,20 @@ class ApiBaseTest extends ApiTestCase {
 	}
 
 	public function testGetTitleOrPageIdPageId() {
+		$page = $this->getExistingTestPage();
 		$result = ( new MockApi() )->getTitleOrPageId(
-			[ 'pageid' => Title::newFromText( 'UTPage' )->getArticleId() ] );
+			[ 'pageid' => $page->getId() ] );
 		$this->assertInstanceOf( WikiPage::class, $result );
-		$this->assertSame( 'UTPage', $result->getTitle()->getPrefixedText() );
+		$this->assertSame(
+			$page->getTitle()->getPrefixedText(),
+			$result->getTitle()->getPrefixedText()
+		);
 	}
 
 	public function testGetTitleOrPageIdInvalidPageId() {
+		// FIXME: fails under postgres
+		$this->markTestSkippedIfDbType( 'postgres' );
+
 		$this->setExpectedException( ApiUsageException::class,
 			'There is no page with ID 2147483648.' );
 		$mock = new MockApi();
@@ -199,10 +208,11 @@ class ApiBaseTest extends ApiTestCase {
 	}
 
 	public function testGetTitleFromTitleOrPageIdPageId() {
+		$page = $this->getExistingTestPage();
 		$result = ( new MockApi() )->getTitleFromTitleOrPageId(
-			[ 'pageid' => Title::newFromText( 'UTPage' )->getArticleId() ] );
+			[ 'pageid' => $page->getId() ] );
 		$this->assertInstanceOf( Title::class, $result );
-		$this->assertSame( 'UTPage', $result->getPrefixedText() );
+		$this->assertSame( $page->getTitle()->getPrefixedText(), $result->getPrefixedText() );
 	}
 
 	public function testGetTitleFromTitleOrPageIdInvalidPageId() {
@@ -212,8 +222,45 @@ class ApiBaseTest extends ApiTestCase {
 		$mock->getTitleFromTitleOrPageId( [ 'pageid' => 298401643 ] );
 	}
 
+	public function testGetParameter() {
+		$mock = $this->getMockBuilder( MockApi::class )
+			->setMethods( [ 'getAllowedParams' ] )
+			->getMock();
+		$mock->method( 'getAllowedParams' )->willReturn( [
+			'foo' => [
+				ApiBase::PARAM_TYPE => [ 'value' ],
+			],
+			'bar' => [
+				ApiBase::PARAM_TYPE => [ 'value' ],
+			],
+		] );
+		$wrapper = TestingAccessWrapper::newFromObject( $mock );
+
+		$context = new DerivativeContext( $mock );
+		$context->setRequest( new FauxRequest( [ 'foo' => 'bad', 'bar' => 'value' ] ) );
+		$wrapper->mMainModule = new ApiMain( $context );
+
+		// Even though 'foo' is bad, getParameter( 'bar' ) must not fail
+		$this->assertSame( 'value', $wrapper->getParameter( 'bar' ) );
+
+		// But getParameter( 'foo' ) must throw.
+		try {
+			$wrapper->getParameter( 'foo' );
+			$this->fail( 'Expected exception not thrown' );
+		} catch ( ApiUsageException $ex ) {
+			$this->assertTrue( $this->apiExceptionHasCode( $ex, 'unknown_foo' ) );
+		}
+
+		// And extractRequestParams() must throw too.
+		try {
+			$mock->extractRequestParams();
+			$this->fail( 'Expected exception not thrown' );
+		} catch ( ApiUsageException $ex ) {
+			$this->assertTrue( $this->apiExceptionHasCode( $ex, 'unknown_foo' ) );
+		}
+	}
+
 	/**
-	 * @dataProvider provideGetParameterFromSettings
 	 * @param string|null $input
 	 * @param array $paramSettings
 	 * @param mixed $expected
@@ -221,21 +268,27 @@ class ApiBaseTest extends ApiTestCase {
 	 *   'parseLimits': true|false
 	 *   'apihighlimits': true|false
 	 *   'internalmode': true|false
+	 *   'prefix': true|false
 	 * @param string[] $warnings
 	 */
-	public function testGetParameterFromSettings(
+	private function doGetParameterFromSettings(
 		$input, $paramSettings, $expected, $warnings, $options = []
 	) {
 		$mock = new MockApi();
 		$wrapper = TestingAccessWrapper::newFromObject( $mock );
+		if ( $options['prefix'] ) {
+			$wrapper->mModulePrefix = 'my';
+			$paramName = 'Param';
+		} else {
+			$paramName = 'myParam';
+		}
 
 		$context = new DerivativeContext( $mock );
 		$context->setRequest( new FauxRequest(
 			$input !== null ? [ 'myParam' => $input ] : [] ) );
 		$wrapper->mMainModule = new ApiMain( $context );
 
-		$parseLimits = isset( $options['parseLimits'] ) ?
-			$options['parseLimits'] : true;
+		$parseLimits = $options['parseLimits'] ?? true;
 
 		if ( !empty( $options['apihighlimits'] ) ) {
 			$context->setUser( self::$users['sysop']->getUser() );
@@ -256,14 +309,14 @@ class ApiBaseTest extends ApiTestCase {
 
 		if ( $expected instanceof Exception ) {
 			try {
-				$wrapper->getParameterFromSettings( 'myParam', $paramSettings,
+				$wrapper->getParameterFromSettings( $paramName, $paramSettings,
 					$parseLimits );
 				$this->fail( 'No exception thrown' );
 			} catch ( Exception $ex ) {
 				$this->assertEquals( $expected, $ex );
 			}
 		} else {
-			$result = $wrapper->getParameterFromSettings( 'myParam',
+			$result = $wrapper->getParameterFromSettings( $paramName,
 				$paramSettings, $parseLimits );
 			if ( isset( $paramSettings[ApiBase::PARAM_TYPE] ) &&
 				$paramSettings[ApiBase::PARAM_TYPE] === 'timestamp' &&
@@ -295,6 +348,28 @@ class ApiBaseTest extends ApiTestCase {
 			$this->assertSame( [ 'myParam' ],
 				$mainWrapper->getSensitiveParams() );
 		}
+	}
+
+	/**
+	 * @dataProvider provideGetParameterFromSettings
+	 * @see self::doGetParameterFromSettings()
+	 */
+	public function testGetParameterFromSettings_noprefix(
+		$input, $paramSettings, $expected, $warnings, $options = []
+	) {
+		$options['prefix'] = false;
+		$this->doGetParameterFromSettings( $input, $paramSettings, $expected, $warnings, $options );
+	}
+
+	/**
+	 * @dataProvider provideGetParameterFromSettings
+	 * @see self::doGetParameterFromSettings()
+	 */
+	public function testGetParameterFromSettings_prefix(
+		$input, $paramSettings, $expected, $warnings, $options = []
+	) {
+		$options['prefix'] = true;
+		$this->doGetParameterFromSettings( $input, $paramSettings, $expected, $warnings, $options );
 	}
 
 	public static function provideGetParameterFromSettings() {
@@ -363,8 +438,10 @@ class ApiBaseTest extends ApiTestCase {
 					ApiBase::PARAM_ISMULTI => true,
 					ApiBase::PARAM_ISMULTI_LIMIT1 => 2,
 				],
-				[ 'a', 'b' ],
-				[ [ 'apiwarn-toomanyvalues', 'myParam', 2 ] ],
+				ApiUsageException::newWithMessage(
+					null, [ 'apierror-toomanyvalues', 'myParam', 2 ], 'too-many-myParam'
+				),
+				[]
 			],
 			'Multi-valued parameter with exceeded limits for non-bot' => [
 				'a|b|c',
@@ -373,8 +450,10 @@ class ApiBaseTest extends ApiTestCase {
 					ApiBase::PARAM_ISMULTI_LIMIT1 => 2,
 					ApiBase::PARAM_ISMULTI_LIMIT2 => 3,
 				],
-				[ 'a', 'b' ],
-				[ [ 'apiwarn-toomanyvalues', 'myParam', 2 ] ],
+				ApiUsageException::newWithMessage(
+					null, [ 'apierror-toomanyvalues', 'myParam', 2 ], 'too-many-myParam'
+				),
+				[]
 			],
 			'Multi-valued parameter with non-exceeded limits for bot' => [
 				'a|b|c',
@@ -452,9 +531,33 @@ class ApiBaseTest extends ApiTestCase {
 				'foo',
 				[ [ 'apiwarn-deprecation-parameter', 'myParam' ] ],
 			],
+			'Deprecated parameter with default, unspecified' => [
+				null,
+				[ ApiBase::PARAM_DEPRECATED => true, ApiBase::PARAM_DFLT => 'foo' ],
+				'foo',
+				[],
+			],
+			'Deprecated parameter with default, specified' => [
+				'foo',
+				[ ApiBase::PARAM_DEPRECATED => true, ApiBase::PARAM_DFLT => 'foo' ],
+				'foo',
+				[ [ 'apiwarn-deprecation-parameter', 'myParam' ] ],
+			],
 			'Deprecated parameter value' => [
 				'a',
 				[ ApiBase::PARAM_DEPRECATED_VALUES => [ 'a' => true ] ],
+				'a',
+				[ [ 'apiwarn-deprecation-parameter', 'myParam=a' ] ],
+			],
+			'Deprecated parameter value as default, unspecified' => [
+				null,
+				[ ApiBase::PARAM_DEPRECATED_VALUES => [ 'a' => true ], ApiBase::PARAM_DFLT => 'a' ],
+				'a',
+				[],
+			],
+			'Deprecated parameter value as default, specified' => [
+				'a',
+				[ ApiBase::PARAM_DEPRECATED_VALUES => [ 'a' => true ], ApiBase::PARAM_DFLT => 'a' ],
 				'a',
 				[ [ 'apiwarn-deprecation-parameter', 'myParam=a' ] ],
 			],
@@ -542,7 +645,7 @@ class ApiBaseTest extends ApiTestCase {
 					ApiBase::PARAM_ISMULTI => true,
 					ApiBase::PARAM_TYPE => 'namespace',
 				],
-				MWNamespace::getValidNamespaces(),
+				MediaWikiServices::getInstance()->getNamespaceInfo()->getValidNamespaces(),
 				[],
 			],
 			// PARAM_ALL is ignored with namespace types.
@@ -553,7 +656,7 @@ class ApiBaseTest extends ApiTestCase {
 					ApiBase::PARAM_TYPE => 'namespace',
 					ApiBase::PARAM_ALL => false,
 				],
-				MWNamespace::getValidNamespaces(),
+				MediaWikiServices::getInstance()->getNamespaceInfo()->getValidNamespaces(),
 				[],
 			],
 			'Namespace with wildcard "x"' => [
@@ -786,10 +889,24 @@ class ApiBaseTest extends ApiTestCase {
 				[],
 				[ 'internalmode' => false ],
 			],
-			'Limit with parseLimits false' => [
+			'Limit with parseLimits false (numeric)' => [
 				'100',
 				[ ApiBase::PARAM_TYPE => 'limit' ],
-				'100',
+				100,
+				[],
+				[ 'parseLimits' => false ],
+			],
+			'Limit with parseLimits false (max)' => [
+				'max',
+				[ ApiBase::PARAM_TYPE => 'limit' ],
+				'max',
+				[],
+				[ 'parseLimits' => false ],
+			],
+			'Limit with parseLimits false (invalid)' => [
+				'kitten',
+				[ ApiBase::PARAM_TYPE => 'limit' ],
+				0,
 				[],
 				[ 'parseLimits' => false ],
 			],
@@ -798,7 +915,6 @@ class ApiBaseTest extends ApiTestCase {
 				[
 					ApiBase::PARAM_TYPE => 'limit',
 					ApiBase::PARAM_MAX2 => 10,
-					ApiBase::PARAM_ISMULTI => true,
 				],
 				new MWException(
 					'Internal error in ApiBase::getParameterFromSettings: ' .
@@ -810,7 +926,6 @@ class ApiBaseTest extends ApiTestCase {
 				[
 					ApiBase::PARAM_TYPE => 'limit',
 					ApiBase::PARAM_MAX => 10,
-					ApiBase::PARAM_ISMULTI => true,
 				],
 				new MWException(
 					'Internal error in ApiBase::getParameterFromSettings: ' .
@@ -995,6 +1110,12 @@ class ApiBaseTest extends ApiTestCase {
 				'Foo bar',
 				[],
 			],
+			'User prefixed with "User:"' => [
+				'User:foo_bar',
+				[ ApiBase::PARAM_TYPE => 'user' ],
+				'Foo bar',
+				[],
+			],
 			'Invalid username "|"' => [
 				'|',
 				[ ApiBase::PARAM_TYPE => 'user' ],
@@ -1173,7 +1294,7 @@ class ApiBaseTest extends ApiTestCase {
 		];
 
 		foreach ( $integerTests as $test ) {
-			$desc = isset( $test[2] ) ? $test[2] : $test[0];
+			$desc = $test[2] ?? $test[0];
 			$warnings = isset( $test[3] ) ?
 				[ [ 'apiwarn-badutf8', 'myParam' ] ] : [];
 			$returnArray["\"$desc\" as integer"] = [
@@ -1190,6 +1311,8 @@ class ApiBaseTest extends ApiTestCase {
 	public function testErrorArrayToStatus() {
 		$mock = new MockApi();
 
+		$msg = new Message( 'mainpage' );
+
 		// Sanity check empty array
 		$expect = Status::newGood();
 		$this->assertEquals( $expect, $mock->errorArrayToStatus( [] ) );
@@ -1200,18 +1323,22 @@ class ApiBaseTest extends ApiTestCase {
 		$expect->fatal( 'autoblockedtext' );
 		$expect->fatal( 'systemblockedtext' );
 		$expect->fatal( 'mainpage' );
+		$expect->fatal( $msg );
+		$expect->fatal( $msg, 'foobar' );
 		$expect->fatal( 'parentheses', 'foobar' );
 		$this->assertEquals( $expect, $mock->errorArrayToStatus( [
 			[ 'blockedtext' ],
 			[ 'autoblockedtext' ],
 			[ 'systemblockedtext' ],
 			'mainpage',
+			$msg,
+			[ $msg, 'foobar' ],
 			[ 'parentheses', 'foobar' ],
 		] ) );
 
 		// Has a blocked $user, so special block handling
 		$user = $this->getMutableTestUser()->getUser();
-		$block = new \Block( [
+		$block = new DatabaseBlock( [
 			'address' => $user->getName(),
 			'user' => $user->getID(),
 			'by' => $this->getTestSysop()->getUser()->getId(),
@@ -1219,21 +1346,87 @@ class ApiBaseTest extends ApiTestCase {
 			'expiry' => time() + 100500,
 		] );
 		$block->insert();
-		$blockinfo = [ 'blockinfo' => ApiQueryUserInfo::getBlockInfo( $block ) ];
+		$userInfoTrait = TestingAccessWrapper::newFromObject(
+			$this->getMockForTrait( ApiBlockInfoTrait::class )
+		);
+		$blockinfo = [ 'blockinfo' => $userInfoTrait->getBlockDetails( $block ) ];
 
 		$expect = Status::newGood();
 		$expect->fatal( ApiMessage::create( 'apierror-blocked', 'blocked', $blockinfo ) );
 		$expect->fatal( ApiMessage::create( 'apierror-autoblocked', 'autoblocked', $blockinfo ) );
 		$expect->fatal( ApiMessage::create( 'apierror-systemblocked', 'blocked', $blockinfo ) );
 		$expect->fatal( 'mainpage' );
+		$expect->fatal( $msg );
+		$expect->fatal( $msg, 'foobar' );
 		$expect->fatal( 'parentheses', 'foobar' );
 		$this->assertEquals( $expect, $mock->errorArrayToStatus( [
 			[ 'blockedtext' ],
 			[ 'autoblockedtext' ],
 			[ 'systemblockedtext' ],
 			'mainpage',
+			$msg,
+			[ $msg, 'foobar' ],
 			[ 'parentheses', 'foobar' ],
 		], $user ) );
+	}
+
+	public function testAddBlockInfoToStatus() {
+		$mock = new MockApi();
+
+		$msg = new Message( 'mainpage' );
+
+		// Sanity check empty array
+		$expect = Status::newGood();
+		$test = Status::newGood();
+		$mock->addBlockInfoToStatus( $test );
+		$this->assertEquals( $expect, $test );
+
+		// No blocked $user, so no special block handling
+		$expect = Status::newGood();
+		$expect->fatal( 'blockedtext' );
+		$expect->fatal( 'autoblockedtext' );
+		$expect->fatal( 'systemblockedtext' );
+		$expect->fatal( 'mainpage' );
+		$expect->fatal( $msg );
+		$expect->fatal( $msg, 'foobar' );
+		$expect->fatal( 'parentheses', 'foobar' );
+		$test = clone $expect;
+		$mock->addBlockInfoToStatus( $test );
+		$this->assertEquals( $expect, $test );
+
+		// Has a blocked $user, so special block handling
+		$user = $this->getMutableTestUser()->getUser();
+		$block = new DatabaseBlock( [
+			'address' => $user->getName(),
+			'user' => $user->getID(),
+			'by' => $this->getTestSysop()->getUser()->getId(),
+			'reason' => __METHOD__,
+			'expiry' => time() + 100500,
+		] );
+		$block->insert();
+		$userInfoTrait = TestingAccessWrapper::newFromObject(
+			$this->getObjectForTrait( ApiBlockInfoTrait::class )
+		);
+		$blockinfo = [ 'blockinfo' => $userInfoTrait->getBlockDetails( $block ) ];
+
+		$expect = Status::newGood();
+		$expect->fatal( ApiMessage::create( 'apierror-blocked', 'blocked', $blockinfo ) );
+		$expect->fatal( ApiMessage::create( 'apierror-autoblocked', 'autoblocked', $blockinfo ) );
+		$expect->fatal( ApiMessage::create( 'apierror-systemblocked', 'blocked', $blockinfo ) );
+		$expect->fatal( 'mainpage' );
+		$expect->fatal( $msg );
+		$expect->fatal( $msg, 'foobar' );
+		$expect->fatal( 'parentheses', 'foobar' );
+		$test = Status::newGood();
+		$test->fatal( 'blockedtext' );
+		$test->fatal( 'autoblockedtext' );
+		$test->fatal( 'systemblockedtext' );
+		$test->fatal( 'mainpage' );
+		$test->fatal( $msg );
+		$test->fatal( $msg, 'foobar' );
+		$test->fatal( 'parentheses', 'foobar' );
+		$mock->addBlockInfoToStatus( $test, $user );
+		$this->assertEquals( $expect, $test );
 	}
 
 	public function testDieStatus() {
@@ -1262,7 +1455,7 @@ class ApiBaseTest extends ApiTestCase {
 		}
 
 		$status = StatusValue::newGood();
-		$status->setOk( false );
+		$status->setOK( false );
 		try {
 			$mock->dieStatus( $status );
 			$this->fail( 'Expected exception not thrown' );
@@ -1270,6 +1463,101 @@ class ApiBaseTest extends ApiTestCase {
 			$this->assertTrue( ApiTestCase::apiExceptionHasCode( $ex, 'unknownerror-nocode' ),
 				'Exception has "unknownerror-nocode"' );
 		}
+	}
+
+	/**
+	 * @covers ApiBase::extractRequestParams
+	 */
+	public function testExtractRequestParams() {
+		$request = new FauxRequest( [
+			'xxexists' => 'exists!',
+			'xxmulti' => 'a|b|c|d|{bad}',
+			'xxempty' => '',
+			'xxtemplate-a' => 'A!',
+			'xxtemplate-b' => 'B1|B2|B3',
+			'xxtemplate-c' => '',
+			'xxrecursivetemplate-b-B1' => 'X',
+			'xxrecursivetemplate-b-B3' => 'Y',
+			'xxrecursivetemplate-b-B4' => '?',
+			'xxemptytemplate-' => 'nope',
+			'foo' => 'a|b|c',
+			'xxfoo' => 'a|b|c',
+			'errorformat' => 'raw',
+		] );
+		$context = new DerivativeContext( RequestContext::getMain() );
+		$context->setRequest( $request );
+		$main = new ApiMain( $context );
+
+		$mock = $this->getMockBuilder( ApiBase::class )
+			->setConstructorArgs( [ $main, 'test', 'xx' ] )
+			->setMethods( [ 'getAllowedParams' ] )
+			->getMockForAbstractClass();
+		$mock->method( 'getAllowedParams' )->willReturn( [
+			'notexists' => null,
+			'exists' => null,
+			'multi' => [
+				ApiBase::PARAM_ISMULTI => true,
+			],
+			'empty' => [
+				ApiBase::PARAM_ISMULTI => true,
+			],
+			'template-{m}' => [
+				ApiBase::PARAM_ISMULTI => true,
+				ApiBase::PARAM_TEMPLATE_VARS => [ 'm' => 'multi' ],
+			],
+			'recursivetemplate-{m}-{t}' => [
+				ApiBase::PARAM_TEMPLATE_VARS => [ 't' => 'template-{m}', 'm' => 'multi' ],
+			],
+			'emptytemplate-{m}' => [
+				ApiBase::PARAM_ISMULTI => true,
+				ApiBase::PARAM_TEMPLATE_VARS => [ 'm' => 'empty' ],
+			],
+			'badtemplate-{e}' => [
+				ApiBase::PARAM_TEMPLATE_VARS => [ 'e' => 'exists' ],
+			],
+			'badtemplate2-{e}' => [
+				ApiBase::PARAM_TEMPLATE_VARS => [ 'e' => 'badtemplate2-{e}' ],
+			],
+			'badtemplate3-{x}' => [
+				ApiBase::PARAM_TEMPLATE_VARS => [ 'x' => 'foo' ],
+			],
+		] );
+
+		$this->assertEquals( [
+			'notexists' => null,
+			'exists' => 'exists!',
+			'multi' => [ 'a', 'b', 'c', 'd', '{bad}' ],
+			'empty' => [],
+			'template-a' => [ 'A!' ],
+			'template-b' => [ 'B1', 'B2', 'B3' ],
+			'template-c' => [],
+			'template-d' => null,
+			'recursivetemplate-a-A!' => null,
+			'recursivetemplate-b-B1' => 'X',
+			'recursivetemplate-b-B2' => null,
+			'recursivetemplate-b-B3' => 'Y',
+		], $mock->extractRequestParams() );
+
+		$used = TestingAccessWrapper::newFromObject( $main )->getParamsUsed();
+		sort( $used );
+		$this->assertEquals( [
+			'xxempty',
+			'xxexists',
+			'xxmulti',
+			'xxnotexists',
+			'xxrecursivetemplate-a-A!',
+			'xxrecursivetemplate-b-B1',
+			'xxrecursivetemplate-b-B2',
+			'xxrecursivetemplate-b-B3',
+			'xxtemplate-a',
+			'xxtemplate-b',
+			'xxtemplate-c',
+			'xxtemplate-d',
+		], $used );
+
+		$warnings = $mock->getResult()->getResultData( 'warnings', [ 'Strip' => 'all' ] );
+		$this->assertCount( 1, $warnings );
+		$this->assertSame( 'ignoring-invalid-templated-value', $warnings[0]['code'] );
 	}
 
 }

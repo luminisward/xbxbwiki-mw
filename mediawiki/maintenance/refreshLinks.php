@@ -21,6 +21,8 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Revision\RevisionRecord;
 use Wikimedia\Rdbms\IDatabase;
 
 require_once __DIR__ . '/Maintenance.php';
@@ -230,7 +232,7 @@ class RefreshLinks extends Maintenance {
 		}
 
 		$rt = null;
-		$content = $page->getContent( Revision::RAW );
+		$content = $page->getContent( RevisionRecord::RAW );
 		if ( $content !== null ) {
 			$rt = $content->getUltimateRedirectTarget();
 		}
@@ -258,7 +260,7 @@ class RefreshLinks extends Maintenance {
 	public static function fixLinksFromArticle( $id, $ns = false ) {
 		$page = WikiPage::newFromID( $id );
 
-		LinkCache::singleton()->clear();
+		MediaWikiServices::getInstance()->getLinkCache()->clear();
 
 		if ( $page === null ) {
 			return;
@@ -267,17 +269,14 @@ class RefreshLinks extends Maintenance {
 			return;
 		}
 
-		$content = $page->getContent( Revision::RAW );
-		if ( $content === null ) {
-			return;
-		}
-
-		$updates = $content->getSecondaryDataUpdates(
-			$page->getTitle(), /* $old = */ null, /* $recursive = */ false );
-		foreach ( $updates as $update ) {
-			DeferredUpdates::addUpdate( $update );
-			DeferredUpdates::doUpdates();
-		}
+		// Defer updates to post-send but then immediately execute deferred updates;
+		// this is the simplest way to run all updates immediately (including updates
+		// scheduled by other updates).
+		$page->doSecondaryDataUpdates( [
+			'defer' => DeferredUpdates::POSTSEND,
+			'recursive' => false,
+		] );
+		DeferredUpdates::doUpdates();
 	}
 
 	/**

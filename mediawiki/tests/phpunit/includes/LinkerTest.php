@@ -1,12 +1,9 @@
 <?php
 
-use MediaWiki\MediaWikiServices;
-
 /**
  * @group Database
  */
 class LinkerTest extends MediaWikiLangTestCase {
-
 	/**
 	 * @dataProvider provideCasesForUserLink
 	 * @covers Linker::userLink
@@ -16,11 +13,16 @@ class LinkerTest extends MediaWikiLangTestCase {
 			'wgArticlePath' => '/wiki/$1',
 		] );
 
-		$this->assertEquals(
-			$expected,
-			Linker::userLink( $userId, $userName, $altUserName ),
-			$msg
-		);
+		// We'd also test the warning, but injecting a mock logger into a static method is tricky.
+		if ( !$userName ) {
+			Wikimedia\suppressWarnings();
+		}
+		$actual = Linker::userLink( $userId, $userName, $altUserName );
+		if ( !$userName ) {
+			Wikimedia\restoreWarnings();
+		}
+
+		$this->assertEquals( $expected, $actual, $msg );
 	}
 
 	public static function provideCasesForUserLink() {
@@ -31,6 +33,12 @@ class LinkerTest extends MediaWikiLangTestCase {
 		# - optional altUserName
 		# - optional message
 		return [
+			# Empty name (T222529)
+			'Empty username, userid 0' => [ '(no username available)', 0, '' ],
+			'Empty username, userid > 0' => [ '(no username available)', 73, '' ],
+
+			'false instead of username' => [ '(no username available)', 73, false ],
+			'null instead of username' => [ '(no username available)', 0, null ],
 
 			# ## ANONYMOUS USER ########################################
 			[
@@ -86,6 +94,118 @@ class LinkerTest extends MediaWikiLangTestCase {
 
 			# ## Regular user ##########################################
 			# TODO!
+		];
+	}
+
+	/**
+	 * @dataProvider provideUserToolLinks
+	 * @covers Linker::userToolLinks
+	 * @param string $expected
+	 * @param int $userId
+	 * @param string $userText
+	 */
+	public function testUserToolLinks( $expected, $userId, $userText ) {
+		// We'd also test the warning, but injecting a mock logger into a static method is tricky.
+		if ( $userText === '' ) {
+			Wikimedia\suppressWarnings();
+		}
+		$actual = Linker::userToolLinks( $userId, $userText );
+		if ( $userText === '' ) {
+			Wikimedia\restoreWarnings();
+		}
+
+		$this->assertSame( $expected, $actual );
+	}
+
+	public static function provideUserToolLinks() {
+		return [
+			// Empty name (T222529)
+			'Empty username, userid 0' => [ ' (no username available)', 0, '' ],
+			'Empty username, userid > 0' => [ ' (no username available)', 73, '' ],
+		];
+	}
+
+	/**
+	 * @dataProvider provideUserTalkLink
+	 * @covers Linker::userTalkLink
+	 * @param string $expected
+	 * @param int $userId
+	 * @param string $userText
+	 */
+	public function testUserTalkLink( $expected, $userId, $userText ) {
+		// We'd also test the warning, but injecting a mock logger into a static method is tricky.
+		if ( $userText === '' ) {
+			Wikimedia\suppressWarnings();
+		}
+		$actual = Linker::userTalkLink( $userId, $userText );
+		if ( $userText === '' ) {
+			Wikimedia\restoreWarnings();
+		}
+
+		$this->assertSame( $expected, $actual );
+	}
+
+	public static function provideUserTalkLink() {
+		return [
+			// Empty name (T222529)
+			'Empty username, userid 0' => [ '(no username available)', 0, '' ],
+			'Empty username, userid > 0' => [ '(no username available)', 73, '' ],
+		];
+	}
+
+	/**
+	 * @dataProvider provideBlockLink
+	 * @covers Linker::blockLink
+	 * @param string $expected
+	 * @param int $userId
+	 * @param string $userText
+	 */
+	public function testBlockLink( $expected, $userId, $userText ) {
+		// We'd also test the warning, but injecting a mock logger into a static method is tricky.
+		if ( $userText === '' ) {
+			Wikimedia\suppressWarnings();
+		}
+		$actual = Linker::blockLink( $userId, $userText );
+		if ( $userText === '' ) {
+			Wikimedia\restoreWarnings();
+		}
+
+		$this->assertSame( $expected, $actual );
+	}
+
+	public static function provideBlockLink() {
+		return [
+			// Empty name (T222529)
+			'Empty username, userid 0' => [ '(no username available)', 0, '' ],
+			'Empty username, userid > 0' => [ '(no username available)', 73, '' ],
+		];
+	}
+
+	/**
+	 * @dataProvider provideEmailLink
+	 * @covers Linker::emailLink
+	 * @param string $expected
+	 * @param int $userId
+	 * @param string $userText
+	 */
+	public function testEmailLink( $expected, $userId, $userText ) {
+		// We'd also test the warning, but injecting a mock logger into a static method is tricky.
+		if ( $userText === '' ) {
+			Wikimedia\suppressWarnings();
+		}
+		$actual = Linker::emailLink( $userId, $userText );
+		if ( $userText === '' ) {
+			Wikimedia\restoreWarnings();
+		}
+
+		$this->assertSame( $expected, $actual );
+	}
+
+	public static function provideEmailLink() {
+		return [
+			// Empty name (T222529)
+			'Empty username, userid 0' => [ '(no username available)', 0, '' ],
+			'Empty username, userid > 0' => [ '(no username available)', 73, '' ],
 		];
 	}
 
@@ -153,58 +273,93 @@ class LinkerTest extends MediaWikiLangTestCase {
 			],
 			// Linker::formatAutocomments
 			[
-				'<a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment">autocomment</span></span>',
+				'<span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→‎autocomment</a></span></span>',
 				"/* autocomment */",
 			],
 			[
-				'<a href="/wiki/Special:BlankPage#linkie.3F" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment"><a href="/wiki/index.php?title=Linkie%3F&amp;action=edit&amp;redlink=1" class="new" title="Linkie? (page does not exist)">linkie?</a></span></span>',
+				'<span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#linkie.3F" title="Special:BlankPage">→‎&#91;[linkie?]]</a></span></span>',
 				"/* [[linkie?]] */",
 			],
 			[
-				'<a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment">autocomment: </span> post</span>',
+				'<span dir="auto"><span class="autocomment">: </span> // Edit via via</span>',
+				// Regression test for T222857
+				"/*  */ // Edit via via",
+			],
+			[
+				'<span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→‎autocomment</a>: </span> post</span>',
 				"/* autocomment */ post",
 			],
 			[
-				'pre <a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment">autocomment</span></span>',
+				'pre <span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→‎autocomment</a></span></span>',
 				"pre /* autocomment */",
 			],
 			[
-				'pre <a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment">autocomment: </span> post</span>',
+				'pre <span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→‎autocomment</a>: </span> post</span>',
 				"pre /* autocomment */ post",
 			],
 			[
-				'<a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment">autocomment: </span> multiple? <a href="/wiki/Special:BlankPage#autocomment2" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment">autocomment2: </span> </span></span>',
-				"/* autocomment */ multiple? /* autocomment2 */ ",
+				'<span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→‎autocomment</a>: </span> multiple? <span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#autocomment2" title="Special:BlankPage">→‎autocomment2</a></span></span></span>',
+				"/* autocomment */ multiple? /* autocomment2 */",
 			],
 			[
-				'<a href="/wiki/Special:BlankPage#autocomment_containing_.2F.2A" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment">autocomment containing /*: </span> T70361</span>',
+				'<span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#autocomment_containing_.2F.2A" title="Special:BlankPage">→‎autocomment containing /*</a>: </span> T70361</span>',
 				"/* autocomment containing /* */ T70361"
 			],
 			[
-				'<a href="/wiki/Special:BlankPage#autocomment_containing_.22quotes.22" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment">autocomment containing &quot;quotes&quot;</span></span>',
+				'<span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#autocomment_containing_.22quotes.22" title="Special:BlankPage">→‎autocomment containing &quot;quotes&quot;</a></span></span>',
 				"/* autocomment containing \"quotes\" */"
 			],
 			[
-				'<a href="/wiki/Special:BlankPage#autocomment_containing_.3Cscript.3Etags.3C.2Fscript.3E" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment">autocomment containing &lt;script&gt;tags&lt;/script&gt;</span></span>',
+				'<span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#autocomment_containing_.3Cscript.3Etags.3C.2Fscript.3E" title="Special:BlankPage">→‎autocomment containing &lt;script&gt;tags&lt;/script&gt;</a></span></span>',
 				"/* autocomment containing <script>tags</script> */"
 			],
 			[
-				'<a href="#autocomment">→</a>‎<span dir="auto"><span class="autocomment">autocomment</span></span>',
+				'<span dir="auto"><span class="autocomment"><a href="#autocomment">→‎autocomment</a></span></span>',
 				"/* autocomment */",
 				false, true
 			],
 			[
-				'‎<span dir="auto"><span class="autocomment">autocomment</span></span>',
+				'<span dir="auto"><span class="autocomment">autocomment</span></span>',
 				"/* autocomment */",
 				null
 			],
 			[
-				'<a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→</a>‎<span dir="auto"><span class="autocomment">autocomment</span></span>',
+				'',
+				"/* */",
+				false, true
+			],
+			[
+				'',
+				"/* */",
+				null
+			],
+			[
+				'<span dir="auto"><span class="autocomment">[[</span></span>',
+				"/* [[ */",
+				false, true
+			],
+			[
+				'<span dir="auto"><span class="autocomment">[[</span></span>',
+				"/* [[ */",
+				null
+			],
+			[
+				"foo <span dir=\"auto\"><span class=\"autocomment\"><a href=\"#.23\">→‎&#91;[#_\t_]]</a></span></span>",
+				"foo /* [[#_\t_]] */",
+				false, true
+			],
+			[
+				"foo <span dir=\"auto\"><span class=\"autocomment\"><a href=\"#_.09\">#_\t_</a></span></span>",
+				"foo /* [[#_\t_]] */",
+				null
+			],
+			[
+				'<span dir="auto"><span class="autocomment"><a href="/wiki/Special:BlankPage#autocomment" title="Special:BlankPage">→‎autocomment</a></span></span>',
 				"/* autocomment */",
 				false, false
 			],
 			[
-				'<a class="external" rel="nofollow" href="//en.example.org/w/Special:BlankPage#autocomment">→</a>‎<span dir="auto"><span class="autocomment">autocomment</span></span>',
+				'<span dir="auto"><span class="autocomment"><a class="external" rel="nofollow" href="//en.example.org/w/Special:BlankPage#autocomment">→‎autocomment</a></span></span>',
 				"/* autocomment */",
 				false, false, $wikiId
 			],
@@ -287,12 +442,77 @@ class LinkerTest extends MediaWikiLangTestCase {
 		);
 	}
 
+	/**
+	 * @covers Linker::generateRollback
+	 * @dataProvider provideCasesForRollbackGeneration
+	 */
+	public function testGenerateRollback( $rollbackEnabled, $expectedModules, $title ) {
+		$this->markTestSkippedIfDbType( 'postgres' );
+
+		$context = RequestContext::getMain();
+		$user = $context->getUser();
+		$user->setOption( 'showrollbackconfirmation', $rollbackEnabled );
+
+		$this->assertSame( 0, Title::newFromText( $title )->getArticleID() );
+		$pageData = $this->insertPage( $title );
+		$page = WikiPage::factory( $pageData['title'] );
+
+		$updater = $page->newPageUpdater( $user );
+		$updater->setContent( \MediaWiki\Revision\SlotRecord::MAIN,
+			new TextContent( 'Technical Wishes 123!' )
+		);
+		$summary = CommentStoreComment::newUnsavedComment( 'Some comment!' );
+		$updater->saveRevision( $summary );
+
+		$rollbackOutput = Linker::generateRollback( $page->getRevision(), $context );
+		$modules = $context->getOutput()->getModules();
+		$currentRev = $page->getRevision();
+		$oldestRev = $page->getOldestRevision();
+
+		$this->assertEquals( $expectedModules, $modules );
+		$this->assertEquals( $user->getName(), $currentRev->getUserText() );
+		$this->assertEquals(
+			static::getTestSysop()->getUser(),
+			$oldestRev->getUserText()
+		);
+
+		$ids = [];
+		$r = $oldestRev;
+		while ( $r ) {
+			$ids[] = $r->getId();
+			$r = $r->getNext();
+		}
+		$this->assertEquals( [ $oldestRev->getId(), $currentRev->getId() ], $ids );
+
+		$this->assertContains( 'rollback 1 edit', $rollbackOutput );
+	}
+
+	public static function provideCasesForRollbackGeneration() {
+		return [
+			[
+				true,
+				[ 'mediawiki.page.rollback.confirmation' ],
+				'Rollback_Test_Page'
+			],
+			[
+				false,
+				[],
+				'Rollback_Test_Page2'
+			]
+		];
+	}
+
 	public static function provideCasesForFormatLinksInComment() {
 		// phpcs:disable Generic.Files.LineLength
 		return [
 			[
 				'foo bar <a href="/wiki/Special:BlankPage" title="Special:BlankPage">Special:BlankPage</a>',
 				'foo bar [[Special:BlankPage]]',
+				null,
+			],
+			[
+				'<a href="/wiki/Special:BlankPage" title="Special:BlankPage">Special:BlankPage</a>',
+				'[[ :Special:BlankPage]]',
 				null,
 			],
 			[
@@ -370,6 +590,7 @@ class LinkerTest extends MediaWikiLangTestCase {
 	 * @dataProvider provideLinkBeginHook
 	 */
 	public function testLinkBeginHook( $callback, $expected ) {
+		$this->hideDeprecated( 'LinkBegin hook (used in hook-LinkBegin-closure)' );
 		$this->setMwGlobals( [
 			'wgArticlePath' => '/wiki/$1',
 			'wgServer' => '//example.org',
@@ -417,6 +638,7 @@ class LinkerTest extends MediaWikiLangTestCase {
 	 * @dataProvider provideLinkEndHook
 	 */
 	public function testLinkEndHook( $callback, $expected ) {
+		$this->hideDeprecated( 'LinkEnd hook (used in hook-LinkEnd-closure)' );
 		$this->setMwGlobals( [
 			'wgArticlePath' => '/wiki/$1',
 		] );
@@ -426,55 +648,5 @@ class LinkerTest extends MediaWikiLangTestCase {
 		$title = SpecialPage::getTitleFor( 'Blankpage' );
 		$out = Linker::link( $title );
 		$this->assertEquals( $expected, $out );
-	}
-
-	/**
-	 * @covers Linker::getLinkColour
-	 */
-	public function testGetLinkColour() {
-		$this->hideDeprecated( 'Linker::getLinkColour' );
-		$linkCache = MediaWikiServices::getInstance()->getLinkCache();
-		$foobarTitle = Title::makeTitle( NS_MAIN, 'FooBar' );
-		$redirectTitle = Title::makeTitle( NS_MAIN, 'Redirect' );
-		$userTitle = Title::makeTitle( NS_USER, 'Someuser' );
-		$linkCache->addGoodLinkObj(
-			1, // id
-			$foobarTitle,
-			10, // len
-			0 // redir
-		);
-		$linkCache->addGoodLinkObj(
-			2, // id
-			$redirectTitle,
-			10, // len
-			1 // redir
-		);
-
-		$linkCache->addGoodLinkObj(
-			3, // id
-			$userTitle,
-			10, // len
-			0 // redir
-		);
-
-		$this->assertEquals(
-			'',
-			Linker::getLinkColour( $foobarTitle, 0 )
-		);
-
-		$this->assertEquals(
-			'stub',
-			Linker::getLinkColour( $foobarTitle, 20 )
-		);
-
-		$this->assertEquals(
-			'mw-redirect',
-			Linker::getLinkColour( $redirectTitle, 0 )
-		);
-
-		$this->assertEquals(
-			'',
-			Linker::getLinkColour( $userTitle, 20 )
-		);
 	}
 }

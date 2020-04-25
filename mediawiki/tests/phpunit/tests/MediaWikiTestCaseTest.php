@@ -1,4 +1,5 @@
 <?php
+
 use MediaWiki\Logger\LoggerFactory;
 use MediaWiki\MediaWikiServices;
 use Psr\Log\LoggerInterface;
@@ -7,6 +8,7 @@ use Wikimedia\Rdbms\LoadBalancer;
 /**
  * @covers MediaWikiTestCase
  * @group MediaWikiTestCaseTest
+ * @group Database
  *
  * @author Addshore
  */
@@ -66,31 +68,7 @@ class MediaWikiTestCaseTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @dataProvider provideExistingKeysAndNewValues
-	 *
-	 * @covers MediaWikiTestCase::stashMwGlobals
-	 * @covers MediaWikiTestCase::tearDown
-	 */
-	public function testStashedGlobalsAreRestoredOnTearDown( $globalKey, $newValue ) {
-		$this->stashMwGlobals( $globalKey );
-		$GLOBALS[$globalKey] = $newValue;
-		$this->assertEquals(
-			$newValue,
-			$GLOBALS[$globalKey],
-			'Global failed to correctly set'
-		);
-
-		$this->tearDown();
-
-		$this->assertEquals(
-			self::$startGlobals[$globalKey],
-			$GLOBALS[$globalKey],
-			'Global failed to be restored on tearDown'
-		);
-	}
-
-	/**
-	 * @covers MediaWikiTestCase::stashMwGlobals
+	 * @covers MediaWikiTestCase::setMwGlobals
 	 * @covers MediaWikiTestCase::tearDown
 	 */
 	public function testSetNonExistentGlobalsAreUnsetOnTearDown() {
@@ -114,9 +92,6 @@ class MediaWikiTestCaseTest extends MediaWikiTestCase {
 
 		$this->overrideMwServices();
 		$this->assertNotSame( $initialServices, MediaWikiServices::getInstance() );
-
-		$this->tearDown();
-		$this->assertSame( $initialServices, MediaWikiServices::getInstance() );
 	}
 
 	public function testSetService() {
@@ -126,17 +101,11 @@ class MediaWikiTestCaseTest extends MediaWikiTestCase {
 			->disableOriginalConstructor()->getMock();
 
 		$this->setService( 'DBLoadBalancer', $mockService );
-		$this->assertNotSame( $initialServices, MediaWikiServices::getInstance() );
 		$this->assertNotSame(
 			$initialService,
 			MediaWikiServices::getInstance()->getDBLoadBalancer()
 		);
 		$this->assertSame( $mockService, MediaWikiServices::getInstance()->getDBLoadBalancer() );
-
-		$this->tearDown();
-		$this->assertSame( $initialServices, MediaWikiServices::getInstance() );
-		$this->assertNotSame( $mockService, MediaWikiServices::getInstance()->getDBLoadBalancer() );
-		$this->assertSame( $initialService, MediaWikiServices::getInstance()->getDBLoadBalancer() );
 	}
 
 	/**
@@ -181,4 +150,76 @@ class MediaWikiTestCaseTest extends MediaWikiTestCase {
 
 		$this->assertSame( $logger1, $logger2 );
 	}
+
+	/**
+	 * @covers MediaWikiTestCase::setupDatabaseWithTestPrefix
+	 * @covers MediaWikiTestCase::copyTestData
+	 */
+	public function testCopyTestData() {
+		$this->markTestSkippedIfDbType( 'sqlite' );
+
+		$this->tablesUsed[] = 'objectcache';
+		$this->db->insert(
+			'objectcache',
+			[ 'keyname' => __METHOD__, 'value' => 'TEST', 'exptime' => $this->db->timestamp( 11 ) ],
+			__METHOD__
+		);
+
+		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+		$lb = $lbFactory->newMainLB();
+		$db = $lb->getConnection( DB_REPLICA );
+
+		// sanity
+		$this->assertNotSame( $this->db, $db );
+
+		// Make sure the DB connection has the fake table clones and the fake table prefix
+		MediaWikiTestCase::setupDatabaseWithTestPrefix( $db, $this->dbPrefix(), false );
+
+		$this->assertSame( $this->db->tablePrefix(), $db->tablePrefix(), 'tablePrefix' );
+
+		// Make sure the DB connection has all the test data
+		$this->copyTestData( $this->db, $db );
+
+		$value = $db->selectField( 'objectcache', 'value', [ 'keyname' => __METHOD__ ], __METHOD__ );
+		$this->assertSame( 'TEST', $value, 'Copied Data' );
+	}
+
+	public function testResetServices() {
+		$services = MediaWikiServices::getInstance();
+
+		// override a service instance
+		$myReadOnlyMode = $this->getMockBuilder( ReadOnlyMode::class )
+			->disableOriginalConstructor()
+			->getMock();
+		$this->setService( 'ReadOnlyMode', $myReadOnlyMode );
+
+		// sanity check
+		$this->assertSame( $myReadOnlyMode, $services->getService( 'ReadOnlyMode' ) );
+
+		// define a custom service
+		$services->defineService(
+			'_TEST_ResetService_Dummy',
+			function ( MediaWikiServices $services ) {
+				$conf = $services->getMainConfig();
+				return (object)[ 'lang' => $conf->get( 'LanguageCode' ) ];
+			}
+		);
+
+		// sanity check
+		$lang = $services->getMainConfig()->get( 'LanguageCode' );
+		$dummy = $services->getService( '_TEST_ResetService_Dummy' );
+		$this->assertSame( $lang, $dummy->lang );
+
+		// the actual test: change config, reset services.
+		$this->setMwGlobals( 'wgLanguageCode', 'qqx' );
+
+		// the overridden service instance should still be there
+		$this->assertSame( $myReadOnlyMode, $services->getService( 'ReadOnlyMode' ) );
+
+		// our custom service should have been re-created with the new language code
+		$dummy2 = $services->getService( '_TEST_ResetService_Dummy' );
+		$this->assertNotSame( $dummy2, $dummy );
+		$this->assertSame( 'qqx', $dummy2->lang );
+	}
+
 }

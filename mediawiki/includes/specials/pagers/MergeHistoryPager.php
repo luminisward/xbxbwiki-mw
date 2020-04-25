@@ -30,10 +30,15 @@ class MergeHistoryPager extends ReverseChronologicalPager {
 	/** @var array */
 	public $mConds;
 
-	function __construct( SpecialMergeHistory $form, $conds, Title $source, Title $dest ) {
+	/** @var int */
+	private $articleID;
+
+	/** @var int */
+	private $maxTimestamp;
+
+	public function __construct( SpecialMergeHistory $form, $conds, Title $source, Title $dest ) {
 		$this->mForm = $form;
 		$this->mConds = $conds;
-		$this->title = $source;
 		$this->articleID = $source->getArticleID();
 
 		$dbr = wfGetDB( DB_REPLICA );
@@ -48,7 +53,7 @@ class MergeHistoryPager extends ReverseChronologicalPager {
 		parent::__construct( $form->getContext() );
 	}
 
-	function getStartBody() {
+	protected function getStartBody() {
 		# Do a link batch query
 		$this->mResult->seek( 0 );
 		$batch = new LinkBatch();

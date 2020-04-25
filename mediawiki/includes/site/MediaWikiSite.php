@@ -22,7 +22,7 @@ use MediaWiki\Site\MediaWikiPageNameNormalizer;
  *
  * @file
  * @ingroup Site
- * @license GNU GPL v2+
+ * @license GPL-2.0-or-later
  * @author John Erling Blad < jeblad@gmail.com >
  * @author Daniel Kinzler
  * @author Jeroen De Dauw < jeroendedauw@gmail.com >
@@ -176,13 +176,13 @@ class MediaWikiSite extends Site {
 	 *
 	 * @param string|bool $pageName Page name or false (default: false)
 	 *
-	 * @return string
+	 * @return string|null
 	 */
 	public function getPageUrl( $pageName = false ) {
 		$url = $this->getLinkPath();
 
-		if ( $url === false ) {
-			return false;
+		if ( $url === null ) {
+			return null;
 		}
 
 		if ( $pageName !== false ) {

@@ -44,7 +44,8 @@ class FormOptions implements ArrayAccess {
 	/** Integer type, maps guessType() to WebRequest::getInt() */
 	const INT = 1;
 	/** Float type, maps guessType() to WebRequest::getFloat()
-	 * @since 1.23 */
+	 * @since 1.23
+	 */
 	const FLOAT = 4;
 	/** Boolean type, maps guessType() to WebRequest::getBool() */
 	const BOOL = 2;
@@ -53,7 +54,8 @@ class FormOptions implements ArrayAccess {
 	 */
 	const INTNULL = 3;
 	/** Array type, maps guessType() to WebRequest::getArray()
-	 * @since 1.29 */
+	 * @since 1.29
+	 */
 	const ARR = 5;
 	/* @} */
 
@@ -336,7 +338,7 @@ class FormOptions implements ArrayAccess {
 	 * available for accessing with getValue() or consumeValue() etc.
 	 *
 	 * @param WebRequest $r The request to fetch values from
-	 * @param array $optionKeys Which options to fetch the values for (default:
+	 * @param array|null $optionKeys Which options to fetch the values for (default:
 	 *     all of them). Note that passing an empty array will also result in
 	 *     values for all keys being fetched.
 	 * @throws MWException If the type of any option is invalid
@@ -381,9 +383,10 @@ class FormOptions implements ArrayAccess {
 
 	/** @name ArrayAccess functions
 	 * These functions implement the ArrayAccess PHP interface.
-	 * @see https://secure.php.net/manual/en/class.arrayaccess.php
+	 * @see https://www.php.net/manual/en/class.arrayaccess.php
 	 */
 	/* @{ */
+
 	/**
 	 * Whether the option exists.
 	 * @param string $name

@@ -29,6 +29,8 @@ abstract class PoolCounterWork {
 	protected $type = 'generic';
 	/** @var bool */
 	protected $cacheable = false; // does this override getCachedWork() ?
+	/** @var PoolCounter */
+	private $poolCounter;
 
 	/**
 	 * @param string $type The class of actions to limit concurrency for (task type)
@@ -150,9 +152,7 @@ abstract class PoolCounterWork {
 					PoolCounter::QUEUE_FULL => 'pool-queuefull',
 					PoolCounter::TIMEOUT => 'pool-timeout' ];
 
-				$status = Status::newFatal( isset( $errors[$status->value] )
-					? $errors[$status->value]
-					: 'pool-errorunknown' );
+				$status = Status::newFatal( $errors[$status->value] ?? 'pool-errorunknown' );
 				$this->logError( $status );
 				return $this->error( $status );
 		}

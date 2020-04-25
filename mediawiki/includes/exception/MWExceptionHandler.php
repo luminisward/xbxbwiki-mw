@@ -35,12 +35,35 @@ class MWExceptionHandler {
 	 * @var string $reservedMemory
 	 */
 	protected static $reservedMemory;
+
 	/**
+	 * Error types that, if unhandled, are fatal to the request.
+	 *
+	 * On PHP 7, these error types may be thrown as Error objects, which
+	 * implement Throwable (but not Exception).
+	 *
+	 * On HHVM, these invoke the set_error_handler callback, similar to how
+	 * (non-fatal) warnings and notices are reported, except that after this
+	 * handler runs for fatal error tpyes, script execution stops!
+	 *
+	 * The user will be shown an HTTP 500 Internal Server Error.
+	 * As such, these should be sent to MediaWiki's "fatal" or "exception"
+	 * channel. Normally, the error handler logs them to the "error" channel.
+	 *
 	 * @var array $fatalErrorTypes
 	 */
 	protected static $fatalErrorTypes = [
-		E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR,
-		/* HHVM's FATAL_ERROR level */ 16777217,
+		E_ERROR,
+		E_PARSE,
+		E_CORE_ERROR,
+		E_COMPILE_ERROR,
+		E_USER_ERROR,
+
+		// E.g. "Catchable fatal error: Argument X must be Y, null given"
+		E_RECOVERABLE_ERROR,
+
+		// HHVM's FATAL_ERROR constant
+		16777217,
 	];
 	/**
 	 * @var bool $handledFatalCallback
@@ -51,9 +74,32 @@ class MWExceptionHandler {
 	 * Install handlers with PHP.
 	 */
 	public static function installHandler() {
+		// This catches:
+		// * Exception objects that were explicitly thrown but not
+		//   caught anywhere in the application. This is rare given those
+		//   would normally be caught at a high-level like MediaWiki::run (index.php),
+		//   api.php, or ResourceLoader::respond (load.php). These high-level
+		//   catch clauses would then call MWExceptionHandler::logException
+		//   or MWExceptionHandler::handleException.
+		//   If they are not caught, then they are handled here.
+		// * Error objects (on PHP 7+), for issues that would historically
+		//   cause fatal errors but may now be caught as Throwable (not Exception).
+		//   Same as previous case, but more common to bubble to here instead of
+		//   caught locally because they tend to not be safe to recover from.
+		//   (e.g. argument TypeErorr, devision by zero, etc.)
 		set_exception_handler( 'MWExceptionHandler::handleUncaughtException' );
+
+		// This catches:
+		// * Non-fatal errors (e.g. PHP Notice, PHP Warning, PHP Error) that do not
+		//   interrupt execution in any way. We log these in the background and then
+		//   continue execution.
+		// * Fatal errors (on HHVM in PHP5 mode) where PHP 7 would throw Throwable.
 		set_error_handler( 'MWExceptionHandler::handleError' );
 
+		// This catches:
+		// * Fatal error for which no Throwable is thrown (PHP 7), and no Error emitted (HHVM).
+		//   This includes Out-Of-Memory and Timeout fatals.
+		//
 		// Reserve 16k of memory so we can report OOM fatals
 		self::$reservedMemory = str_repeat( ' ', 16384 );
 		register_shutdown_function( 'MWExceptionHandler::handleFatalError' );
@@ -161,8 +207,8 @@ class MWExceptionHandler {
 	 *
 	 * @param int $level Error level raised
 	 * @param string $message
-	 * @param string $file
-	 * @param int $line
+	 * @param string|null $file
+	 * @param int|null $line
 	 * @return bool
 	 *
 	 * @see logError()
@@ -173,38 +219,53 @@ class MWExceptionHandler {
 		global $wgPropagateErrors;
 
 		if ( in_array( $level, self::$fatalErrorTypes ) ) {
-			return call_user_func_array(
-				'MWExceptionHandler::handleFatalError', func_get_args()
-			);
+			return self::handleFatalError( ...func_get_args() );
 		}
 
-		// Map error constant to error name (reverse-engineer PHP error
-		// reporting)
+		// Map PHP error constant to a PSR-3 severity level.
+		// Avoid use of "DEBUG" or "INFO" levels, unless the
+		// error should evade error monitoring and alerts.
+		//
+		// To decide the log level, ask yourself: "Has the
+		// program's behaviour diverged from what the written
+		// code expected?"
+		//
+		// For example, use of a deprecated method or violating a strict standard
+		// has no impact on functional behaviour (Warning). On the other hand,
+		// accessing an undefined variable makes behaviour diverge from what the
+		// author intended/expected. PHP recovers from an undefined variables by
+		// yielding null and continuing execution, but it remains a change in
+		// behaviour given the null was not part of the code and is likely not
+		// accounted for.
 		switch ( $level ) {
-			case E_RECOVERABLE_ERROR:
-				$levelName = 'Error';
-				$severity = LogLevel::ERROR;
-				break;
 			case E_WARNING:
 			case E_CORE_WARNING:
 			case E_COMPILE_WARNING:
+				$levelName = 'Warning';
+				$severity = LogLevel::ERROR;
+				break;
+			case E_NOTICE:
+				$levelName = 'Notice';
+				$severity = LogLevel::ERROR;
+				break;
+			case E_USER_NOTICE:
+				// Used by wfWarn(), MWDebug::warning()
+				$levelName = 'Notice';
+				$severity = LogLevel::WARNING;
+				break;
 			case E_USER_WARNING:
+				// Used by wfWarn(), MWDebug::warning()
 				$levelName = 'Warning';
 				$severity = LogLevel::WARNING;
 				break;
-			case E_NOTICE:
-			case E_USER_NOTICE:
-				$levelName = 'Notice';
-				$severity = LogLevel::INFO;
-				break;
 			case E_STRICT:
 				$levelName = 'Strict Standards';
-				$severity = LogLevel::DEBUG;
+				$severity = LogLevel::WARNING;
 				break;
 			case E_DEPRECATED:
 			case E_USER_DEPRECATED:
 				$levelName = 'Deprecated';
-				$severity = LogLevel::INFO;
+				$severity = LogLevel::WARNING;
 				break;
 			default:
 				$levelName = 'Unknown error';
@@ -216,9 +277,9 @@ class MWExceptionHandler {
 		self::logError( $e, 'error', $severity );
 
 		// If $wgPropagateErrors is true return false so PHP shows/logs the error normally.
-		// Ignore $wgPropagateErrors if the error should break execution, or track_errors is set
+		// Ignore $wgPropagateErrors if track_errors is set
 		// (which means someone is counting on regular PHP error handling behavior).
-		return !( $wgPropagateErrors || $level == E_RECOVERABLE_ERROR || ini_get( 'track_errors' ) );
+		return !( $wgPropagateErrors || ini_get( 'track_errors' ) );
 	}
 
 	/**
@@ -233,12 +294,12 @@ class MWExceptionHandler {
 	 *
 	 * @since 1.25
 	 *
-	 * @param int $level Error level raised
-	 * @param string $message Error message
-	 * @param string $file File that error was raised in
-	 * @param int $line Line number error was raised at
-	 * @param array $context Active symbol table point of error
-	 * @param array $trace Backtrace at point of error (undocumented HHVM
+	 * @param int|null $level Error level raised
+	 * @param string|null $message Error message
+	 * @param string|null $file File that error was raised in
+	 * @param int|null $line Line number error was raised at
+	 * @param array|null $context Active symbol table point of error
+	 * @param array|null $trace Backtrace at point of error (undocumented HHVM
 	 *     feature)
 	 * @return bool Always returns false
 	 */
@@ -289,7 +350,7 @@ class MWExceptionHandler {
 
 		// Look at message to see if this is a class not found failure
 		// HHVM: Class undefined: foo
-		// PHP5: Class 'foo' not found
+		// PHP7: Class 'foo' not found
 		if ( preg_match( "/Class (undefined: \w+|'\w+' not found)/", $message ) ) {
 			// phpcs:disable Generic.Files.LineLength
 			$msg = <<<TXT
@@ -422,22 +483,6 @@ TXT;
 			}
 			return $frame;
 		}, $trace );
-	}
-
-	/**
-	 * Get the ID for this exception.
-	 *
-	 * The ID is saved so that one can match the one output to the user (when
-	 * $wgShowExceptionDetails is set to false), to the entry in the debug log.
-	 *
-	 * @since 1.22
-	 * @deprecated since 1.27: Exception IDs are synonymous with request IDs.
-	 * @param Exception|Throwable $e
-	 * @return string
-	 */
-	public static function getLogId( $e ) {
-		wfDeprecated( __METHOD__, '1.27' );
-		return WebRequest::getRequestId();
 	}
 
 	/**
@@ -638,16 +683,21 @@ TXT;
 	 * This method must not assume the exception is an MWException,
 	 * it is also used to handle PHP exceptions or exceptions from other libraries.
 	 *
-	 * @since 1.22
 	 * @param Exception|Throwable $e
 	 * @param string $catcher CAUGHT_BY_* class constant indicating what caught the error
+	 * @param array $extraData (since 1.34) Additional data to log
+	 * @since 1.22
 	 */
-	public static function logException( $e, $catcher = self::CAUGHT_BY_OTHER ) {
+	public static function logException( $e, $catcher = self::CAUGHT_BY_OTHER, $extraData = [] ) {
 		if ( !( $e instanceof MWException ) || $e->isLoggable() ) {
 			$logger = LoggerFactory::getInstance( 'exception' );
+			$context = self::getLogContext( $e, $catcher );
+			if ( $extraData ) {
+				$context['extraData'] = $extraData;
+			}
 			$logger->error(
 				self::getLogNormalMessage( $e ),
-				self::getLogContext( $e, $catcher )
+				$context
 			);
 
 			$json = self::jsonSerializeException( $e, false, FormatJson::ALL_OK, $catcher );

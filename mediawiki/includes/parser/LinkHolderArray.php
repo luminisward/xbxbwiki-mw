@@ -21,6 +21,8 @@
  * @ingroup Parser
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * @ingroup Parser
  */
@@ -46,6 +48,7 @@ class LinkHolderArray {
 	 * Reduce memory usage to reduce the impact of circular references
 	 */
 	public function __destruct() {
+		// @phan-suppress-next-line PhanTypeSuspiciousNonTraversableForeach
 		foreach ( $this as $name => $value ) {
 			unset( $this->$name );
 		}
@@ -273,6 +276,7 @@ class LinkHolderArray {
 
 	/**
 	 * Replace internal links
+	 * @suppress SecurityCheck-XSS Gets confused with $entry['pdbk']
 	 * @param string &$text
 	 */
 	protected function replaceInternal( &$text ) {
@@ -280,10 +284,8 @@ class LinkHolderArray {
 			return;
 		}
 
-		global $wgContLang;
-
 		$colours = [];
-		$linkCache = LinkCache::singleton();
+		$linkCache = MediaWikiServices::getInstance()->getLinkCache();
 		$output = $this->parent->getOutput();
 		$linkRenderer = $this->parent->getLinkRenderer();
 
@@ -358,11 +360,11 @@ class LinkHolderArray {
 		}
 		if ( count( $linkcolour_ids ) ) {
 			// pass an array of page_ids to an extension
-			Hooks::run( 'GetLinkColours', [ $linkcolour_ids, &$colours ] );
+			Hooks::run( 'GetLinkColours', [ $linkcolour_ids, &$colours, $this->parent->getTitle() ] );
 		}
 
 		# Do a second query for different language variants of links and categories
-		if ( $wgContLang->hasVariants() ) {
+		if ( $this->parent->getContentLanguage()->hasVariants() ) {
 			$this->doVariants( $colours );
 		}
 
@@ -372,7 +374,7 @@ class LinkHolderArray {
 			foreach ( $entries as $index => $entry ) {
 				$pdbk = $entry['pdbk'];
 				$title = $entry['title'];
-				$query = isset( $entry['query'] ) ? $entry['query'] : [];
+				$query = $entry['query'] ?? [];
 				$key = "$ns:$index";
 				$searchkey = "<!--LINK'\" $key-->";
 				$displayText = $entry['text'];
@@ -404,12 +406,13 @@ class LinkHolderArray {
 				$replacePairs[$searchkey] = $link;
 			}
 		}
-		$replacer = new HashtableReplacer( $replacePairs, 1 );
 
 		# Do the thing
 		$text = preg_replace_callback(
 			'/(<!--LINK\'" .*?-->)/',
-			$replacer->cb(),
+			function ( array $matches ) use ( $replacePairs ) {
+				return $replacePairs[$matches[1]];
+			},
 			$text
 		);
 	}
@@ -417,6 +420,7 @@ class LinkHolderArray {
 	/**
 	 * Replace interwiki links
 	 * @param string &$text
+	 * @suppress SecurityCheck-XSS Gets confused with $this->interwikis['pdbk']
 	 */
 	protected function replaceInterwiki( &$text ) {
 		if ( empty( $this->interwikis ) ) {
@@ -434,12 +438,14 @@ class LinkHolderArray {
 			);
 			$output->addInterwikiLink( $link['title'] );
 		}
-		$replacer = new HashtableReplacer( $replacePairs, 1 );
 
 		$text = preg_replace_callback(
 			'/<!--IWLINK\'" (.*?)-->/',
-			$replacer->cb(),
-			$text );
+			function ( array $matches ) use ( $replacePairs ) {
+				return $replacePairs[$matches[1]];
+			},
+			$text
+		);
 	}
 
 	/**
@@ -447,11 +453,10 @@ class LinkHolderArray {
 	 * @param array &$colours
 	 */
 	protected function doVariants( &$colours ) {
-		global $wgContLang;
 		$linkBatch = new LinkBatch();
 		$variantMap = []; // maps $pdbkey_Variant => $keys (of link holders)
 		$output = $this->parent->getOutput();
-		$linkCache = LinkCache::singleton();
+		$linkCache = MediaWikiServices::getInstance()->getLinkCache();
 		$titlesToBeConverted = '';
 		$titlesAttrs = [];
 
@@ -475,7 +480,8 @@ class LinkHolderArray {
 		}
 
 		// Now do the conversion and explode string to text of titles
-		$titlesAllVariants = $wgContLang->autoConvertToAllVariants( rtrim( $titlesToBeConverted, "\0" ) );
+		$titlesAllVariants = $this->parent->getContentLanguage()->
+			autoConvertToAllVariants( rtrim( $titlesToBeConverted, "\0" ) );
 		$allVariantsName = array_keys( $titlesAllVariants );
 		foreach ( $titlesAllVariants as &$titlesVariant ) {
 			$titlesVariant = explode( "\0", $titlesVariant );
@@ -516,7 +522,7 @@ class LinkHolderArray {
 		foreach ( $output->getCategoryLinks() as $category ) {
 			$categoryTitle = Title::makeTitleSafe( NS_CATEGORY, $category );
 			$linkBatch->addObj( $categoryTitle );
-			$variants = $wgContLang->autoConvertToAllVariants( $category );
+			$variants = $this->parent->getContentLanguage()->autoConvertToAllVariants( $category );
 			foreach ( $variants as $variant ) {
 				if ( $variant !== $category ) {
 					$variantTitle = Title::makeTitleSafe( NS_CATEGORY, $variant );
@@ -584,7 +590,7 @@ class LinkHolderArray {
 					}
 				}
 			}
-			Hooks::run( 'GetLinkColours', [ $linkcolour_ids, &$colours ] );
+			Hooks::run( 'GetLinkColours', [ $linkcolour_ids, &$colours, $this->parent->getTitle() ] );
 
 			// rebuild the categories in original order (if there are replacements)
 			if ( count( $varCategories ) > 0 ) {
@@ -627,8 +633,7 @@ class LinkHolderArray {
 	 * @private
 	 */
 	public function replaceTextCallback( $matches ) {
-		$type = $matches[1];
-		$key = $matches[2];
+		list( , $type, $key ) = $matches;
 		if ( $type == 'LINK' ) {
 			list( $ns, $index ) = explode( ':', $key, 2 );
 			if ( isset( $this->internals[$ns][$index]['text'] ) ) {

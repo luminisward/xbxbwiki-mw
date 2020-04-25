@@ -28,11 +28,20 @@ use Wikimedia\Rdbms\IDatabase;
  * This class handles the logic for the actor table migration.
  *
  * This is not intended to be a long-term part of MediaWiki; it will be
- * deprecated and removed along with $wgActorTableSchemaMigrationStage.
+ * deprecated and removed once actor migration is complete.
  *
  * @since 1.31
+ * @since 1.34 Use with 'ar_user', 'img_user', 'oi_user', 'fa_user',
+ *  'rc_user', 'log_user', and 'ipb_by' is deprecated. Callers should
+ *  reference the corresponding actor fields directly.
  */
 class ActorMigration {
+
+	/**
+	 * Constant for extensions to feature-test whether $wgActorTableSchemaMigrationStage
+	 * (in MW <1.34) expects MIGRATION_* or SCHEMA_COMPAT_*
+	 */
+	const MIGRATION_STAGE_SCHEMA_COMPAT = 1;
 
 	/**
 	 * Define fields that use temporary tables for transitional purposes
@@ -63,6 +72,28 @@ class ActorMigration {
 	private static $formerTempTables = [];
 
 	/**
+	 * Define fields that are deprecated for use with this class.
+	 * @var (string|null)[] Keys are '$key', value is null for soft deprecation
+	 *  or a string naming the deprecated version for hard deprecation.
+	 */
+	private static $deprecated = [
+		'ar_user' => null, // 1.34
+		'img_user' => null, // 1.34
+		'oi_user' => null, // 1.34
+		'fa_user' => null, // 1.34
+		'rc_user' => null, // 1.34
+		'log_user' => null, // 1.34
+		'ipb_by' => null, // 1.34
+	];
+
+	/**
+	 * Define fields that are removed for use with this class.
+	 * @var string[] Keys are '$key', value is the MediaWiki version in which
+	 *  use was removed.
+	 */
+	private static $removed = [];
+
+	/**
 	 * Define fields that use non-standard mapping
 	 * @var array Keys are the user id column name, values are arrays with two
 	 *  elements (the user text column name and the actor id column name)
@@ -74,11 +105,27 @@ class ActorMigration {
 	/** @var array|null Cache for `self::getJoin()` */
 	private $joinCache = null;
 
-	/** @var int One of the MIGRATION_* constants */
+	/** @var int Combination of SCHEMA_COMPAT_* constants */
 	private $stage;
 
 	/** @private */
 	public function __construct( $stage ) {
+		if ( ( $stage & SCHEMA_COMPAT_WRITE_BOTH ) === 0 ) {
+			throw new InvalidArgumentException( '$stage must include a write mode' );
+		}
+		if ( ( $stage & SCHEMA_COMPAT_READ_BOTH ) === 0 ) {
+			throw new InvalidArgumentException( '$stage must include a read mode' );
+		}
+		if ( ( $stage & SCHEMA_COMPAT_READ_BOTH ) === SCHEMA_COMPAT_READ_BOTH ) {
+			throw new InvalidArgumentException( 'Cannot read both schemas' );
+		}
+		if ( ( $stage & SCHEMA_COMPAT_READ_OLD ) && !( $stage & SCHEMA_COMPAT_WRITE_OLD ) ) {
+			throw new InvalidArgumentException( 'Cannot read the old schema without also writing it' );
+		}
+		if ( ( $stage & SCHEMA_COMPAT_READ_NEW ) && !( $stage & SCHEMA_COMPAT_WRITE_NEW ) ) {
+			throw new InvalidArgumentException( 'Cannot read the new schema without also writing it' );
+		}
+
 		$this->stage = $stage;
 	}
 
@@ -91,12 +138,27 @@ class ActorMigration {
 	}
 
 	/**
+	 * Issue deprecation warning/error as appropriate.
+	 * @param string $key
+	 */
+	private static function checkDeprecation( $key ) {
+		if ( isset( self::$removed[$key] ) ) {
+			throw new InvalidArgumentException(
+				"Use of " . static::class . " for '$key' was removed in MediaWiki " . self::$removed[$key]
+			);
+		}
+		if ( !empty( self::$deprecated[$key] ) ) {
+			wfDeprecated( static::class . " for '$key'", self::$deprecated[$key], false, 3 );
+		}
+	}
+
+	/**
 	 * Return an SQL condition to test if a user field is anonymous
 	 * @param string $field Field name or SQL fragment
 	 * @return string
 	 */
 	public function isAnon( $field ) {
-		return $this->stage === MIGRATION_NEW ? "$field IS NULL" : "$field = 0";
+		return ( $this->stage & SCHEMA_COMPAT_READ_NEW ) ? "$field IS NULL" : "$field = 0";
 	}
 
 	/**
@@ -105,7 +167,7 @@ class ActorMigration {
 	 * @return string
 	 */
 	public function isNotAnon( $field ) {
-		return $this->stage === MIGRATION_NEW ? "$field IS NOT NULL" : "$field != 0";
+		return ( $this->stage & SCHEMA_COMPAT_READ_NEW ) ? "$field IS NOT NULL" : "$field != 0";
 	}
 
 	/**
@@ -114,11 +176,7 @@ class ActorMigration {
 	 * @return string[] [ $text, $actor ]
 	 */
 	private static function getFieldNames( $key ) {
-		if ( isset( self::$specialFields[$key] ) ) {
-			return self::$specialFields[$key];
-		}
-
-		return [ $key . '_text', substr( $key, 0, -5 ) . '_actor' ];
+		return self::$specialFields[$key] ?? [ $key . '_text', substr( $key, 0, -5 ) . '_actor' ];
 	}
 
 	/**
@@ -126,13 +184,16 @@ class ActorMigration {
 	 *
 	 * @param string $key A key such as "rev_user" identifying the actor
 	 *  field being fetched.
-	 * @return array With three keys:
+	 * @return array[] With three keys:
 	 *   - tables: (string[]) to include in the `$table` to `IDatabase->select()`
 	 *   - fields: (string[]) to include in the `$vars` to `IDatabase->select()`
 	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()`
 	 *  All tables, fields, and joins are aliased, so `+` is safe to use.
+	 * @phan-return array{tables:string[],fields:string[],joins:array}
 	 */
 	public function getJoin( $key ) {
+		self::checkDeprecation( $key );
+
 		if ( !isset( $this->joinCache[$key] ) ) {
 			$tables = [];
 			$fields = [];
@@ -140,18 +201,16 @@ class ActorMigration {
 
 			list( $text, $actor ) = self::getFieldNames( $key );
 
-			if ( $this->stage === MIGRATION_OLD ) {
+			if ( $this->stage & SCHEMA_COMPAT_READ_OLD ) {
 				$fields[$key] = $key;
 				$fields[$text] = $text;
 				$fields[$actor] = 'NULL';
 			} else {
-				$join = $this->stage === MIGRATION_NEW ? 'JOIN' : 'LEFT JOIN';
-
 				if ( isset( self::$tempTables[$key] ) ) {
 					$t = self::$tempTables[$key];
 					$alias = "temp_$key";
 					$tables[$alias] = $t['table'];
-					$joins[$alias] = [ $join, "{$alias}.{$t['pk']} = {$t['joinPK']}" ];
+					$joins[$alias] = [ 'JOIN', "{$alias}.{$t['pk']} = {$t['joinPK']}" ];
 					$joinField = "{$alias}.{$t['field']}";
 				} else {
 					$joinField = $actor;
@@ -159,15 +218,10 @@ class ActorMigration {
 
 				$alias = "actor_$key";
 				$tables[$alias] = 'actor';
-				$joins[$alias] = [ $join, "{$alias}.actor_id = {$joinField}" ];
+				$joins[$alias] = [ 'JOIN', "{$alias}.actor_id = {$joinField}" ];
 
-				if ( $this->stage === MIGRATION_NEW ) {
-					$fields[$key] = "{$alias}.actor_user";
-					$fields[$text] = "{$alias}.actor_name";
-				} else {
-					$fields[$key] = "COALESCE( {$alias}.actor_user, $key )";
-					$fields[$text] = "COALESCE( {$alias}.actor_name, $text )";
-				}
+				$fields[$key] = "{$alias}.actor_user";
+				$fields[$text] = "{$alias}.actor_name";
 				$fields[$actor] = $joinField;
 			}
 
@@ -191,17 +245,19 @@ class ActorMigration {
 	 * @return array to merge into `$values` to `IDatabase->update()` or `$a` to `IDatabase->insert()`
 	 */
 	public function getInsertValues( IDatabase $dbw, $key, UserIdentity $user ) {
+		self::checkDeprecation( $key );
+
 		if ( isset( self::$tempTables[$key] ) ) {
 			throw new InvalidArgumentException( "Must use getInsertValuesWithTempTable() for $key" );
 		}
 
 		list( $text, $actor ) = self::getFieldNames( $key );
 		$ret = [];
-		if ( $this->stage <= MIGRATION_WRITE_BOTH ) {
+		if ( $this->stage & SCHEMA_COMPAT_WRITE_OLD ) {
 			$ret[$key] = $user->getId();
 			$ret[$text] = $user->getName();
 		}
-		if ( $this->stage >= MIGRATION_WRITE_BOTH ) {
+		if ( $this->stage & SCHEMA_COMPAT_WRITE_NEW ) {
 			// We need to be able to assign an actor ID if none exists
 			if ( !$user instanceof User && !$user->getActorId() ) {
 				$user = User::newFromAnyId( $user->getId(), $user->getName(), null );
@@ -220,10 +276,12 @@ class ActorMigration {
 	 * @param UserIdentity $user User to set in the update
 	 * @return array with two values:
 	 *  - array to merge into `$values` to `IDatabase->update()` or `$a` to `IDatabase->insert()`
-	 *  - callback to call with the the primary key for the main table insert
+	 *  - callback to call with the primary key for the main table insert
 	 *    and extra fields needed for the temp table.
 	 */
 	public function getInsertValuesWithTempTable( IDatabase $dbw, $key, UserIdentity $user ) {
+		self::checkDeprecation( $key );
+
 		if ( isset( self::$formerTempTables[$key] ) ) {
 			wfDeprecated( __METHOD__ . " for $key", self::$formerTempTables[$key] );
 		} elseif ( !isset( self::$tempTables[$key] ) ) {
@@ -233,11 +291,11 @@ class ActorMigration {
 		list( $text, $actor ) = self::getFieldNames( $key );
 		$ret = [];
 		$callback = null;
-		if ( $this->stage <= MIGRATION_WRITE_BOTH ) {
+		if ( $this->stage & SCHEMA_COMPAT_WRITE_OLD ) {
 			$ret[$key] = $user->getId();
 			$ret[$text] = $user->getName();
 		}
-		if ( $this->stage >= MIGRATION_WRITE_BOTH ) {
+		if ( $this->stage & SCHEMA_COMPAT_WRITE_NEW ) {
 			// We need to be able to assign an actor ID if none exists
 			if ( !$user instanceof User && !$user->getActorId() ) {
 				$user = User::newFromAnyId( $user->getId(), $user->getName(), null );
@@ -301,10 +359,14 @@ class ActorMigration {
 	 *   - orconds: (array[]) array of alternatives in case a union of multiple
 	 *     queries would be more efficient than a query with OR. May have keys
 	 *     'actor', 'userid', 'username'.
+	 *     Since 1.32, this is guaranteed to contain just one alternative if
+	 *     $users contains a single user.
 	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()`
 	 *  All tables and joins are aliased, so `+` is safe to use.
 	 */
 	public function getWhere( IDatabase $db, $key, $users, $useId = true ) {
+		self::checkDeprecation( $key );
+
 		$tables = [];
 		$conds = [];
 		$joins = [];
@@ -332,44 +394,26 @@ class ActorMigration {
 		list( $text, $actor ) = self::getFieldNames( $key );
 
 		// Combine data into conditions to be ORed together
-		$actorNotEmpty = [];
-		if ( $this->stage === MIGRATION_OLD ) {
-			$actors = [];
-			$actorEmpty = [];
-		} elseif ( isset( self::$tempTables[$key] ) ) {
-			$t = self::$tempTables[$key];
-			$alias = "temp_$key";
-			$tables[$alias] = $t['table'];
-			$joins[$alias] = [
-				$this->stage === MIGRATION_NEW ? 'JOIN' : 'LEFT JOIN',
-				"{$alias}.{$t['pk']} = {$t['joinPK']}"
-			];
-			$joinField = "{$alias}.{$t['field']}";
-			$actorEmpty = [ $joinField => null ];
-			if ( $this->stage !== MIGRATION_NEW ) {
-				// Otherwise the resulting test can evaluate to NULL, and
-				// NOT(NULL) is NULL rather than true.
-				$actorNotEmpty = [ "$joinField IS NOT NULL" ];
+		if ( $this->stage & SCHEMA_COMPAT_READ_NEW ) {
+			if ( $actors ) {
+				if ( isset( self::$tempTables[$key] ) ) {
+					$t = self::$tempTables[$key];
+					$alias = "temp_$key";
+					$tables[$alias] = $t['table'];
+					$joins[$alias] = [ 'JOIN', "{$alias}.{$t['pk']} = {$t['joinPK']}" ];
+					$joinField = "{$alias}.{$t['field']}";
+				} else {
+					$joinField = $actor;
+				}
+				$conds['actor'] = $db->makeList( [ $joinField => $actors ], IDatabase::LIST_AND );
 			}
 		} else {
-			$joinField = $actor;
-			$actorEmpty = [ $joinField => 0 ];
-		}
-
-		if ( $actors ) {
-			$conds['actor'] = $db->makeList(
-				$actorNotEmpty + [ $joinField => $actors ], IDatabase::LIST_AND
-			);
-		}
-		if ( $this->stage < MIGRATION_NEW && $ids ) {
-			$conds['userid'] = $db->makeList(
-				$actorEmpty + [ $key => $ids ], IDatabase::LIST_AND
-			);
-		}
-		if ( $this->stage < MIGRATION_NEW && $names ) {
-			$conds['username'] = $db->makeList(
-				$actorEmpty + [ $text => $names ], IDatabase::LIST_AND
-			);
+			if ( $ids ) {
+				$conds['userid'] = $db->makeList( [ $key => $ids ], IDatabase::LIST_AND );
+			}
+			if ( $names ) {
+				$conds['username'] = $db->makeList( [ $text => $names ], IDatabase::LIST_AND );
+			}
 		}
 
 		return [
