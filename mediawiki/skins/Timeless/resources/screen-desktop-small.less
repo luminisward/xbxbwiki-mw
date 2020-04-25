@@ -1,17 +1,33 @@
 @import 'variables.less';
 
-// Redundant sidebar category list and stuff
+// Single-column layout with dropdown menus
 
 #mw-content-block {
-	padding: 1px 0;
+	padding: 0;
+	position: relative;
+	// In case of high resolution usage
+	max-width: @content-width - @column-left-size - @column-right-size;
 }
+
+.ts-inner {
+	max-width: @content-width - @column-left-size - @column-right-size;
+}
+
 #mw-content {
 	border-width: 1px 0 1px;
-  clear: both;
-  margin-top: 3em;
+	clear: both;
+	margin-top: 3em;
+}
+
+#mw-content-container {
+	padding-bottom: 0;
 }
 
 .categories-bottom();
+
+#mw-data-after-content {
+	padding: 0 @content-padding;
+}
 
 // Header navigation
 
@@ -23,17 +39,24 @@
 		display: inline-block;
 	}
 }
+
 .sidebar-inner,
 #p-logo {
 	display: none !important;
 }
+
+// .color-right,
+// .color-middle,
+// .color-left {
+// 	background: @green;
+// }
 
 // Have these cover the fixed header color-bar using the mw-header-nav-hack (with its own color-bar at the bottom)
 #mw-site-navigation,
 #mw-related-navigation {
 	display: inline-block;
 	position: relative;
-	z-index: 1009;
+	z-index: 99;
 
 	h2 {
 		font-weight: normal;
@@ -45,8 +68,8 @@
 		.dropdown-header();
 	}
 }
-.sidebar-chunk:hover {
-	.pokey,
+
+.client-nojs .sidebar-chunk:hover {
 	.sidebar-inner {
 		display: block !important;
 	}
@@ -59,30 +82,61 @@
 	background: @background;
 	width: 100%;
 }
-#mw-header-nav-hack .color-bar {
-	margin-top: 2.5em; // Height of expected menu header contents
-}
 
 #mw-site-navigation {
-	float: left;
-	margin-left: 2em;
+	position: absolute;
+	top: -3em;
+	left: 2em;
 
 	.sidebar-chunk {
 		margin: 0 1em 0 0;
 	}
+
 	.sidebar-inner {
 		.dropdown-menu( left );
 	}
 }
+
+#mw-site-navigation .sidebar-chunk h2 span {
+	.dropdown-pokey();
+
+	&:before,
+	&:after {
+		right: 1px;
+		display: none;
+	}
+
+	&:before {
+		top: 34px;
+	}
+
+	&:after {
+		top: 36px;
+	}
+}
+
+#mw-site-navigation .dropdown-active,
+.client-nojs #mw-site-navigation .sidebar-chunk:hover {
+	h2 span {
+		&:before,
+		&:after {
+			display: block;
+		}
+	}
+}
+
 #mw-related-navigation {
-	float: right;
-	margin-right: 2em;
+	position: absolute;
+	top: -3em;
+	right: 2em;
 
 	.sidebar-chunk {
 		margin: 0 0 0 1em;
 	}
+
 	.sidebar-inner {
 		.dropdown-menu();
+		.dropdown-pokey();
 		top: 2.95em !important; // to override mobile positioning
 	}
 }
@@ -92,9 +146,10 @@
 #mw-header {
 	padding: 0 2em;
 }
+
 #p-logo-text a {
 	padding-left: 0;
-	text-align: left;
+	padding-right: 0.5em;
 }
 
 #mw-footer {
@@ -107,19 +162,10 @@
 	float: right;
 
 	h2 span {
-		display: none;
+		max-width: 130px;
 	}
-	h2:after {
-		margin-left: -0.65em;
-	}
+
 	.dropdown {
 		right: -1em;
 	}
-}
-
-#user-tools {
-	width: 6em;
-}
-#p-search {
-	margin-right: 6em;
 }
