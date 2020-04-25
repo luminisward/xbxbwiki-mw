@@ -48,11 +48,17 @@ class MediaWikiGadgetsDefinitionRepo extends GadgetRepo {
 	 */
 	private function purgeDefinitionCache() {
 		$cache = MediaWikiServices::getInstance()->getMainWANObjectCache();
-		$cache->touchCheckKey( $this->getCheckKey() );
+		$cache->touchCheckKey( $this->getDefinitionCacheKey() );
 	}
 
-	private function getCheckKey() {
-		return wfMemcKey( 'gadgets-definition', Gadget::GADGET_CLASS_VERSION, self::CACHE_VERSION );
+	private function getDefinitionCacheKey() {
+		$cache = MediaWikiServices::getInstance()->getMainWANObjectCache();
+
+		return $cache->makeKey(
+			'gadgets-definition',
+			Gadget::GADGET_CLASS_VERSION,
+			self::CACHE_VERSION
+		);
 	}
 
 	/**
@@ -70,12 +76,15 @@ class MediaWikiGadgetsDefinitionRepo extends GadgetRepo {
 		$t1Cache = ObjectCache::getLocalServerInstance( 'hash' );
 		$wanCache = MediaWikiServices::getInstance()->getMainWANObjectCache();
 
-		$key = $this->getCheckKey();
+		$key = $this->getDefinitionCacheKey();
 
 		// (a) Check the tier 1 cache
 		$value = $t1Cache->get( $key );
+		// Randomize logical APC expiry to avoid stampedes
+		// somewhere between 7.0 and 15.0 (seconds)
+		$cutoffAge = mt_rand( 7 * 1e6, 15 * 1e6 ) / 1e6;
 		// Check if it passes a blind TTL check (avoids I/O)
-		if ( $value && ( microtime( true ) - $value['time'] ) < 10 ) {
+		if ( $value && ( microtime( true ) - $value['time'] ) < $cutoffAge ) {
 			$this->definitionCache = $value['gadgets']; // process cache
 			return $this->definitionCache;
 		}
@@ -120,7 +129,7 @@ class MediaWikiGadgetsDefinitionRepo extends GadgetRepo {
 	/**
 	 * Fetch list of gadgets and returns it as associative array of sections with gadgets
 	 * e.g. [ $name => $gadget1, etc. ]
-	 * @param string $forceNewText Injected text of MediaWiki:gadgets-definition [optional]
+	 * @param string|null $forceNewText Injected text of MediaWiki:gadgets-definition [optional]
 	 * @return array|bool
 	 */
 	public function fetchStructuredList( $forceNewText = null ) {
@@ -241,7 +250,7 @@ class MediaWikiGadgetsDefinitionRepo extends GadgetRepo {
 					break;
 				case 'type':
 					// Single value, not a list
-					$info['type'] = isset( $params[0] ) ? $params[0] : '';
+					$info['type'] = $params[0] ?? '';
 					break;
 			}
 		}

@@ -1,6 +1,8 @@
 <?php
 
-namespace MediaWiki\Extensions\OAuth;
+namespace MediaWiki\Extensions\OAuth\Tests\Lib;
+
+use MediaWiki\Extensions\OAuth\Lib\OAuthConsumer;
 
 /**
  * The MIT License
@@ -26,17 +28,13 @@ namespace MediaWiki\Extensions\OAuth;
  * THE SOFTWARE.
  */
 
-require_once __DIR__ . '/common.php';
-require_once __DIR__ . '/Mock_OAuthBaseStringRequest.php';
-require_once __DIR__ . '/Mock_OAuthSignatureMethod_RSA_SHA1.php';
-
 /**
  * @group OAuth
  */
 class OAuthSignatureMethodRsaSha1Test extends \PHPUnit\Framework\TestCase {
 	private $method;
 
-	public function setUp() {
+	protected function setUp() : void {
 		$this->method = new Mock_OAuthSignatureMethod_RSA_SHA1();
 	}
 
@@ -67,6 +65,6 @@ class OAuthSignatureMethodRsaSha1Test extends \PHPUnit\Framework\TestCase {
 		$consumer  = new OAuthConsumer('dpf43f3p2l4k3l03', '__unused__');
 		$token     = NULL;
 		$signature = 'jvTp/wX1TYtByB1m+Pbyo0lnCOLIsyGCH7wke8AUs3BpnwZJtAuEJkvQL2/9n4s5wUmUl4aCI4BwpraNx4RtEXMe5qg5T1LVTGliMRpKasKsW//e+RinhejgCuzoH26dyF8iY2ZZ/5D1ilgeijhV/vBka5twt399mXwaYdCwFYE=';
-		$this->assertTrue($this->method->check_signature( $request, $consumer, $token, $signature) );	
+		$this->assertTrue($this->method->check_signature( $request, $consumer, $token, $signature) );
 	}
 }

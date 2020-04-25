@@ -33,10 +33,11 @@ class GadgetDefinitionNamespaceRepo extends GadgetRepo {
 	public function getGadgetIds() {
 		$key = $this->getGadgetIdsKey();
 
+		$fname = __METHOD__;
 		return $this->wanCache->getWithSetCallback(
 			$key,
 			self::CACHE_TTL,
-			function ( $oldValue, &$ttl, array &$setOpts ) {
+			function ( $oldValue, &$ttl, array &$setOpts ) use ( $fname ) {
 				$dbr = wfGetDB( DB_REPLICA );
 				$setOpts += Database::getCacheSetOptions( $dbr );
 
@@ -44,7 +45,7 @@ class GadgetDefinitionNamespaceRepo extends GadgetRepo {
 					'page',
 					'page_title',
 					[ 'page_namespace' => NS_GADGET_DEFINITION ],
-					__METHOD__
+					$fname
 				);
 			},
 			[
@@ -100,9 +101,6 @@ class GadgetDefinitionNamespaceRepo extends GadgetRepo {
 		$gadget = $this->wanCache->getWithSetCallback(
 			$key,
 			self::CACHE_TTL,
-			/**
-			 * @suppress PhanTypeMismatchArgument
-			 */
 			function ( $old, &$ttl, array &$setOpts ) use ( $id ) {
 				$setOpts += Database::getCacheSetOptions( wfGetDB( DB_REPLICA ) );
 				$title = Title::makeTitleSafe( NS_GADGET_DEFINITION, $id );

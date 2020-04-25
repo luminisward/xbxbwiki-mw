@@ -1,6 +1,8 @@
 <?php
 
-namespace MediaWiki\Extensions\OAuth;
+namespace MediaWiki\Extensions\OAuth\Tests\Lib;
+
+use MediaWiki\Extensions\OAuth\Lib\OAuthUtil;
 
 /**
  * The MIT License
@@ -25,8 +27,6 @@ namespace MediaWiki\Extensions\OAuth;
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
 */
-
-require_once __DIR__ . '/common.php';
 
 /**
  * Tests of OAuthUtil
@@ -76,7 +76,7 @@ class OAuthUtilTest extends \PHPUnit\Framework\TestCase {
 		// http://wiki.oauth.net/TestCases ("Normalize Request Parameters")
 
 		$this->assertEquals(
-			array('name'=>''), 
+			array('name'=>''),
 			OAuthUtil::parse_parameters('name')
 		);
 		$this->assertEquals(
@@ -128,7 +128,7 @@ class OAuthUtilTest extends \PHPUnit\Framework\TestCase {
 		);
 
 		// From issue 164, by hidetaka
-		// Based on discussion at 
+		// Based on discussion at
 		// http://groups.google.com/group/oauth/browse_thread/thread/7c698004be0d536/dced7b6c82b917b2?lnk=gst&q=sort#
 		$this->assertEquals(
 			'x=200&x=25&y=B&y=a',

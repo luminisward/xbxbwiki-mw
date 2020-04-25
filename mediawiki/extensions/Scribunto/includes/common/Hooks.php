@@ -2,7 +2,7 @@
 /**
  * Wikitext scripting infrastructure for MediaWiki: hooks.
  * Copyright (C) 2009-2012 Victor Vasiliev <vasilvv@gmail.com>
- * http://www.mediawiki.org/
+ * https://www.mediawiki.org/
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -171,7 +171,7 @@ class ScribuntoHooks {
 
 			// #iferror-compatible error element
 			return "<strong class=\"error\"><span class=\"scribunto-error\" id=\"$id\">" .
-				$parserError. "</span></strong>";
+				$parserError . "</span></strong>";
 		}
 	}
 
@@ -261,9 +261,13 @@ class ScribuntoHooks {
 	 * @return bool
 	 */
 	public static function contentHandlerDefaultModelFor( Title $title, &$model ) {
+		if ( $model === 'sanitized-css' ) {
+			// Let TemplateStyles override Scribunto
+			return true;
+		}
 		if ( $title->getNamespace() == NS_MODULE && !Scribunto::isDocPage( $title ) ) {
 			$model = CONTENT_MODEL_SCRIBUNTO;
-			return false;
+			return true;
 		}
 		return true;
 	}
@@ -359,7 +363,6 @@ class ScribuntoHooks {
 			return true;
 		}
 
-		/** @suppress PhanUndeclaredMethod */
 		$validateStatus = $content->validate( $title );
 		if ( $validateStatus->isOK() ) {
 			return true;

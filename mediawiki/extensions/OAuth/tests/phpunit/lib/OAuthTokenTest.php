@@ -1,6 +1,8 @@
 <?php
 
-namespace MediaWiki\Extensions\OAuth;
+namespace MediaWiki\Extensions\OAuth\Tests\Lib;
+
+use MediaWiki\Extensions\OAuth\Lib\OAuthToken;
 
 /**
  * The MIT License
@@ -25,8 +27,6 @@ namespace MediaWiki\Extensions\OAuth;
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-require_once __DIR__ . '/common.php';
 
 /**
  * @group OAuth

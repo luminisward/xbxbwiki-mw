@@ -7,6 +7,8 @@
  * @file
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * @ingroup Extensions
  */
@@ -46,11 +48,10 @@ class TitleBlacklistEntry {
 	private $mSource;
 
 	/**
-	 * Construct a new TitleBlacklistEntry.
-	 *
 	 * @param string $regex Regular expression to match
 	 * @param array $params Parameters for this entry
 	 * @param string $raw Raw contents of this line
+	 * @param string $source
 	 */
 	private function __construct( $regex, $params, $raw, $source ) {
 		$this->mRaw = $raw;
@@ -87,7 +88,7 @@ class TitleBlacklistEntry {
 	 *
 	 * @param string $title Title to check
 	 * @param string $action Action to check
-	 * @return bool TRUE if the the regex matches the title, and is not overridden
+	 * @return bool TRUE if the regex matches the title, and is not overridden
 	 * else false if it doesn't match (or was overridden)
 	 */
 	public function matches( $title, $action ) {
@@ -104,7 +105,7 @@ class TitleBlacklistEntry {
 		) {
 			if ( $action === 'edit' ) {
 				// Use process cache for frequently edited pages
-				$cache = ObjectCache::getMainWANInstance();
+				$cache = MediaWikiServices::getInstance()->getMainWANObjectCache();
 				list( $ok, $norm ) = $cache->getWithSetCallback(
 					$cache->makeKey( 'titleblacklist', 'normalized-unicode', md5( $title ) ),
 					$cache::TTL_MONTH,
@@ -118,18 +119,18 @@ class TitleBlacklistEntry {
 			}
 
 			if ( $ok === "OK" ) {
-				list( $ver, $title ) = explode( ':', $norm, 2 );
+				list( , $title ) = explode( ':', $norm, 2 );
 			} else {
 				wfDebugLog( 'TitleBlacklist', 'AntiSpoof could not normalize "' . $title . '".' );
 			}
 		}
 
-		wfSuppressWarnings();
+		Wikimedia\suppressWarnings();
 		$match = preg_match(
 			"/^(?:{$this->mRegex})$/us" . ( isset( $this->mParams['casesensitive'] ) ? '' : 'i' ),
 			$title
 		);
-		wfRestoreWarnings();
+		Wikimedia\restoreWarnings();
 
 		if ( $match ) {
 			if ( isset( $this->mParams['moveonly'] ) && $action != 'move' ) {
@@ -257,7 +258,7 @@ class TitleBlacklistEntry {
 	 * @return string Custom message for this entry
 	 */
 	public function getCustomMessage() {
-		return isset( $this->mParams['errmsg'] ) ? $this->mParams['errmsg'] : null;
+		return $this->mParams['errmsg'] ?? null;
 	}
 
 	/**
@@ -288,6 +289,6 @@ class TitleBlacklistEntry {
 		// For grep:
 		// titleblacklist-forbidden-edit, titleblacklist-forbidden-move,
 		// titleblacklist-forbidden-upload, titleblacklist-forbidden-new-account
-		return $message ? $message : "titleblacklist-forbidden-{$operation}";
+		return $message ?: "titleblacklist-forbidden-{$operation}";
 	}
 }

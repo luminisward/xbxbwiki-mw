@@ -1,4 +1,4 @@
-( function ( mw, $ ) {
+( function () {
 	QUnit.module( 'mmv.logging.ViewLogger', QUnit.newMwEnvironment( {
 		setup: function () {
 			this.clock = this.sandbox.useFakeTimers();
@@ -18,35 +18,35 @@
 	} ) );
 
 	QUnit.test( 'unview()', function ( assert ) {
-		var logger = { log: $.noop },
-			viewLogger = new mw.mmv.logging.ViewLogger( { recordVirtualViewBeaconURI: $.noop }, {}, logger );
+		var logger = { log: function () {} },
+			viewLogger = new mw.mmv.logging.ViewLogger( { recordVirtualViewBeaconURI: function () {} }, {}, logger );
 
 		this.sandbox.stub( logger, 'log' );
 
 		viewLogger.unview();
 
-		assert.ok( !logger.log.called, 'action logger not called' );
+		assert.strictEqual( logger.log.called, false, 'action logger not called' );
 
 		viewLogger.setLastViewLogged( false );
 		viewLogger.unview();
 
-		assert.ok( !logger.log.called, 'action logger not called' );
+		assert.strictEqual( logger.log.called, false, 'action logger not called' );
 
 		viewLogger.setLastViewLogged( true );
 		viewLogger.unview();
 
-		assert.ok( logger.log.calledOnce, 'action logger called' );
+		assert.strictEqual( logger.log.calledOnce, true, 'action logger called' );
 
 		viewLogger.unview();
 
-		assert.ok( logger.log.calledOnce, 'action logger not called again' );
+		assert.strictEqual( logger.log.calledOnce, true, 'action logger not called again' );
 	} );
 
 	QUnit.test( 'focus and blur', function ( assert ) {
 		var fakeWindow = $( '<div>' ),
-			viewLogger = new mw.mmv.logging.ViewLogger( { recordVirtualViewBeaconURI: $.noop }, fakeWindow, { log: $.noop } );
+			viewLogger = new mw.mmv.logging.ViewLogger( { recordVirtualViewBeaconURI: function () {} }, fakeWindow, { log: function () {} } );
 
-		this.clock.tick( 1 ); // This is just so that $.now() > 0 in the fake timer environment
+		this.clock.tick( 1 ); // This is just so that the timer ticks up in the fake timer environment
 
 		viewLogger.attach();
 
@@ -68,9 +68,9 @@
 	} );
 
 	QUnit.test( 'stopViewDuration before startViewDuration', function ( assert ) {
-		var viewLogger = new mw.mmv.logging.ViewLogger( { recordVirtualViewBeaconURI: $.noop }, {}, { log: $.noop } );
+		var viewLogger = new mw.mmv.logging.ViewLogger( { recordVirtualViewBeaconURI: function () {} }, {}, { log: function () {} } );
 
-		this.clock.tick( 1 ); // This is just so that $.now() > 0 in the fake timer environment
+		this.clock.tick( 1 ); // This is just so that the timer ticks up in the fake timer environment
 
 		viewLogger.stopViewDuration();
 
@@ -84,4 +84,4 @@
 
 		assert.strictEqual( viewLogger.viewDuration, 3, 'Only last timeframe was logged' );
 	} );
-}( mediaWiki, jQuery ) );
+}() );

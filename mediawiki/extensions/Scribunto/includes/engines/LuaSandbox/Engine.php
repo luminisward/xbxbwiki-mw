@@ -1,6 +1,5 @@
 <?php
 
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
 class Scribunto_LuaSandboxEngine extends Scribunto_LuaEngine {
 	public $options, $loaded = false;
 	protected $lineCache = [];
@@ -208,12 +207,11 @@ class Scribunto_LuaSandboxEngine extends Scribunto_LuaEngine {
 		return $this->lineCache['mw.lua'][$lineNum - 1];
 	}
 
-	function newInterpreter() {
+	protected function newInterpreter() {
 		return new Scribunto_LuaSandboxInterpreter( $this, $this->options );
 	}
 }
 
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
 class Scribunto_LuaSandboxInterpreter extends Scribunto_LuaInterpreter {
 	/**
 	 * @var Scribunto_LuaEngine
@@ -253,7 +251,7 @@ class Scribunto_LuaSandboxInterpreter extends Scribunto_LuaInterpreter {
 		}
 	}
 
-	function __construct( $engine, array $options ) {
+	public function __construct( $engine, array $options ) {
 		self::checkLuaSandboxVersion();
 
 		$this->engine = $engine;
@@ -311,11 +309,9 @@ class Scribunto_LuaSandboxInterpreter extends Scribunto_LuaInterpreter {
 		# 	$name, [ $this, 'callback' ], $functions );
 	}
 
-	public function callFunction( $func /*, ... */ ) {
-		$args = func_get_args();
-		$func = array_shift( $args );
+	public function callFunction( $func, ...$args ) {
 		try {
-			$ret = call_user_func_array( [ $func, 'call' ], $args );
+			$ret = $func->call( ...$args );
 			if ( $ret === false ) {
 				// Per the documentation on LuaSandboxFunction::call, a return value
 				// of false means that something went wrong and it's PHP's fault,
@@ -372,7 +368,6 @@ class Scribunto_LuaSandboxInterpreter extends Scribunto_LuaInterpreter {
 	}
 }
 
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
 class Scribunto_LuaSandboxCallback {
 
 	/**
@@ -380,7 +375,7 @@ class Scribunto_LuaSandboxCallback {
 	 */
 	protected $callback;
 
-	function __construct( $callback ) {
+	public function __construct( $callback ) {
 		$this->callback = $callback;
 	}
 
@@ -391,9 +386,9 @@ class Scribunto_LuaSandboxCallback {
 	 * @param array $args
 	 * @return mixed
 	 */
-	function __call( $funcName, $args ) {
+	public function __call( $funcName, $args ) {
 		try {
-			return call_user_func_array( $this->callback, $args );
+			return ( $this->callback )( ...$args );
 		} catch ( Scribunto_LuaError $e ) {
 			throw new LuaSandboxRuntimeError( $e->getLuaMessage() );
 		}

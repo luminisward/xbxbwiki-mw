@@ -7,7 +7,8 @@
 			"Papapep",
 			"Pitort",
 			"SMP",
-			"Vriullop"
+			"Vriullop",
+			"Kippelboy"
 		]
 	},
 	"titleblacklist-desc": "Permet als administradors restringir la creació de pàgines i comptes d'usuari mitjançant una [[MediaWiki:Titleblacklist|llista negra]] i una [[MediaWiki:Titlewhitelist|llista blanca]]",

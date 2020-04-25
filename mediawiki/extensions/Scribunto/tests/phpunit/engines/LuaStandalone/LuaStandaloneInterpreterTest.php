@@ -6,11 +6,13 @@ if ( !wfIsCLI() ) {
 
 require_once __DIR__ . '/../LuaCommon/LuaInterpreterTest.php';
 
+use Wikimedia\TestingAccessWrapper;
+
 /**
  * @group Lua
  * @group LuaStandalone
+ * @covers Scribunto_LuaStandaloneInterpreter
  */
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
 class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTest {
 	public $stdOpts = [
 		'errorFile' => null,
@@ -61,6 +63,7 @@ class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTes
 			return;
 		}
 		$interpreter = $this->newInterpreter();
+		$engine = TestingAccessWrapper::newFromObject( $interpreter->engine );
 		$status = $interpreter->getStatus();
 		$pid = $status['pid'];
 		$this->assertInternalType( 'integer', $status['pid'] );
@@ -74,7 +77,7 @@ class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTes
 		}
 		$status = $interpreter->getStatus();
 		$vsize = $this->getVsize( $pid );
-		$time = $status['time'] / $interpreter->engine->getClockTick();
+		$time = $status['time'] / $engine->getClockTick();
 		$this->assertGreaterThan( 0.1, $time, 'getStatus() time usage' );
 		$this->assertLessThan( 1.5, $time, 'getStatus() time usage' );
 		$this->assertEquals( $vsize, $status['vsize'], 'vsize', $vsize * 0.1 );

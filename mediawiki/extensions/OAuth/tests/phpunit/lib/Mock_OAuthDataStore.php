@@ -1,6 +1,10 @@
 <?php
 
-namespace MediaWiki\Extensions\OAuth;
+namespace MediaWiki\Extensions\OAuth\Tests\Lib;
+
+use MediaWiki\Extensions\OAuth\Lib\OAuthConsumer;
+use MediaWiki\Extensions\OAuth\Lib\OAuthDataStore;
+use MediaWiki\Extensions\OAuth\Lib\OAuthToken;
 
 /**
  * A mock store for testing

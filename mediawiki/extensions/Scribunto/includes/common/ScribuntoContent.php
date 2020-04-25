@@ -14,7 +14,7 @@
  */
 class ScribuntoContent extends TextContent {
 
-	function __construct( $text ) {
+	public function __construct( $text ) {
 		parent::__construct( $text, CONTENT_MODEL_SCRIBUNTO );
 	}
 
@@ -27,7 +27,7 @@ class ScribuntoContent extends TextContent {
 	public function validate( Title $title ) {
 		$engine = Scribunto::newDefaultEngine();
 		$engine->setTitle( $title );
-		return $engine->validate( $this->getNativeData(), $title->getPrefixedDBkey() );
+		return $engine->validate( $this->getText(), $title->getPrefixedDBkey() );
 	}
 
 	public function prepareSave( WikiPage $page, $flags, $parentRevId, User $user ) {
@@ -39,7 +39,7 @@ class ScribuntoContent extends TextContent {
 	 *
 	 * @param Title $title The page title to use as a context for rendering
 	 * @param null|int $revId The revision being rendered (optional)
-	 * @param null|ParserOptions $options Any parser options
+	 * @param ParserOptions $options Any parser options
 	 * @param bool $generateHtml Whether to generate HTML (default: true).
 	 * @param ParserOutput &$output ParserOutput representing the HTML form of the text.
 	 * @return ParserOutput
@@ -49,7 +49,7 @@ class ScribuntoContent extends TextContent {
 	) {
 		global $wgParser;
 
-		$text = $this->getNativeData();
+		$text = $this->getText();
 
 		// Get documentation, if any
 		$output = new ParserOutput();
@@ -84,13 +84,8 @@ class ScribuntoContent extends TextContent {
 					"\n" . $msg->plain() . "\n"
 				);
 
-				if ( !$options ) {
-					// NOTE: use canonical options per default to produce cacheable output
-					$options = ContentHandler::getForTitle( $doc )->makeParserOptions( 'canonical' );
-				} else {
-					if ( $options->getTargetLanguage() === null ) {
-						$options->setTargetLanguage( $doc->getPageLanguage() );
-					}
+				if ( $options->getTargetLanguage() === null ) {
+					$options->setTargetLanguage( $doc->getPageLanguage() );
 				}
 
 				$output = $wgParser->parse( $docWikitext, $title, $options, true, true, $revId );

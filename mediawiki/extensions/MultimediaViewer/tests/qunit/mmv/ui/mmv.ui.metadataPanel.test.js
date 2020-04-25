@@ -1,4 +1,4 @@
-( function ( mw, $ ) {
+( function () {
 	var thingsShouldBeEmptied = [
 			'$license',
 			'$title',
@@ -21,8 +21,6 @@
 			panel = new mw.mmv.ui.MetadataPanel( $qf, $( '<div>' ).appendTo( $qf ), mw.storage, new mw.mmv.Config( {}, mw.config, mw.user, new mw.Api(), mw.storage ) );
 
 		panel.empty();
-
-		assert.expect( thingsShouldBeEmptied.length + thingsShouldHaveEmptyClass.length );
 
 		for ( i = 0; i < thingsShouldBeEmptied.length; i++ ) {
 			assert.strictEqual( panel[ thingsShouldBeEmptied[ i ] ].text(), '', 'We successfully emptied the ' + thingsShouldBeEmptied[ i ] + ' element' );
@@ -115,15 +113,7 @@
 				getArticlePath: function () { return 'Foo'; },
 				isCommons: function () { return false; }
 			},
-			oldMoment = window.moment,
-			// custom clock will give MPP.formatDate some time to load moment.js
 			clock = this.sandbox.useFakeTimers();
-
-		/* window.moment = function ( date ) {
-			// This has no effect for now, since writing this test revealed that our moment.js
-			// doesn't have any language configuration
-			return oldMoment( date ).lang( 'fr' );
-		};*/
 
 		panel.setImageInfo( image, imageData, repoData );
 
@@ -131,9 +121,9 @@
 		assert.ok( panel.$credit.text(), 'Default credit is shown' );
 		assert.strictEqual( panel.$license.prop( 'href' ), imageData.descriptionUrl,
 			'User is directed to file page for license information' );
-		assert.ok( !panel.$license.prop( 'target' ), 'License information opens in same window' );
-		assert.ok( panel.$datetimeLi.hasClass( 'empty' ), 'Date/Time is empty' );
-		assert.ok( panel.$locationLi.hasClass( 'empty' ), 'Location is empty' );
+		assert.notOk( panel.$license.prop( 'target' ), 'License information opens in same window' );
+		assert.strictEqual( panel.$datetimeLi.hasClass( 'empty' ), true, 'Date/Time is empty' );
+		assert.strictEqual( panel.$locationLi.hasClass( 'empty' ), true, 'Location is empty' );
 
 		imageData.creationDateTime = '2013-08-26T14:41:02Z';
 		imageData.uploadDateTime = '2013-08-25T14:41:02Z';
@@ -149,8 +139,8 @@
 		clock.tick( 10 );
 
 		assert.strictEqual( panel.$title.text(), title, 'Title is correctly set' );
-		assert.ok( !panel.$credit.hasClass( 'empty' ), 'Credit is not empty' );
-		assert.ok( !panel.$datetimeLi.hasClass( 'empty' ), 'Date/Time is not empty' );
+		assert.strictEqual( panel.$credit.hasClass( 'empty' ), false, 'Credit is not empty' );
+		assert.strictEqual( panel.$datetimeLi.hasClass( 'empty' ), false, 'Date/Time is not empty' );
 		assert.strictEqual( panel.creditField.$element.find( '.mw-mmv-author' ).text(), imageData.author, 'Author text is correctly set' );
 		assert.strictEqual( panel.creditField.$element.find( '.mw-mmv-source' ).html(), '<b>Lost</b><a href="foo">Bar</a>', 'Source text is correctly set' );
 		// Either multimediaviewer-credit-popup-text or multimediaviewer-credit-popup-text-more.
@@ -158,7 +148,7 @@
 		assert.ok( panel.$datetime.text().indexOf( '26 August 2013' ) > 0, 'Correct date is displayed' );
 		assert.strictEqual( panel.$license.text(), 'CC BY 2.0', 'License is correctly set' );
 		assert.ok( panel.$license.prop( 'target' ), 'License information opens in new window' );
-		assert.ok( panel.$restrictions.children().last().children().hasClass( 'mw-mmv-restriction-default' ), 'Default restriction is correctly displayed last' );
+		assert.strictEqual( panel.$restrictions.children().last().children().hasClass( 'mw-mmv-restriction-default' ), true, 'Default restriction is correctly displayed last' );
 
 		imageData.creationDateTime = undefined;
 		panel.setImageInfo( image, imageData, repoData );
@@ -166,7 +156,6 @@
 
 		assert.ok( panel.$datetime.text().indexOf( '25 August 2013' ) > 0, 'Correct date is displayed' );
 
-		window.moment = oldMoment;
 		clock.restore();
 	} );
 
@@ -176,32 +165,27 @@
 
 		panel.setLicense( null, 'http://example.com' ); // make sure license is visible as it contains the permission
 		panel.setPermission( 'Look at me, I am a permission!' );
-		assert.ok( panel.$permissionLink.is( ':visible' ) );
+		assert.strictEqual( panel.$permissionLink.is( ':visible' ), true );
 	} );
 
 	QUnit.test( 'Date formatting', function ( assert ) {
 		var $qf = $( '#qunit-fixture' ),
 			panel = new mw.mmv.ui.MetadataPanel( $qf, $( '<div>' ).appendTo( $qf ), mw.storage, new mw.mmv.Config( {}, mw.config, mw.user, new mw.Api(), mw.storage ) ),
 			date1 = 'Garbage',
-			promise = panel.formatDate( date1 );
+			result = panel.formatDate( date1 );
 
-		return promise.then( function ( result ) {
-			assert.strictEqual( result, date1, 'Invalid date is correctly ignored' );
-		} );
+		assert.strictEqual( result, date1, 'Invalid date is correctly ignored' );
 	} );
 
 	QUnit.test( 'About links', function ( assert ) {
-		var $qf = $( '#qunit-fixture' ),
-			oldWgMediaViewerIsInBeta = mw.config.get( 'wgMediaViewerIsInBeta' );
+		var $qf = $( '#qunit-fixture' );
 
 		this.sandbox.stub( mw.user, 'isAnon' );
-		mw.config.set( 'wgMediaViewerIsInBeta', false );
 		// eslint-disable-next-line no-new
 		new mw.mmv.ui.MetadataPanel( $qf.empty(), $( '<div>' ).appendTo( $qf ), mw.storage, new mw.mmv.Config( {}, mw.config, mw.user, new mw.Api(), mw.storage ) );
 
 		assert.strictEqual( $qf.find( '.mw-mmv-about-link' ).length, 1, 'About link is created.' );
 		assert.strictEqual( $qf.find( '.mw-mmv-discuss-link' ).length, 1, 'Discuss link is created.' );
 		assert.strictEqual( $qf.find( '.mw-mmv-help-link' ).length, 1, 'Help link is created.' );
-		mw.config.set( 'wgMediaViewerIsInBeta', oldWgMediaViewerIsInBeta );
 	} );
-}( mediaWiki, jQuery ) );
+}() );

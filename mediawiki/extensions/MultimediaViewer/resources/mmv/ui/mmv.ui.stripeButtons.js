@@ -15,7 +15,7 @@
  * along with MediaViewer.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-( function ( mw, $, oo ) {
+( function () {
 	var SBP;
 
 	/**
@@ -43,7 +43,7 @@
 
 		this.initDescriptionPageButton();
 	}
-	oo.inheritClass( StripeButtons, mw.mmv.ui.Element );
+	OO.inheritClass( StripeButtons, mw.mmv.ui.Element );
 	SBP = StripeButtons.prototype;
 
 	/**
@@ -73,7 +73,7 @@
 	SBP.initDescriptionPageButton = function () {
 		this.buttons.$descriptionPage = this.createButton(
 			'empty mw-mmv-description-page-button mw-ui-big mw-ui-button mw-ui-progressive'
-		).click( function () {
+		).on( 'click', function () {
 			mw.mmv.actionLogger.log( 'file-description-page-abovefold' );
 		} );
 	};
@@ -133,4 +133,4 @@
 	};
 
 	mw.mmv.ui.StripeButtons = StripeButtons;
-}( mediaWiki, jQuery, OO ) );
+}() );

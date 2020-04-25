@@ -1,10 +1,12 @@
 <?php
 
-namespace MediaWiki\Extensions\OAuth;
+namespace MediaWiki\Extensions\OAuth\Tests\Lib;
+
+use MediaWiki\Extensions\OAuth\Lib\OAuthSignatureMethod_RSA_SHA1;
 
 /**
  * A mock implementation of OAuthSignatureMethod_RSA_SHA1
- * Always returns the signatures described in 
+ * Always returns the signatures described in
  * http://wiki.oauth.net/TestCases section 9.3 ("RSA-SHA1")
  */
 class Mock_OAuthSignatureMethod_RSA_SHA1 extends OAuthSignatureMethod_RSA_SHA1 {

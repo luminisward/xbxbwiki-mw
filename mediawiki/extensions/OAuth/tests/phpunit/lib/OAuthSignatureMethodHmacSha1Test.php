@@ -1,6 +1,10 @@
 <?php
 
-namespace MediaWiki\Extensions\OAuth;
+namespace MediaWiki\Extensions\OAuth\Tests\Lib;
+
+use MediaWiki\Extensions\OAuth\Lib\OAuthConsumer;
+use MediaWiki\Extensions\OAuth\Lib\OAuthSignatureMethod_HMAC_SHA1;
+use MediaWiki\Extensions\OAuth\Lib\OAuthToken;
 
 /**
  * The MIT License
@@ -26,16 +30,13 @@ namespace MediaWiki\Extensions\OAuth;
  * THE SOFTWARE.
  */
 
-require_once __DIR__ . '/common.php';
-require_once __DIR__ . '/Mock_OAuthBaseStringRequest.php';
-
 /**
  * @group OAuth
  */
 class OAuthSignatureMethodHmacSha1Test extends \PHPUnit\Framework\TestCase {
 	private $method;
 
-	public function setUp() {
+	protected function setUp() : void {
 		$this->method = new OAuthSignatureMethod_HMAC_SHA1();
 	}
 

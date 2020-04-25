@@ -1,14 +1,14 @@
 {
 	"@metadata": {
 		"authors": [
-			"Hym411",
-			"Priviet",
-			"아라",
-			"Revi",
-			"LiteHell",
 			"Hwangjy9",
+			"Hym411",
+			"LiteHell",
+			"Macofe",
+			"Priviet",
+			"Revi",
 			"Ykhwong",
-			"Macofe"
+			"아라"
 		]
 	},
 	"mwoauth-desc": "API 인증을 위해 OAuth 1.0a를 사용할 수 있게 합니다",
@@ -64,7 +64,6 @@
 	"mwoauth-consumer-stage-disabled": "비활성화됨",
 	"mwoauth-consumer-stage-suppressed": "표시하지 않음",
 	"oauthconsumerregistration": "OAuth 컨슈머 등록",
-	"mwoauthconsumerregistration-notloggedin": "이 페이지에 접근하려면 로그인해야 합니다.",
 	"mwoauthconsumerregistration-navigation": "둘러보기:",
 	"mwoauthconsumerregistration-propose": "새 컨슈머 제안",
 	"mwoauthconsumerregistration-list": "내 컨슈머 목록",
@@ -88,7 +87,7 @@
 	"mwoauthconsumerregistration-resetsecretkey": "비밀 키를 새 값으로 재설정",
 	"mwoauthconsumerregistration-proposed": "당신의 OAuth 고객 요청을 받았습니다.\n\n'''$1''' 컨슈머 토큰과 '''$2''' 비밀 토큰을 재할당했습니다.\n\"나중에 참조하기 위해서 이것을 기록해주세요.\"",
 	"mwoauthconsumerregistration-created-owner-only": "당신의 OAuth 컨슈머가 생성되었습니다.\n당신의 토큰:\n;컨슈머 토큰: $1\n;컨슈머 비밀: $2\n;접근 토큰: $3\n;접근 비밀: $4",
-	"mwoauthconsumerregistration-updated": "OAuth 컨슈머 등록을 성공적으로 업데이트했습니다.",
+	"mwoauthconsumerregistration-updated": "OAuth 컨슈머 등록을 업데이트했습니다.",
 	"mwoauthconsumerregistration-secretreset": "고객에게 '''$1'''의 비밀 토큰을 할당했습니다. \"나중에 참조하기 위해서 이것을 기록해주세요.\"",
 	"oauthmanageconsumers": "OAuth 컨슈머 관리",
 	"mwoauthmanageconsumers-notloggedin": "이 페이지에 접근하려면 로그인해야 합니다.",
@@ -153,9 +152,9 @@
 	"mwoauthlistconsumers-status-disabled": "비활성화됨",
 	"mwoauthlistconsumers-status-rejected": "거부됨",
 	"mwoauthlistconsumers-status-expired": "만료됨",
+	"mwoauthlistconsumers-rclink": "이 애플리케이션의 최근 바뀜",
 	"oauthmanagemygrants": "연결된 애플리케이션 관리",
 	"mwoauthmanagemygrants-text": "이 문서는 당신의 계정을 사용할 수 있는 모든 애플리케이션을 나열합니다. 이러한 애플리케이션은 당신을 대신하여 인증할 때 애플리케이션에 부여한 권한이 접근 범위를 제한합니다. 만약 애플리케이션이 당신을 대신해 자매 프로젝트에 접근하도록 하기 위해서 애플리케이션에 개별적으로 권한을 부여한다면 각각의 프로젝트들에 대한 개별 설정이 아래에 보일 것입니다.\n\n연결된 애플리케이션들은 OAuth 프로토콜을 사용하여 계정에 접근합니다. <span class=\"plainlinks\">([https://www.mediawiki.org/wiki/Special:MyLanguage/Help:OAuth 연결된 애플리케이션에 대해 더 알아보세요])</span>",
-	"mwoauthmanagemygrants-notloggedin": "이 페이지에 접근하려면 로그인해야 합니다.",
 	"mwoauthmanagemygrants-navigation": "둘러보기:",
 	"mwoauthmanagemygrants-showlist": "연결된 애플리케이션 목록",
 	"mwoauthmanagemygrants-none": "계정에 연결된 애플리케이션이 없습니다.",
@@ -193,6 +192,7 @@
 	"mwoauthdatastore-request-token-not-found": "죄송합니다. 이 응용 프로그램에 연결하는 도중 문제가 발생하였습니다.\n뒤로 돌아가서 계정에 연결을 다시 시도하시거나 응용 프로그램 개발자에게 연락하십시오.\n\n<span class=\"plainlinks mw-mwoautherror-details\">OAuth 토큰 찾을 수 없음, $1</span>",
 	"mwoauthdatastore-request-token-already-used": "이 요청은 이미 완료되었으므로 다시 제출할 수 없습니다.\n애플리케이션으로 돌아간 다음 계정에 다시 접속을 시도하거나 애플리케이션 개발자에게 문의하십시오.\n\n<span class=\"plainlinks mw-mwoautherror-details\">OAuth 토큰이 이미 사용됨, $1</span>",
 	"mwoauthdatastore-bad-token": "요청과 일치하는 토큰을 찾을 수 없습니다.",
+	"mwoauthdatastore-bad-source-ip": "유효하지 않은 IP 주소로부터 요청이 왔습니다.",
 	"mwoauthdatastore-bad-verifier": "제공한 인증 코드는 올바르지 않습니다.",
 	"mwoauthdatastore-invalid-token-type": "요청한 토큰 유형이 잘못되었습니다.",
 	"mwoauthgrants-general-error": "OAuth 요청에 오류가 있습니다.",
@@ -237,6 +237,7 @@
 	"action-mwoauthupdateownconsumer": "내가 제어할 수 있는 OAuth 컨슈머 업데이트",
 	"action-mwoauthviewsuppressed": "표시하지 않은 OAuth 컨슈머 보기",
 	"mwoauth-botpasswords-note": "<strong>주의:</strong> <span class=\"plainlinks\">[$1 OAuth]</span>가 봇 비밀번호 보다 더 안전하며 봇이 이를 지원하면 이 기능이 더 선호됩니다.",
+	"mwoauth-api-module-disabled": "\"$1\" 모듈은 OAuth와 함께 사용할 수 없습니다.",
 	"echo-category-title-oauth-owner": "OAuth 개발",
 	"echo-pref-tooltip-oauth-owner": "내가 만든 OAuth 애플리케이션에 관한 이벤트를 내게 알립니다.",
 	"echo-category-title-oauth-admin": "OAuth 관리자",
@@ -259,5 +260,7 @@
 	"notification-oauth-app-reject-primary-link": "앱 보기",
 	"notification-oauth-app-disable-primary-link": "앱 보기",
 	"notification-oauth-app-reenable-primary-link": "앱 보기",
-	"notification-oauth-app-body": "이유: $1"
+	"notification-oauth-app-body": "이유: $1",
+	"mwoauth-login-required-reason": "애플리케이션의 접근 인가를 위해 {{SITENAME}} 계정으로 로그인해야 합니다.",
+	"mwoauthconsumer-application-view": "이 애플리케이션 보기"
 }

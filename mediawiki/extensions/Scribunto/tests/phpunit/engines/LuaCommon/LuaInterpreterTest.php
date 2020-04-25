@@ -1,7 +1,12 @@
 <?php
 
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
-abstract class Scribunto_LuaInterpreterTest extends MediaWikiTestCase {
+abstract class Scribunto_LuaInterpreterTest extends PHPUnit\Framework\TestCase {
+	use MediaWikiCoversValidator;
+	use PHPUnit4And6Compat;
+
+	/**
+	 * @return Scribunto_LuaInterpreter
+	 */
 	abstract protected function newInterpreter( $opts = [] );
 
 	protected function setUp() {
@@ -19,8 +24,10 @@ abstract class Scribunto_LuaInterpreterTest extends MediaWikiTestCase {
 			local x, i
 			local s = string.rep("x", 1000000)
 			local n = args[1]
+			local e = args[2] and os.clock() + args[2] or nil
 			for i = 1, n do
 				x = x or string.find(s, "y", 1, true)
+				if e and os.clock() >= e then break end
 			end',
 			'busy' );
 		return $chunk;
@@ -32,9 +39,7 @@ abstract class Scribunto_LuaInterpreterTest extends MediaWikiTestCase {
 		$args = $this->normalizeOrder( $args );
 		$interpreter = $this->newInterpreter();
 		$passthru = $interpreter->loadString( 'return ...', 'passthru' );
-		$finalArgs = $args;
-		array_unshift( $finalArgs, $passthru );
-		$ret = call_user_func_array( [ $interpreter, 'callFunction' ], $finalArgs );
+		$ret = $interpreter->callFunction( $passthru, ...$args );
 		$ret = $this->normalizeOrder( $ret );
 		$this->assertSame( $args, $ret );
 	}
@@ -52,7 +57,7 @@ abstract class Scribunto_LuaInterpreterTest extends MediaWikiTestCase {
 
 		$finalArgs = $args;
 		array_unshift( $finalArgs, $doublePassthru );
-		$ret = call_user_func_array( [ $interpreter, 'callFunction' ], $finalArgs );
+		$ret = $interpreter->callFunction( ...$finalArgs );
 		$ret = $this->normalizeOrder( $ret );
 		$this->assertSame( $args, $ret );
 	}
@@ -117,10 +122,14 @@ abstract class Scribunto_LuaInterpreterTest extends MediaWikiTestCase {
 			$this->markTestSkipped( "Darwin is lacking POSIX timer, skipping CPU time limiting test." );
 		}
 
-		$interpreter = $this->newInterpreter( [ 'cpuLimit' => 2 ] );
+		$interpreter = $this->newInterpreter( [ 'cpuLimit' => 1 ] );
 		$chunk = $this->getBusyLoop( $interpreter );
 		try {
-			$interpreter->callFunction( $chunk, 1e9 );
+			$interpreter->callFunction(
+				$chunk,
+				1e9, // Arbitrary large quantity of work for the loop
+				2 // Early termination condition: 1 second CPU limit plus 1 second "fudge factor"
+			);
 			$this->fail( "Expected ScribuntoException was not thrown" );
 		} catch ( ScribuntoException $ex ) {
 			$this->assertSame( 'scribunto-common-timeout', $ex->messageName );
@@ -161,4 +170,36 @@ abstract class Scribunto_LuaInterpreterTest extends MediaWikiTestCase {
 		$res = $interpreter->callFunction( $chunk, $func );
 		$this->assertEquals( [ 42, 'From Lua' ], $res );
 	}
+
+	public function testRegisterInterfaceWithSameName() {
+		$interpreter = $this->newInterpreter();
+		$test1Called = false;
+		$test2Called = false;
+
+		// Like a first call to Scribunto_LuaEngine::registerInterface()
+		$interpreter->registerLibrary( 'mw_interface', [
+			'foo' => function ( $v ) use ( &$test1Called ) {
+				$test1Called = $v;
+			},
+		] );
+		$interpreter->callFunction(
+			$interpreter->loadString( 'test1 = mw_interface; mw_interface = nil', 'test' )
+		);
+		// Like a second call to Scribunto_LuaEngine::registerInterface()
+		$interpreter->registerLibrary( 'mw_interface', [
+			'foo' => function ( $v ) use ( &$test2Called ) {
+				$test2Called = $v;
+			},
+		] );
+		$interpreter->callFunction(
+			$interpreter->loadString( 'test2 = mw_interface; mw_interface = nil', 'test' )
+		);
+		// Call both of the interfaces registered above.
+		$interpreter->callFunction(
+			$interpreter->loadString( 'test1.foo( "first" ); test2.foo( "second" )', 'test' )
+		);
+		$this->assertSame( 'first', $test1Called, 'test1.foo was called with "first"' );
+		$this->assertSame( 'second', $test2Called, 'test2.foo was called with "second"' );
+	}
+
 }

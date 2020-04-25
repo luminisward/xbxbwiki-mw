@@ -1,6 +1,8 @@
 <?php
 /**
  * @section LICENSE
+ * © 2017 Wikimedia Foundation and contributors
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -19,10 +21,13 @@
  * @file
  */
 
-namespace MediaWiki\Extensions\OAuth;
+namespace MediaWiki\Extensions\OAuth\Tests\Backend;
+
+use MediaWiki\Extensions\OAuth\Backend\MWOAuthException;
+use MediaWiki\Extensions\OAuth\Backend\MWOAuthServer;
 
 /**
- * @copyright © 2017 Wikimedia Foundation and contributors
+ * @covers \MediaWiki\Extensions\OAuth\Backend\MWOAuthServer
  */
 class MWOAuthServerTest extends \PHPUnit\Framework\TestCase {
 
@@ -33,7 +38,7 @@ class MWOAuthServerTest extends \PHPUnit\Framework\TestCase {
 	 * @param bool $isPrefix Is Callback prefix?
 	 * @dataProvider provideCheckCallback
 	 */
-	public function testCheckCallback( $expect, $registeredUrl, $got, $isPrefix=true ) {
+	public function testCheckCallback( $expect, $registeredUrl, $got, $isPrefix = true ) {
 		$fixture = new MWOAuthServer( null );
 		$consumer = new StubConsumer( [
 			'callbackIsPrefix' => $isPrefix,
@@ -79,17 +84,5 @@ class MWOAuthServerTest extends \PHPUnit\Framework\TestCase {
 			[ false, 'https://host:8000', 'https://host:8000@evil.com' ],
 			[ false, 'https://host', 'https://hosting' ],
 		];
-	}
-}
-
-class StubConsumer {
-	public $data;
-
-	public function __construct( $data ) {
-		$this->data = $data;
-	}
-
-	public function get( $key ) {
-		return $this->data[$key];
 	}
 }

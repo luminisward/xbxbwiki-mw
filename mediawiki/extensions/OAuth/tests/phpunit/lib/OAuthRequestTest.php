@@ -23,11 +23,15 @@
  * THE SOFTWARE.
  */
 
-namespace MediaWiki\Extensions\OAuth;
+namespace MediaWiki\Extensions\OAuth\Tests\Lib;
 
-use PHPUnit4And6Compat;
 
-require_once __DIR__ . '/common.php';
+use MediaWiki\Extensions\OAuth\Lib\OAuthConsumer;
+use MediaWiki\Extensions\OAuth\Lib\OAuthException;
+use MediaWiki\Extensions\OAuth\Lib\OAuthRequest;
+use MediaWiki\Extensions\OAuth\Lib\OAuthSignatureMethod_HMAC_SHA1;
+use MediaWiki\Extensions\OAuth\Lib\OAuthSignatureMethod_PLAINTEXT;
+use MediaWiki\Extensions\OAuth\Lib\OAuthToken;
 
 /**
  * Tests of OAuthRequest
@@ -42,7 +46,23 @@ require_once __DIR__ . '/common.php';
  * @group OAuth
  */
 class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
-	use PHPUnit4And6Compat;
+
+	protected static $globals = [];
+
+	public static function setUpBeforeClass() : void {
+		parent::setUpBeforeClass();
+		// can't use @backupGlobals because it tries to serialize the arrays
+		self::$globals['$_SERVER'] = $_SERVER;
+		self::$globals['$_POST'] = $_POST;
+		self::$globals['$_GET'] = $_GET;
+	}
+
+	public static function tearDownAfterClass() : void {
+		$_SERVER = self::$globals['$_SERVER'];
+		$_POST = self::$globals['$_POST'];
+		$_GET = self::$globals['$_GET'];
+		parent::tearDownAfterClass();
+	}
 
 	public function testCanGetSingleParameter() {
 		// Yes, a awesomely boring test.. But if this doesn't work, the other tests is unreliable
@@ -127,7 +147,7 @@ class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
 	}
 
 	public function testBuildRequestFromGet() {
-		OAuthTestUtils::build_request('GET', 'http://testbed/test?foo=bar&baz=blargh');		
+		OAuthTestUtils::build_request('GET', 'http://testbed/test?foo=bar&baz=blargh');
 		$this->assertEquals(array('foo'=>'bar','baz'=>'blargh'), OAuthRequest::from_request()->get_parameters(), 'Failed to parse GET parameters');
 	}
 
@@ -140,13 +160,13 @@ class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
 	public function testHasProperParameterPriority() {
 		$test_header = 'OAuth realm="",oauth_foo=header';
 		OAuthTestUtils::build_request('POST', 'http://testbed/test?oauth_foo=get', 'oauth_foo=post', $test_header);
-		$this->assertEquals('header', OAuthRequest::from_request()->get_parameter('oauth_foo'), 'Loaded parameters in with the wrong priorities');		
+		$this->assertEquals('header', OAuthRequest::from_request()->get_parameter('oauth_foo'), 'Loaded parameters in with the wrong priorities');
 
 		OAuthTestUtils::build_request('POST', 'http://testbed/test?oauth_foo=get', 'oauth_foo=post');
-		$this->assertEquals('post', OAuthRequest::from_request()->get_parameter('oauth_foo'), 'Loaded parameters in with the wrong priorities');		
+		$this->assertEquals('post', OAuthRequest::from_request()->get_parameter('oauth_foo'), 'Loaded parameters in with the wrong priorities');
 
 		OAuthTestUtils::build_request('POST', 'http://testbed/test?oauth_foo=get');
-		$this->assertEquals('get', OAuthRequest::from_request()->get_parameter('oauth_foo'), 'Loaded parameters in with the wrong priorities');				
+		$this->assertEquals('get', OAuthRequest::from_request()->get_parameter('oauth_foo'), 'Loaded parameters in with the wrong priorities');
 	}
 
 	public function testNormalizeHttpMethod() {
@@ -221,7 +241,7 @@ class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals('foo=bar', OAuthRequest::from_request()->to_postdata());
 
 		OAuthTestUtils::build_request('GET', 'http://example.com?foo=bar');
-		$this->assertEquals('foo=bar', OAuthRequest::from_request()->to_postdata());	
+		$this->assertEquals('foo=bar', OAuthRequest::from_request()->to_postdata());
 	}
 
 	public function testBuildUrl() {
@@ -232,7 +252,7 @@ class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals('http://example.com?foo=bar', OAuthRequest::from_request()->to_url());
 
 		OAuthTestUtils::build_request('GET', 'http://example.com?foo=bar');
-		$this->assertEquals('http://example.com?foo=bar', OAuthRequest::from_request()->to_url());	
+		$this->assertEquals('http://example.com?foo=bar', OAuthRequest::from_request()->to_url());
 	}
 
 	public function testConvertToString() {
@@ -243,7 +263,7 @@ class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
 		$this->assertEquals('http://example.com?foo=bar', (string) OAuthRequest::from_request());
 
 		OAuthTestUtils::build_request('GET', 'http://example.com?foo=bar');
-		$this->assertEquals('http://example.com?foo=bar', (string) OAuthRequest::from_request());	
+		$this->assertEquals('http://example.com?foo=bar', (string) OAuthRequest::from_request());
 	}
 
 	public function testBuildHeader() {
@@ -268,7 +288,7 @@ class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
 	}
 
 	public function testWontBuildHeaderWithArrayInput() {
-		$this->setExpectedException('MediaWiki\Extensions\OAuth\OAuthException');
+		$this->expectException(OAuthException::class);
 		OAuthTestUtils::build_request('POST', 'http://example.com', 'oauth_foo=bar&oauth_foo=baz');
 		OAuthRequest::from_request()->to_header();
 	}
@@ -285,22 +305,22 @@ class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
 
 		$params  = 'oauth_version=1.0&oauth_consumer_key=dpf43f3p2l4k3l03&oauth_timestamp=1191242090';
 		$params .= '&oauth_nonce=hsu94j3884jdopsl&oauth_signature_method=PLAINTEXT&oauth_signature=ignored';
-		OAuthTestUtils::build_request('POST', 'https://photos.example.net/request_token', $params);			
+		OAuthTestUtils::build_request('POST', 'https://photos.example.net/request_token', $params);
 		$this->assertEquals('POST&https%3A%2F%2Fphotos.example.net%2Frequest_token&oauth_'
 							.'consumer_key%3Ddpf43f3p2l4k3l03%26oauth_nonce%3Dhsu94j3884j'
 							.'dopsl%26oauth_signature_method%3DPLAINTEXT%26oauth_timestam'
-							.'p%3D1191242090%26oauth_version%3D1.0', 
-							OAuthRequest::from_request()->get_signature_base_string());									
+							.'p%3D1191242090%26oauth_version%3D1.0',
+							OAuthRequest::from_request()->get_signature_base_string());
 
 		$params  = 'file=vacation.jpg&size=original&oauth_version=1.0&oauth_consumer_key=dpf43f3p2l4k3l03';
 		$params .= '&oauth_token=nnch734d00sl2jdk&oauth_timestamp=1191242096&oauth_nonce=kllo9940pd9333jh';
 		$params .= '&oauth_signature=ignored&oauth_signature_method=HMAC-SHA1';
-		OAuthTestUtils::build_request('GET', 'http://photos.example.net/photos?'.$params);			
+		OAuthTestUtils::build_request('GET', 'http://photos.example.net/photos?'.$params);
 		$this->assertEquals('GET&http%3A%2F%2Fphotos.example.net%2Fphotos&file%3Dvacation'
 							.'.jpg%26oauth_consumer_key%3Ddpf43f3p2l4k3l03%26oauth_nonce%'
 							.'3Dkllo9940pd9333jh%26oauth_signature_method%3DHMAC-SHA1%26o'
 							.'auth_timestamp%3D1191242096%26oauth_token%3Dnnch734d00sl2jd'
-							.'k%26oauth_version%3D1.0%26size%3Doriginal', 
+							.'k%26oauth_version%3D1.0%26size%3Doriginal',
 							OAuthRequest::from_request()->get_signature_base_string());
 	}
 
@@ -308,7 +328,7 @@ class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
 		$params  = 'file=vacation.jpg&size=original&oauth_version=1.0&oauth_consumer_key=dpf43f3p2l4k3l03';
 		$params .= '&oauth_token=nnch734d00sl2jdk&oauth_timestamp=1191242096&oauth_nonce=kllo9940pd9333jh';
 		$params .= '&oauth_signature=ignored&oauth_signature_method=HMAC-SHA1';
-		OAuthTestUtils::build_request('GET', 'http://photos.example.net/photos?'.$params);			
+		OAuthTestUtils::build_request('GET', 'http://photos.example.net/photos?'.$params);
 		$r = OAuthRequest::from_request();
 
 		$cons = new OAuthConsumer('key', 'kd94hf93k423kf44');
@@ -325,7 +345,7 @@ class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
 		$params  = 'file=vacation.jpg&size=original&oauth_version=1.0&oauth_consumer_key=dpf43f3p2l4k3l03';
 		$params .= '&oauth_token=nnch734d00sl2jdk&oauth_timestamp=1191242096&oauth_nonce=kllo9940pd9333jh';
 		$params .= '&oauth_signature=__ignored__&oauth_signature_method=HMAC-SHA1';
-		OAuthTestUtils::build_request('GET', 'http://photos.example.net/photos?'.$params);			
+		OAuthTestUtils::build_request('GET', 'http://photos.example.net/photos?'.$params);
 		$r = OAuthRequest::from_request();
 
 		$cons = new OAuthConsumer('key', 'kd94hf93k423kf44');
@@ -354,5 +374,3 @@ class OAuthRequestTest extends \PHPUnit\Framework\TestCase {
 
 	}
 }
-
-?>

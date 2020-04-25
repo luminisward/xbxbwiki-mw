@@ -1,6 +1,5 @@
 <?php
 
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
 class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 	// Note these caches are naturally limited to
 	// $wgExpensiveParserFunctionLimit + 1 actual Title objects because any
@@ -9,7 +8,7 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 	private $titleCache = [];
 	private $idCache = [ 0 => null ];
 
-	function register() {
+	public function register() {
 		$lib = [
 			'newTitle' => [ $this, 'newTitle' ],
 			'makeTitle' => [ $this, 'makeTitle' ],
@@ -89,6 +88,7 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 	 * title for repeated lookups. It may call incrementExpensiveFunctionCount() if
 	 * the title is not already cached.
 	 *
+	 * @internal
 	 * @param string $text Title text
 	 * @return array Lua data
 	 */
@@ -139,12 +139,13 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 	 * Calls Title::newFromID or Title::newFromTitle as appropriate for the
 	 * arguments.
 	 *
+	 * @internal
 	 * @param string|int $text_or_id Title or page_id to fetch
-	 * @param string|int $defaultNamespace Namespace name or number to use if
+	 * @param string|int|null $defaultNamespace Namespace name or number to use if
 	 *  $text_or_id doesn't override
 	 * @return array Lua data
 	 */
-	function newTitle( $text_or_id, $defaultNamespace = null ) {
+	public function newTitle( $text_or_id, $defaultNamespace = null ) {
 		$type = $this->getLuaType( $text_or_id );
 		if ( $type === 'number' ) {
 			if ( array_key_exists( $text_or_id, $this->idCache ) ) {
@@ -186,13 +187,14 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 	 *
 	 * Calls Title::makeTitleSafe.
 	 *
+	 * @internal
 	 * @param string|int $ns Namespace
 	 * @param string $text Title text
-	 * @param string $fragment URI fragment
-	 * @param string $interwiki Interwiki code
+	 * @param string|null $fragment URI fragment
+	 * @param string|null $interwiki Interwiki code
 	 * @return array Lua data
 	 */
-	function makeTitle( $ns, $text, $fragment = null, $interwiki = null ) {
+	public function makeTitle( $ns, $text, $fragment = null, $interwiki = null ) {
 		$this->checkNamespace( 'makeTitle', 1, $ns );
 		$this->checkType( 'makeTitle', 2, $text, 'string' );
 		$this->checkTypeOptional( 'makeTitle', 3, $fragment, 'string', '' );
@@ -210,13 +212,14 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 
 	/**
 	 * Get a URL referring to this title
+	 * @internal
 	 * @param string $text Title text.
 	 * @param string $which 'fullUrl', 'localUrl', or 'canonicalUrl'
 	 * @param string|array|null $query Query string or query string data.
 	 * @param string|null $proto 'http', 'https', 'relative', or 'canonical'
 	 * @return array
 	 */
-	function getUrl( $text, $which, $query = null, $proto = null ) {
+	public function getUrl( $text, $which, $query = null, $proto = null ) {
 		static $protoMap = [
 			'http' => PROTO_HTTP,
 			'https' => PROTO_HTTPS,
@@ -250,7 +253,7 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 		if ( !$title ) {
 			return [ null ];
 		}
-		return [ call_user_func_array( [ $title, $func ], $args ) ];
+		return [ $title->$func( ...$args ) ];
 	}
 
 	/**
@@ -271,21 +274,38 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 		$this->getParser()->getOutput()->addTemplate(
 			$title, $title->getArticleID(), $title->getLatestRevID()
 		);
-		if ( $title->equals( $this->getTitle() ) ) {
-			$this->getParser()->getOutput()->setFlag( 'vary-revision' );
-		}
 
 		$rev = $this->getParser()->fetchCurrentRevisionOfTitle( $title );
+
+		if ( $title->equals( $this->getTitle() ) ) {
+			$parserOutput = $this->getParser()->getOutput();
+			$parserOutput->setFlag( 'vary-revision-sha1' );
+			$parserOutput->setRevisionUsedSha1Base36( $rev ? $rev->getSha1() : '' );
+			wfDebug( __METHOD__ . ": set vary-revision-sha1 for '$title'" );
+		}
+
 		return $rev ? $rev->getContent() : null;
 	}
 
-	function getContent( $text ) {
+	/**
+	 * Handler for getContent
+	 * @internal
+	 * @param string $text
+	 * @return string[]|null[]
+	 */
+	public function getContent( $text ) {
 		$this->checkType( 'getContent', 1, $text, 'string' );
 		$content = $this->getContentInternal( $text );
 		return [ $content ? $content->serialize() : null ];
 	}
 
-	function getFileInfo( $text ) {
+	/**
+	 * Handler for getFileInfo
+	 * @internal
+	 * @param string $text
+	 * @return array
+	 */
+	public function getFileInfo( $text ) {
 		$this->checkType( 'getFileInfo', 1, $text, 'string' );
 		$title = Title::newFromText( $text );
 		if ( !$title ) {
@@ -336,6 +356,12 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 		return array_combine( range( 1, count( $arr ) ), array_values( $arr ) );
 	}
 
+	/**
+	 * Handler for protectionLevels
+	 * @internal
+	 * @param string $text
+	 * @return array
+	 */
 	public function protectionLevels( $text ) {
 		$this->checkType( 'protectionLevels', 1, $text, 'string' );
 		$title = Title::newFromText( $text );
@@ -351,6 +377,12 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 		) ];
 	}
 
+	/**
+	 * Handler for cascadingProtection
+	 * @internal
+	 * @param string $text
+	 * @return array
+	 */
 	public function cascadingProtection( $text ) {
 		$this->checkType( 'cascadingProtection', 1, $text, 'string' );
 		$title = Title::newFromText( $text );
@@ -372,6 +404,12 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 		] ];
 	}
 
+	/**
+	 * Handler for redirectTarget
+	 * @internal
+	 * @param string $text
+	 * @return string[]|null[]
+	 */
 	public function redirectTarget( $text ) {
 		$this->checkType( 'redirectTarget', 1, $text, 'string' );
 		$content = $this->getContentInternal( $text );
