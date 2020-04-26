@@ -13,7 +13,7 @@ vendor/
 xb*/LocalSettings.php
 xb*/images/
 sitemap*
-mediawiki/composer.lock
+composer.lock
 mediawiki/extensions/SemanticMediaWiki/
 mediawiki/extensions/SemanticScribunto/
 mysql/data/
