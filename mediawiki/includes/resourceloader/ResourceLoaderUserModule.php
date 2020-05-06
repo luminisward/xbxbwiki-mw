@@ -21,7 +21,10 @@
  */
 
 /**
- * Module for user customizations scripts
+ * Module for user customizations scripts.
+ *
+ * @ingroup ResourceLoader
+ * @internal
  */
 class ResourceLoaderUserModule extends ResourceLoaderWikiModule {
 
@@ -58,8 +61,9 @@ class ResourceLoaderUserModule extends ResourceLoaderWikiModule {
 			}
 		}
 
-		// Hack for T28283: Allow excluding pages for preview on a CSS/JS page.
-		// The excludepage parameter is set by OutputPage.
+		// This is obsolete since 1.32 (T112474). It was formerly used by
+		// OutputPage to implement previewing of user CSS and JS.
+		// @todo: Remove it once we're sure nothing else is using the parameter
 		$excludepage = $context->getRequest()->getVal( 'excludepage' );
 		if ( isset( $pages[$excludepage] ) ) {
 			unset( $pages[$excludepage] );
@@ -75,13 +79,5 @@ class ResourceLoaderUserModule extends ResourceLoaderWikiModule {
 	 */
 	public function getGroup() {
 		return 'user';
-	}
-
-	/**
-	 * @param ResourceLoaderContext|null $context
-	 * @return array
-	 */
-	public function getDependencies( ResourceLoaderContext $context = null ) {
-		return [ 'user.styles' ];
 	}
 }

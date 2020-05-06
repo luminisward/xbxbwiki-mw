@@ -8,11 +8,12 @@
 .vscode
 .bash_history
 
+vendor/
+
 xb*/LocalSettings.php
 xb*/images/
 sitemap*
-mediawiki/composer.lock
-mediawiki/vendor/
+composer.lock
 mediawiki/extensions/SemanticMediaWiki/
 mediawiki/extensions/SemanticScribunto/
 mysql/data/

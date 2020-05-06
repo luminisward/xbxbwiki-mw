@@ -21,6 +21,8 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\Linker\LinkTarget;
+use MediaWiki\MediaWikiServices;
 use Wikimedia\Rdbms\IResultWrapper;
 use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Rdbms\DBError;
@@ -45,13 +47,18 @@ abstract class QueryPage extends SpecialPage {
 	 * The number of rows returned by the query. Reading this variable
 	 * only makes sense in functions that are run after the query has been
 	 * done, such as preprocessResults() and formatRow().
+	 *
+	 * @var int
 	 */
 	protected $numRows;
 
+	/**
+	 * @var string|null
+	 */
 	protected $cachedTimestamp = null;
 
 	/**
-	 * Whether to show prev/next links
+	 * @var bool Whether to show prev/next links
 	 */
 	protected $shownavigation = true;
 
@@ -61,7 +68,8 @@ abstract class QueryPage extends SpecialPage {
 	 *
 	 * DO NOT CHANGE THIS LIST without testing that
 	 * maintenance/updateSpecialPages.php still works.
-	 * @return array
+	 *
+	 * @return string[][]
 	 */
 	public static function getPages() {
 		static $qp = null;
@@ -69,45 +77,69 @@ abstract class QueryPage extends SpecialPage {
 		if ( $qp === null ) {
 			// QueryPage subclass, Special page name
 			$qp = [
-				[ AncientPagesPage::class, 'Ancientpages' ],
-				[ BrokenRedirectsPage::class, 'BrokenRedirects' ],
-				[ DeadendPagesPage::class, 'Deadendpages' ],
-				[ DoubleRedirectsPage::class, 'DoubleRedirects' ],
-				[ FileDuplicateSearchPage::class, 'FileDuplicateSearch' ],
-				[ ListDuplicatedFilesPage::class, 'ListDuplicatedFiles' ],
-				[ LinkSearchPage::class, 'LinkSearch' ],
-				[ ListredirectsPage::class, 'Listredirects' ],
-				[ LonelyPagesPage::class, 'Lonelypages' ],
-				[ LongPagesPage::class, 'Longpages' ],
-				[ MediaStatisticsPage::class, 'MediaStatistics' ],
-				[ MIMEsearchPage::class, 'MIMEsearch' ],
-				[ MostcategoriesPage::class, 'Mostcategories' ],
+				[ SpecialAncientPages::class, 'Ancientpages' ],
+				[ SpecialBrokenRedirects::class, 'BrokenRedirects' ],
+				[ SpecialDeadendPages::class, 'Deadendpages' ],
+				[ SpecialDoubleRedirects::class, 'DoubleRedirects' ],
+				[ SpecialFileDuplicateSearch::class, 'FileDuplicateSearch' ],
+				[ SpecialListDuplicatedFiles::class, 'ListDuplicatedFiles' ],
+				[ SpecialLinkSearch::class, 'LinkSearch' ],
+				[ SpecialListRedirects::class, 'Listredirects' ],
+				[ SpecialLonelyPages::class, 'Lonelypages' ],
+				[ SpecialLongPages::class, 'Longpages' ],
+				[ SpecialMediaStatistics::class, 'MediaStatistics' ],
+				[ SpecialMIMESearch::class, 'MIMEsearch' ],
+				[ SpecialMostCategories::class, 'Mostcategories' ],
 				[ MostimagesPage::class, 'Mostimages' ],
-				[ MostinterwikisPage::class, 'Mostinterwikis' ],
-				[ MostlinkedCategoriesPage::class, 'Mostlinkedcategories' ],
-				[ MostlinkedTemplatesPage::class, 'Mostlinkedtemplates' ],
-				[ MostlinkedPage::class, 'Mostlinked' ],
-				[ MostrevisionsPage::class, 'Mostrevisions' ],
-				[ FewestrevisionsPage::class, 'Fewestrevisions' ],
-				[ ShortPagesPage::class, 'Shortpages' ],
-				[ UncategorizedCategoriesPage::class, 'Uncategorizedcategories' ],
-				[ UncategorizedPagesPage::class, 'Uncategorizedpages' ],
-				[ UncategorizedImagesPage::class, 'Uncategorizedimages' ],
-				[ UncategorizedTemplatesPage::class, 'Uncategorizedtemplates' ],
-				[ UnusedCategoriesPage::class, 'Unusedcategories' ],
-				[ UnusedimagesPage::class, 'Unusedimages' ],
-				[ WantedCategoriesPage::class, 'Wantedcategories' ],
+				[ SpecialMostInterwikis::class, 'Mostinterwikis' ],
+				[ SpecialMostLinkedCategories::class, 'Mostlinkedcategories' ],
+				[ SpecialMostLinkedTemplates::class, 'Mostlinkedtemplates' ],
+				[ SpecialMostLinked::class, 'Mostlinked' ],
+				[ SpecialMostRevisions::class, 'Mostrevisions' ],
+				[ SpecialFewestRevisions::class, 'Fewestrevisions' ],
+				[ SpecialShortPages::class, 'Shortpages' ],
+				[ SpecialUncategorizedCategories::class, 'Uncategorizedcategories' ],
+				[ SpecialUncategorizedPages::class, 'Uncategorizedpages' ],
+				[ SpecialUncategorizedImages::class, 'Uncategorizedimages' ],
+				[ SpecialUncategorizedTemplates::class, 'Uncategorizedtemplates' ],
+				[ SpecialUnusedCategories::class, 'Unusedcategories' ],
+				[ SpecialUnusedImages::class, 'Unusedimages' ],
+				[ SpecialWantedCategories::class, 'Wantedcategories' ],
 				[ WantedFilesPage::class, 'Wantedfiles' ],
 				[ WantedPagesPage::class, 'Wantedpages' ],
-				[ WantedTemplatesPage::class, 'Wantedtemplates' ],
-				[ UnwatchedpagesPage::class, 'Unwatchedpages' ],
-				[ UnusedtemplatesPage::class, 'Unusedtemplates' ],
-				[ WithoutInterwikiPage::class, 'Withoutinterwiki' ],
+				[ SpecialWantedTemplates::class, 'Wantedtemplates' ],
+				[ SpecialUnwatchedPages::class, 'Unwatchedpages' ],
+				[ SpecialUnusedTemplates::class, 'Unusedtemplates' ],
+				[ SpecialWithoutInterwiki::class, 'Withoutinterwiki' ],
 			];
 			Hooks::run( 'wgQueryPages', [ &$qp ] );
 		}
 
 		return $qp;
+	}
+
+	/**
+	 * Get a list of query pages disabled and with it's run mode
+	 * @param Config $config
+	 * @return string[]
+	 */
+	public static function getDisabledQueryPages( Config $config ) {
+		$disableQueryPageUpdate = $config->get( 'DisableQueryPageUpdate' );
+
+		if ( !is_array( $disableQueryPageUpdate ) ) {
+			return [];
+		}
+
+		$pages = [];
+		foreach ( $disableQueryPageUpdate as $name => $runMode ) {
+			if ( is_int( $name ) ) {
+				// The run mode may be omitted
+				$pages[$runMode] = 'disabled';
+			} else {
+				$pages[$name] = $runMode;
+			}
+		}
+		return $pages;
 	}
 
 	/**
@@ -165,7 +197,7 @@ abstract class QueryPage extends SpecialPage {
 	 * Subclasses return an array of fields to order by here. Don't append
 	 * DESC to the field names, that'll be done automatically if
 	 * sortDescending() returns true.
-	 * @return array
+	 * @return string[]
 	 * @since 1.18
 	 */
 	function getOrderFields() {
@@ -279,21 +311,6 @@ abstract class QueryPage extends SpecialPage {
 	}
 
 	/**
-	 * Some special pages (for example SpecialListusers used to) might not return the
-	 * current object formatted, but return the previous one instead.
-	 * Setting this to return true will ensure formatResult() is called
-	 * one more time to make sure that the very last result is formatted
-	 * as well.
-	 *
-	 * @deprecated since 1.27
-	 *
-	 * @return bool
-	 */
-	function tryLastResult() {
-		return false;
-	}
-
-	/**
 	 * Clear the cache and save new results
 	 *
 	 * @param int|bool $limit Limit for SQL statement
@@ -320,7 +337,7 @@ abstract class QueryPage extends SpecialPage {
 				$num = $res->numRows();
 				# Fetch results
 				$vals = [];
-				foreach ( $res as $row ) {
+				foreach ( $res as $i => $row ) {
 					if ( isset( $row->value ) ) {
 						if ( $this->usesTimestamps() ) {
 							$value = wfTimestamp( TS_UNIX,
@@ -329,7 +346,7 @@ abstract class QueryPage extends SpecialPage {
 							$value = intval( $row->value ); // T16414
 						}
 					} else {
-						$value = 0;
+						$value = $i;
 					}
 
 					$vals[] = [
@@ -381,6 +398,23 @@ abstract class QueryPage extends SpecialPage {
 	 */
 	function getRecacheDB() {
 		return wfGetDB( DB_REPLICA, [ $this->getName(), 'QueryPage::recache', 'vslow' ] );
+	}
+
+	/**
+	 * Remove a cached result.
+	 * Useful for interactive backlogs where the user can fix problems in-place.
+	 * @param LinkTarget $title The page to remove.
+	 * @since 1.34
+	 */
+	public function delete( LinkTarget $title ) {
+		if ( $this->isCached() ) {
+			$dbw = wfGetDB( DB_MASTER );
+			$dbw->delete( 'querycache', [
+				'qc_type' => $this->getName(),
+				'qc_namespace' => $title->getNamespace(),
+				'qc_title' => $title->getDBkey(),
+			], __METHOD__ );
+		}
 	}
 
 	/**
@@ -499,6 +533,9 @@ abstract class QueryPage extends SpecialPage {
 		return [ 'value' ];
 	}
 
+	/**
+	 * @return string
+	 */
 	public function getCachedTimestamp() {
 		if ( is_null( $this->cachedTimestamp ) ) {
 			$dbr = wfGetDB( DB_REPLICA );
@@ -568,7 +605,7 @@ abstract class QueryPage extends SpecialPage {
 	/**
 	 * This is the actual workhorse. It does everything needed to make a
 	 * real, honest-to-gosh query page.
-	 * @param string $par
+	 * @param string|null $par
 	 */
 	public function execute( $par ) {
 		$user = $this->getUser();
@@ -619,13 +656,21 @@ abstract class QueryPage extends SpecialPage {
 
 				# If updates on this page have been disabled, let the user know
 				# that the data set won't be refreshed for now
-				if ( is_array( $this->getConfig()->get( 'DisableQueryPageUpdate' ) )
-					&& in_array( $this->getName(), $this->getConfig()->get( 'DisableQueryPageUpdate' ) )
-				) {
-					$out->wrapWikiMsg(
-						"<div class=\"mw-querypage-no-updates\">\n$1\n</div>",
-						'querypage-no-updates'
-					);
+				$disabledQueryPages = self::getDisabledQueryPages( $this->getConfig() );
+				if ( isset( $disabledQueryPages[$this->getName()] ) ) {
+					$runMode = $disabledQueryPages[$this->getName()];
+					if ( $runMode === 'disabled' ) {
+						$out->wrapWikiMsg(
+							"<div class=\"mw-querypage-no-updates\">\n$1\n</div>",
+							'querypage-no-updates'
+						);
+					} else {
+						// Messages used here: querypage-updates-periodical
+						$out->wrapWikiMsg(
+							"<div class=\"mw-querypage-updates-" . $runMode . "\">\n$1\n</div>",
+							'querypage-updates-' . $runMode
+						);
+					}
 				}
 			}
 		}
@@ -648,8 +693,8 @@ abstract class QueryPage extends SpecialPage {
 				$miserMaxResults = $this->getConfig()->get( 'MiserMode' )
 					&& ( $this->offset + $this->limit >= $this->getMaxResults() );
 				$atEnd = ( $this->numRows <= $this->limit ) || $miserMaxResults;
-				$paging = $this->getLanguage()->viewPrevNext( $this->getPageTitle( $par ), $this->offset,
-					$this->limit, $this->linkParameters(), $atEnd );
+				$paging = $this->buildPrevNextNavigation( $this->offset,
+					$this->limit, $this->linkParameters(), $atEnd, $par );
 				$out->addHTML( '<p>' . $paging . '</p>' );
 			} else {
 				# No results to show, so don't bother with "showing X of Y" etc.
@@ -665,7 +710,7 @@ abstract class QueryPage extends SpecialPage {
 		# an OutputPage, and let them get on with it
 		$this->outputResults( $out,
 			$this->getSkin(),
-			$dbr, # Should use a ResultWrapper for this
+			$dbr, # Should use IResultWrapper for this
 			$res,
 			min( $this->numRows, $this->limit ), # do not format the one extra row, if exist
 			$this->offset );
@@ -690,8 +735,6 @@ abstract class QueryPage extends SpecialPage {
 	 * @param int $offset Paging offset
 	 */
 	protected function outputResults( $out, $skin, $dbr, $res, $num, $offset ) {
-		global $wgContLang;
-
 		if ( $num > 0 ) {
 			$html = [];
 			if ( !$this->listoutput ) {
@@ -700,19 +743,7 @@ abstract class QueryPage extends SpecialPage {
 
 			# $res might contain the whole 1,000 rows, so we read up to
 			# $num [should update this to use a Pager]
-			// phpcs:ignore Generic.CodeAnalysis.ForLoopWithTestFunctionCall
 			for ( $i = 0; $i < $num && $row = $res->fetchObject(); $i++ ) {
-				$line = $this->formatResult( $skin, $row );
-				if ( $line ) {
-					$html[] = $this->listoutput
-						? $line
-						: "<li>{$line}</li>\n";
-				}
-			}
-
-			# Flush the final result
-			if ( $this->tryLastResult() ) {
-				$row = null;
 				$line = $this->formatResult( $skin, $row );
 				if ( $line ) {
 					$html[] = $this->listoutput
@@ -726,7 +757,7 @@ abstract class QueryPage extends SpecialPage {
 			}
 
 			$html = $this->listoutput
-				? $wgContLang->listToText( $html )
+				? MediaWikiServices::getInstance()->getContentLanguage()->listToText( $html )
 				: implode( '', $html );
 
 			$out->addHTML( $html );
@@ -757,105 +788,13 @@ abstract class QueryPage extends SpecialPage {
 	}
 
 	/**
-	 * Similar to above, but packaging in a syndicated feed instead of a web page
-	 * @param string $class
-	 * @param int $limit
-	 * @return bool
-	 */
-	function doFeed( $class = '', $limit = 50 ) {
-		if ( !$this->getConfig()->get( 'Feed' ) ) {
-			$this->getOutput()->addWikiMsg( 'feed-unavailable' );
-			return false;
-		}
-
-		$limit = min( $limit, $this->getConfig()->get( 'FeedLimit' ) );
-
-		$feedClasses = $this->getConfig()->get( 'FeedClasses' );
-		if ( isset( $feedClasses[$class] ) ) {
-			/** @var RSSFeed|AtomFeed $feed */
-			$feed = new $feedClasses[$class](
-				$this->feedTitle(),
-				$this->feedDesc(),
-				$this->feedUrl() );
-			$feed->outHeader();
-
-			$res = $this->reallyDoQuery( $limit, 0 );
-			foreach ( $res as $obj ) {
-				$item = $this->feedResult( $obj );
-				if ( $item ) {
-					$feed->outItem( $item );
-				}
-			}
-
-			$feed->outFooter();
-			return true;
-		} else {
-			return false;
-		}
-	}
-
-	/**
-	 * Override for custom handling. If the titles/links are ok, just do
-	 * feedItemDesc()
-	 * @param object $row
-	 * @return FeedItem|null
-	 */
-	function feedResult( $row ) {
-		if ( !isset( $row->title ) ) {
-			return null;
-		}
-		$title = Title::makeTitle( intval( $row->namespace ), $row->title );
-		if ( $title ) {
-			$date = isset( $row->timestamp ) ? $row->timestamp : '';
-			$comments = '';
-			if ( $title ) {
-				$talkpage = $title->getTalkPage();
-				$comments = $talkpage->getFullURL();
-			}
-
-			return new FeedItem(
-				$title->getPrefixedText(),
-				$this->feedItemDesc( $row ),
-				$title->getFullURL(),
-				$date,
-				$this->feedItemAuthor( $row ),
-				$comments );
-		} else {
-			return null;
-		}
-	}
-
-	function feedItemDesc( $row ) {
-		return isset( $row->comment ) ? htmlspecialchars( $row->comment ) : '';
-	}
-
-	function feedItemAuthor( $row ) {
-		return isset( $row->user_text ) ? $row->user_text : '';
-	}
-
-	function feedTitle() {
-		$desc = $this->getDescription();
-		$code = $this->getConfig()->get( 'LanguageCode' );
-		$sitename = $this->getConfig()->get( 'Sitename' );
-		return "$sitename - $desc [$code]";
-	}
-
-	function feedDesc() {
-		return $this->msg( 'tagline' )->text();
-	}
-
-	function feedUrl() {
-		return $this->getPageTitle()->getFullURL();
-	}
-
-	/**
-	 * Creates a new LinkBatch object, adds all pages from the passed ResultWrapper (MUST include
+	 * Creates a new LinkBatch object, adds all pages from the passed result wrapper (MUST include
 	 * title and optional the namespace field) and executes the batch. This operation will pre-cache
 	 * LinkCache information like page existence and information for stub color and redirect hints.
 	 *
-	 * @param IResultWrapper $res The ResultWrapper object to process. Needs to include the title
+	 * @param IResultWrapper $res The result wrapper to process. Needs to include the title
 	 *  field and namespace field, if the $ns parameter isn't set.
-	 * @param null $ns Use this namespace for the given titles in the ResultWrapper object,
+	 * @param null $ns Use this namespace for the given titles in the result wrapper,
 	 *  instead of the namespace value of $res.
 	 */
 	protected function executeLBFromResultWrapper( IResultWrapper $res, $ns = null ) {
@@ -865,7 +804,7 @@ abstract class QueryPage extends SpecialPage {
 
 		$batch = new LinkBatch;
 		foreach ( $res as $row ) {
-			$batch->add( $ns !== null ? $ns : $row->namespace, $row->title );
+			$batch->add( $ns ?? $row->namespace, $row->title );
 		}
 		$batch->execute();
 

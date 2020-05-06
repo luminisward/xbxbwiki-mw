@@ -1,5 +1,6 @@
 {
 	"name": "Cite",
+	"version": "1.0.0",
 	"author": [
 		"Ævar Arnfjörð Bjarmason",
 		"Andrew Garrett",
@@ -15,11 +16,14 @@
 	"license-name": "GPL-2.0-or-later",
 	"type": "parserhook",
 	"requires": {
-		"MediaWiki": ">= 1.30.0"
+		"MediaWiki": ">= 1.32.0"
 	},
 	"MessagesDirs": {
-		"cite": "i18n",
-		"ve-cite": "modules/ve-cite/i18n"
+		"Cite": [
+			"i18n",
+			"i18n/api",
+			"modules/ve-cite/i18n"
+		]
 	},
 	"APIPropModules": {
 		"references": {
@@ -72,6 +76,22 @@
 			"messages": [
 				"cite_references_link_accessibility_label",
 				"cite_references_link_many_accessibility_label"
+			]
+		},
+		"ext.cite.ux-enhancements": {
+			"scripts": [
+				"ext.cite.a11y.js",
+				"ext.cite.highlighting.js"
+			],
+			"styles": [
+				"ext.cite.a11y.css",
+				"ext.cite.highlighting.css"
+			],
+			"messages": [
+				"cite_reference_link_prefix",
+				"cite_references_link_accessibility_label",
+				"cite_references_link_many_accessibility_label",
+				"cite_references_link_accessibility_back_label"
 			]
 		},
 		"ext.cite.style": {

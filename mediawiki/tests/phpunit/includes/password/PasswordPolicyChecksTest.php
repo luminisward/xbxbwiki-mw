@@ -150,10 +150,48 @@ class PasswordPolicyChecksTest extends MediaWikiTestCase {
 		global $IP;
 		$this->setMwGlobals( [
 			'wgSitename' => 'sitename',
-			'wgPopularPasswordFile' => "$IP/serialized/commonpasswords.cdb"
+			'wgPopularPasswordFile' => "$IP/includes/password/commonpasswords.cdb"
 		] );
 		$user = User::newFromName( 'username' );
 		$status = PasswordPolicyChecks::checkPopularPasswordBlacklist( PHP_INT_MAX, $user, $password );
 		$this->assertSame( $expected, $status->isGood() );
+	}
+
+	public static function provideLargeBlacklist() {
+		return [
+			[ false, 'testpass' ],
+			[ false, 'password' ],
+			[ false, '12345' ],
+			[ true, 'DKn17egcA4' ],
+			[ true, 'testwikijenkinspass' ],
+		];
+	}
+
+	/**
+	 * @covers PasswordPolicyChecks::checkPasswordNotInLargeBlacklist
+	 * @dataProvider provideLargeBlacklist
+	 */
+	public function testCheckNotInLargeBlacklist( $expected, $password ) {
+		$user = User::newFromName( 'username' );
+		$status = PasswordPolicyChecks::checkPasswordNotInLargeBlacklist( true, $user, $password );
+		$this->assertSame( $expected, $status->isGood() );
+	}
+
+	/**
+	 * Verify that all password policy description messages actually exist.
+	 * Messages used on Special:PasswordPolicies
+	 * @coversNothing
+	 */
+	public function testPasswordPolicyDescriptionsExist() {
+		global $wgPasswordPolicy;
+		$lang = Language::factory( 'en' );
+
+		foreach ( array_keys( $wgPasswordPolicy['checks'] ) as $check ) {
+			$msgKey = 'passwordpolicies-policy-' . strtolower( $check );
+			$this->assertTrue(
+				wfMessage( $msgKey )->useDatabase( false )->inLanguage( $lang )->exists(),
+				"Message '$msgKey' required by '$check' must exist"
+			);
+		}
 	}
 }

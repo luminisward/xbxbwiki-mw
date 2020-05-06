@@ -48,7 +48,6 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 	 * @return void
 	 */
 	private function run( $resultPageSet = null ) {
-		global $wgContLang;
 		$params = $this->extractRequestParams();
 
 		// Extract parameters
@@ -60,12 +59,18 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 
 		// Create search engine instance and set options
 		$search = $this->buildSearchEngine( $params );
+		if ( isset( $params['sort'] ) ) {
+			$search->setSort( $params['sort'] );
+		}
 		$search->setFeatureData( 'rewrite', (bool)$params['enablerewrites'] );
 		$search->setFeatureData( 'interwiki', (bool)$interwiki );
 
-		$query = $search->transformSearchTerm( $query );
-		$query = $search->replacePrefixes( $query );
-
+		$nquery = $search->replacePrefixes( $query );
+		if ( $nquery !== $query ) {
+			$query = $nquery;
+			wfDeprecated( 'SearchEngine::replacePrefixes() (overridden by ' .
+						  get_class( $search ) . ')', '1.32' );
+		}
 		// Perform the actual search
 		if ( $what == 'text' ) {
 			$matches = $search->searchText( $query );
@@ -138,29 +143,22 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 			}
 		}
 
-		// Add the search results to the result
-		$terms = $wgContLang->convertForSearchResult( $matches->termMatches() );
 		$titles = [];
 		$count = 0;
-		$result = $matches->next();
-		$limit = $params['limit'];
 
-		while ( $result ) {
-			if ( ++$count > $limit ) {
-				// We've reached the one extra which shows that there are
-				// additional items to be had. Stop here...
-				$this->setContinueEnumParameter( 'offset', $params['offset'] + $params['limit'] );
-				break;
-			}
+		if ( $matches->hasMoreResults() ) {
+			$this->setContinueEnumParameter( 'offset', $params['offset'] + $params['limit'] );
+		}
 
+		foreach ( $matches as $result ) {
+			$count++;
 			// Silently skip broken and missing titles
 			if ( $result->isBrokenTitle() || $result->isMissingRevision() ) {
-				$result = $matches->next();
 				continue;
 			}
 
 			if ( $resultPageSet === null ) {
-				$vals = $this->getSearchResultData( $result, $prop, $terms );
+				$vals = $this->getSearchResultData( $result, $prop );
 				if ( $vals ) {
 					// Add item to results and see whether it fits
 					$fit = $apiResult->addValue( [ 'query', $this->getModuleName() ], null, $vals );
@@ -172,8 +170,6 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 			} else {
 				$titles[] = $result->getTitle();
 			}
-
-			$result = $matches->next();
 		}
 
 		// Here we assume interwiki results do not count with
@@ -183,14 +179,14 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 		// Interwiki results inside main result set
 		$canAddInterwiki = (bool)$params['enablerewrites'] && ( $resultPageSet === null );
 		if ( $canAddInterwiki ) {
-			$this->addInterwikiResults( $matches, $apiResult, $prop, $terms, 'additional',
-				SearchResultSet::INLINE_RESULTS );
+			$this->addInterwikiResults( $matches, $apiResult, $prop, 'additional',
+				ISearchResultSet::INLINE_RESULTS );
 		}
 
 		// Interwiki results outside main result set
 		if ( $interwiki && $resultPageSet === null ) {
-			$this->addInterwikiResults( $matches, $apiResult, $prop, $terms, 'interwiki',
-				SearchResultSet::SECONDARY_RESULTS );
+			$this->addInterwikiResults( $matches, $apiResult, $prop, 'interwiki',
+				ISearchResultSet::SECONDARY_RESULTS );
 		}
 
 		if ( $resultPageSet === null ) {
@@ -216,10 +212,9 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 	 * Assemble search result data.
 	 * @param SearchResult $result Search result
 	 * @param array        $prop Props to extract (as keys)
-	 * @param array        $terms Terms list
 	 * @return array|null Result data or null if result is broken in some way.
 	 */
-	private function getSearchResultData( SearchResult $result, $prop, $terms ) {
+	private function getSearchResultData( SearchResult $result, $prop ) {
 		// Silently skip broken and missing titles
 		if ( $result->isBrokenTitle() || $result->isMissingRevision() ) {
 			return null;
@@ -238,7 +233,7 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 			$vals['wordcount'] = $result->getWordCount();
 		}
 		if ( isset( $prop['snippet'] ) ) {
-			$vals['snippet'] = $result->getTextSnippet( $terms );
+			$vals['snippet'] = $result->getTextSnippet();
 		}
 		if ( isset( $prop['timestamp'] ) ) {
 			$vals['timestamp'] = wfTimestamp( TS_ISO_8601, $result->getTimestamp() );
@@ -283,17 +278,16 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 
 	/**
 	 * Add interwiki results as a section in query results.
-	 * @param SearchResultSet $matches
+	 * @param ISearchResultSet $matches
 	 * @param ApiResult       $apiResult
 	 * @param array           $prop Props to extract (as keys)
-	 * @param array           $terms Terms list
 	 * @param string          $section Section name where results would go
 	 * @param int             $type Interwiki result type
 	 * @return int|null Number of total hits in the data or null if none was produced
 	 */
 	private function addInterwikiResults(
-		SearchResultSet $matches, ApiResult $apiResult, $prop,
-		$terms, $section, $type
+		ISearchResultSet $matches, ApiResult $apiResult, $prop,
+		$section, $type
 	) {
 		$totalhits = null;
 		if ( $matches->hasInterwikiResults( $type ) ) {
@@ -301,10 +295,9 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 				// Include number of results if requested
 				$totalhits += $interwikiMatches->getTotalHits();
 
-				$result = $interwikiMatches->next();
-				while ( $result ) {
+				foreach ( $interwikiMatches as $result ) {
 					$title = $result->getTitle();
-					$vals = $this->getSearchResultData( $result, $prop, $terms );
+					$vals = $this->getSearchResultData( $result, $prop );
 
 					$vals['namespace'] = $result->getInterwikiNamespaceText();
 					$vals['title'] = $title->getText();
@@ -322,8 +315,6 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 						// pagination info so just bail out
 						break;
 					}
-
-					$result = $interwikiMatches->next();
 				}
 			}
 			if ( $totalhits !== null ) {
@@ -390,6 +381,21 @@ class ApiQuerySearch extends ApiQueryGeneratorBase {
 			'interwiki' => false,
 			'enablerewrites' => false,
 		];
+
+		// If we have more than one engine the list of available sorts is
+		// difficult to represent. For now don't expose it.
+		$services = MediaWiki\MediaWikiServices::getInstance();
+		$alternatives = $services
+			->getSearchEngineConfig()
+			->getSearchTypes();
+		if ( count( $alternatives ) == 1 ) {
+			$this->allowedParams['sort'] = [
+				ApiBase::PARAM_DFLT => 'relevance',
+				ApiBase::PARAM_TYPE => $services
+					->newSearchEngine()
+					->getValidSorts(),
+			];
+		}
 
 		return $this->allowedParams;
 	}

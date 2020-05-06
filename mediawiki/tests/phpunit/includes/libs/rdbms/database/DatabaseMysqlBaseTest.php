@@ -79,12 +79,12 @@ class DatabaseMysqlBaseTest extends PHPUnit\Framework\TestCase {
 
 			// unicode chars
 			[
-				self::createUnicodeString( '`\u0001a\uFFFFb`' ),
-				self::createUnicodeString( '\u0001a\uFFFFb' )
+				"`\u{0001}a\u{FFFF}b`",
+				"\u{0001}a\u{FFFF}b"
 			],
 			[
-				self::createUnicodeString( '`\u0001\uFFFF`' ),
-				self::createUnicodeString( '\u0001\u0000\uFFFF\u0000' )
+				"`\u{0001}\u{FFFF}`",
+				"\u{0001}\u{0000}\u{FFFF}\u{0000}"
 			],
 			[ '`☃`', '☃' ],
 			[ '`メインページ`', 'メインページ' ],
@@ -97,14 +97,10 @@ class DatabaseMysqlBaseTest extends PHPUnit\Framework\TestCase {
 		];
 	}
 
-	private static function createUnicodeString( $str ) {
-		return json_decode( '"' . $str . '"' );
-	}
-
 	private function getMockForViews() {
 		$db = $this->getMockBuilder( DatabaseMysqli::class )
 			->disableOriginalConstructor()
-			->setMethods( [ 'fetchRow', 'query' ] )
+			->setMethods( [ 'fetchRow', 'query', 'getDBname' ] )
 			->getMock();
 
 		$db->method( 'query' )
@@ -114,6 +110,7 @@ class DatabaseMysqlBaseTest extends PHPUnit\Framework\TestCase {
 				(object)[ 'Tables_in_' => 'view2' ],
 				(object)[ 'Tables_in_' => 'myview' ]
 			] ) );
+		$db->method( 'getDBname' )->willReturn( '' );
 
 		return $db;
 	}
@@ -319,8 +316,8 @@ class DatabaseMysqlBaseTest extends PHPUnit\Framework\TestCase {
 	 * @dataProvider provideCommonDomainGTIDs
 	 * @covers Wikimedia\Rdbms\MySQLMasterPos
 	 */
-	public function testCommonGtidDomains( MySQLMasterPos $pos, MySQLMasterPos $ref, $gtids ) {
-		$this->assertEquals( $gtids, MySQLMasterPos::getCommonDomainGTIDs( $pos, $ref ) );
+	public function testGetRelevantActiveGTIDs( MySQLMasterPos $pos, MySQLMasterPos $ref, $gtids ) {
+		$this->assertEquals( $gtids, MySQLMasterPos::getRelevantActiveGTIDs( $pos, $ref ) );
 	}
 
 	public static function provideCommonDomainGTIDs() {
@@ -329,6 +326,12 @@ class DatabaseMysqlBaseTest extends PHPUnit\Framework\TestCase {
 				new MySQLMasterPos( '255-13-99,256-12-50,257-14-50', 1 ),
 				new MySQLMasterPos( '255-11-1000', 1 ),
 				[ '255-13-99' ]
+			],
+			[
+				( new MySQLMasterPos( '255-13-99,256-12-50,257-14-50', 1 ) )
+					->setActiveDomain( 257 ),
+				new MySQLMasterPos( '255-11-1000,257-14-30', 1 ),
+				[ '257-14-50' ]
 			],
 			[
 				new MySQLMasterPos(
@@ -675,13 +678,13 @@ class DatabaseMysqlBaseTest extends PHPUnit\Framework\TestCase {
 		$this->assertSame( 'CAST( fieldName AS SIGNED )', $output );
 	}
 
-	/*
+	/**
 	 * @covers Wikimedia\Rdbms\Database::setIndexAliases
 	 */
 	public function testIndexAliases() {
 		$db = $this->getMockBuilder( DatabaseMysqli::class )
 			->disableOriginalConstructor()
-			->setMethods( [ 'mysqlRealEscapeString' ] )
+			->setMethods( [ 'mysqlRealEscapeString', 'dbSchema', 'tablePrefix' ] )
 			->getMock();
 		$db->method( 'mysqlRealEscapeString' )->willReturnCallback(
 			function ( $s ) {
@@ -714,7 +717,7 @@ class DatabaseMysqlBaseTest extends PHPUnit\Framework\TestCase {
 	public function testTableAliases() {
 		$db = $this->getMockBuilder( DatabaseMysqli::class )
 			->disableOriginalConstructor()
-			->setMethods( [ 'mysqlRealEscapeString' ] )
+			->setMethods( [ 'mysqlRealEscapeString', 'dbSchema', 'tablePrefix' ] )
 			->getMock();
 		$db->method( 'mysqlRealEscapeString' )->willReturnCallback(
 			function ( $s ) {

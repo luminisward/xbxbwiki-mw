@@ -15,7 +15,7 @@
  * along with MultimediaViewer.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-( function ( mw, $, oo ) {
+( function () {
 	// Shortcut for prototype later
 	var MPP;
 
@@ -29,7 +29,7 @@
 	 * @param {jQuery} $aboveFold The brighter headline of the metadata panel (.mw-mmv-above-fold).
 	 *  Called "aboveFold" for historical reasons, but actually a part of the next sibling of the element
 	 *  is also above the fold (bottom of the screen).
-	 * @param {mw.storage} localStorage the localStorage object, for dependency injection
+	 * @param {mw.SafeStorage} localStorage the localStorage object, for dependency injection
 	 * @param {mw.mmv.Config} config A configuration object.
 	 */
 	function MetadataPanel( $container, $aboveFold, localStorage, config ) {
@@ -47,7 +47,7 @@
 		this.initializeImageMetadata();
 		this.initializeAboutLinks();
 	}
-	oo.inheritClass( MetadataPanel, mw.mmv.ui.Element );
+	OO.inheritClass( MetadataPanel, mw.mmv.ui.Element );
 	MPP = MetadataPanel.prototype;
 
 	/**
@@ -185,7 +185,7 @@
 	/**
 	 * Initializes the header, which contains the title, credit, and license elements.
 	 *
-	 * @param {mw.storage} localStorage the localStorage object, for dependency injection
+	 * @param {mw.SafeStorage} localStorage the localStorage object, for dependency injection
 	 */
 	MPP.initializeHeader = function ( localStorage ) {
 		this.progressBar = new mw.mmv.ui.ProgressBar( this.$aboveFold );
@@ -391,7 +391,7 @@
 		this.$location = $( '<a>' )
 			.addClass( 'mw-mmv-location' )
 			.appendTo( this.$locationLi )
-			.click( function () { mw.mmv.actionLogger.log( 'location-page' ); } );
+			.on( 'click', function () { mw.mmv.actionLogger.log( 'location-page' ); } );
 	};
 
 	/**
@@ -404,19 +404,19 @@
 			.prop( 'href', mw.config.get( 'wgMultimediaViewer' ).infoLink )
 			.text( mw.message( 'multimediaviewer-about-mmv' ).text() )
 			.addClass( 'mw-mmv-about-link' )
-			.click( function () { mw.mmv.actionLogger.log( 'about-page' ); } );
+			.on( 'click', function () { mw.mmv.actionLogger.log( 'about-page' ); } );
 
 		this.$mmvDiscussLink = $( '<a>' )
 			.prop( 'href', mw.config.get( 'wgMultimediaViewer' ).discussionLink )
 			.text( mw.message( 'multimediaviewer-discuss-mmv' ).text() )
 			.addClass( 'mw-mmv-discuss-link' )
-			.click( function () { mw.mmv.actionLogger.log( 'discuss-page' ); } );
+			.on( 'click', function () { mw.mmv.actionLogger.log( 'discuss-page' ); } );
 
 		this.$mmvHelpLink = $( '<a>' )
 			.prop( 'href', mw.config.get( 'wgMultimediaViewer' ).helpLink )
 			.text( mw.message( 'multimediaviewer-help-mmv' ).text() )
 			.addClass( 'mw-mmv-help-link' )
-			.click( function () { mw.mmv.actionLogger.log( 'help-page' ); } );
+			.on( 'click', function () { mw.mmv.actionLogger.log( 'help-page' ); } );
 
 		this.$mmvAboutLinks = $( '<div>' )
 			.addClass( 'mw-mmv-about-links' )
@@ -630,7 +630,7 @@
 			showDefault = false,
 			validRestrictions = 0;
 
-		$.each( restrictions, function ( index, value ) {
+		restrictions.forEach( function ( value, index ) {
 			if ( !mw.message( 'multimediaviewer-restriction-' + value ).exists() || value === 'default' || index + 1 > MetadataPanel.MAX_RESTRICT ) {
 				showDefault = true; // If the restriction isn't defined or there are more than MAX_RESTRICT of them, show a generic symbol at the end
 				return;
@@ -685,8 +685,7 @@
 	 */
 	MPP.setLocationData = function ( imageData ) {
 		var latsec, latitude, latmsg, latdeg, latremain, latmin,
-			longsec, longitude, longmsg, longdeg, longremain, longmin,
-			language;
+			longsec, longitude, longmsg, longdeg, longremain, longmin;
 
 		if ( !imageData.hasCoords() ) {
 			return;
@@ -733,18 +732,13 @@
 			).text()
 		);
 
-		$.each( mw.language.data, function ( key ) {
-			language = key;
-			return false;
-		} );
-
 		this.$location.prop( 'href', (
 			'//tools.wmflabs.org/geohack/geohack.php?pagename=' +
 			'File:' + imageData.title.getMain() +
 			'&params=' +
 			Math.abs( imageData.latitude ) + ( imageData.latitude >= 0 ? '_N_' : '_S_' ) +
 			Math.abs( imageData.longitude ) + ( imageData.longitude >= 0 ? '_E_' : '_W_' ) +
-			'&language=' + language
+			'&language=' + encodeURIComponent( mw.config.get( 'wgUserLanguage' ) )
 		) );
 
 		this.$locationLi.removeClass( 'empty' );
@@ -763,19 +757,9 @@
 		mw.mmv.attributionLogger.logAttribution( imageData );
 
 		if ( imageData.creationDateTime ) {
-			// Use the raw date until moment can try to interpret it
-			panel.setDateTime( imageData.creationDateTime );
-
-			this.formatDate( imageData.creationDateTime ).then( function ( formattedDate ) {
-				panel.setDateTime( formattedDate, true );
-			} );
+			panel.setDateTime( this.formatDate( imageData.creationDateTime ), true );
 		} else if ( imageData.uploadDateTime ) {
-			// Use the raw date until moment can try to interpret it
-			panel.setDateTime( imageData.uploadDateTime );
-
-			this.formatDate( imageData.uploadDateTime ).then( function ( formattedDate ) {
-				panel.setDateTime( formattedDate );
-			} );
+			panel.setDateTime( this.formatDate( imageData.uploadDateTime ) );
 		}
 
 		this.buttons.set( imageData, repoData );
@@ -820,29 +804,24 @@
 	 * Unrecognized strings are returned unchanged.
 	 *
 	 * @param {string} dateString
-	 * @return {jQuery.Deferred}
+	 * @return {string} formatted date
 	 */
 	MPP.formatDate = function ( dateString ) {
-		var deferred = $.Deferred(),
-			date;
-
-		mw.loader.using( 'moment', function () {
-			/* global moment */
-			date = moment( dateString );
-
-			if ( date.isValid() ) {
-				deferred.resolve( date.format( 'LL' ) );
-			} else {
-				deferred.resolve( dateString );
+		var date,
+			lang = mw.config.get( 'wgUserLanguage' );
+		if ( lang === 'en' ) { lang = 'en-GB'; } // for D MMMM YYYY format
+		date = new Date( dateString );
+		try {
+			if ( date instanceof Date && !isNaN( date ) ) {
+				return date.toLocaleString( lang, {
+					day: 'numeric',
+					month: 'long',
+					year: 'numeric'
+				} );
 			}
-		}, function ( error ) {
-			deferred.reject( error );
-			if ( window.console && window.console.error ) {
-				window.console.error( 'mw.loader.using error when trying to load moment', error );
-			}
-		} );
-
-		return deferred.promise();
+		} catch ( ignore ) {}
+		// fallback to original date string
+		return dateString;
 	};
 
 	/**
@@ -883,4 +862,4 @@
 	};
 
 	mw.mmv.ui.MetadataPanel = MetadataPanel;
-}( mediaWiki, jQuery, OO ) );
+}() );

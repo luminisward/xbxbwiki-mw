@@ -19,20 +19,6 @@
  */
 
 /**
- * Interface for MediaWiki-localized exceptions
- *
- * @since 1.29
- * @ingroup Exception
- */
-interface ILocalizedException {
-	/**
-	 * Return a Message object for this exception
-	 * @return Message
-	 */
-	public function getMessageObject();
-}
-
-/**
  * Basic localized exception.
  *
  * @since 1.29
@@ -46,7 +32,8 @@ class LocalizedException extends Exception implements ILocalizedException {
 	/**
 	 * @param string|array|MessageSpecifier $messageSpec See Message::newFromSpecifier
 	 * @param int $code
-	 * @param Exception|Throwable $previous The previous exception used for the exception chaining.
+	 * @param Exception|Throwable|null $previous The previous exception used for the exception
+	 *  chaining.
 	 */
 	public function __construct( $messageSpec, $code = 0, $previous = null ) {
 		$this->messageSpec = $messageSpec;

@@ -19,7 +19,6 @@
  * @ingroup JobQueue
  */
 use MediaWiki\MediaWikiServices;
-use Wikimedia\Rdbms\DBReplicationWaitError;
 
 /**
  * Job for pruning recent changes
@@ -74,9 +73,8 @@ class RecentChangesUpdateJob extends Job {
 	protected function purgeExpiredRows() {
 		global $wgRCMaxAge, $wgUpdateRowsPerQuery;
 
-		$lockKey = wfWikiID() . ':recentchanges-prune';
-
 		$dbw = wfGetDB( DB_MASTER );
+		$lockKey = $dbw->getDomainID() . ':recentchanges-prune';
 		if ( !$dbw->lock( $lockKey, __METHOD__, 0 ) ) {
 			// already in progress
 			return;
@@ -105,11 +103,9 @@ class RecentChangesUpdateJob extends Job {
 				$dbw->delete( 'recentchanges', [ 'rc_id' => $rcIds ], __METHOD__ );
 				Hooks::run( 'RecentChangesPurgeRows', [ $rows ] );
 				// There might be more, so try waiting for replica DBs
-				try {
-					$factory->commitAndWaitForReplication(
-						__METHOD__, $ticket, [ 'timeout' => 3 ]
-					);
-				} catch ( DBReplicationWaitError $e ) {
+				if ( !$factory->commitAndWaitForReplication(
+					__METHOD__, $ticket, [ 'timeout' => 3 ]
+				) ) {
 					// Another job will continue anyway
 					break;
 				}
@@ -131,7 +127,7 @@ class RecentChangesUpdateJob extends Job {
 		$factory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
 		$ticket = $factory->getEmptyTransactionTicket( __METHOD__ );
 
-		$lockKey = wfWikiID() . '-activeusers';
+		$lockKey = $dbw->getDomainID() . '-activeusers';
 		if ( !$dbw->lock( $lockKey, __METHOD__, 0 ) ) {
 			// Exclusive update (avoids duplicate entries)… it's usually fine to just
 			// drop out here, if the Job is already running.
@@ -172,7 +168,7 @@ class RecentChangesUpdateJob extends Job {
 			],
 			__METHOD__,
 			[
-				'GROUP BY' => [ 'rc_user_text' ],
+				'GROUP BY' => [ $actorQuery['fields']['rc_user_text'] ],
 				'ORDER BY' => 'NULL' // avoid filesort
 			],
 			$actorQuery['joins']

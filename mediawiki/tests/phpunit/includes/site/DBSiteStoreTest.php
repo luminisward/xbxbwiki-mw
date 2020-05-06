@@ -1,8 +1,8 @@
 <?php
 
+use MediaWiki\MediaWikiServices;
+
 /**
- * Tests for the DBSiteStore class.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -37,7 +37,8 @@ class DBSiteStoreTest extends MediaWikiTestCase {
 	private function newDBSiteStore() {
 		// NOTE: Use the real DB load balancer for now. Eventually, the test framework should
 		// provide a LoadBalancer that is safe to use in unit tests.
-		return new DBSiteStore( wfGetLB() );
+		$lb = MediaWikiServices::getInstance()->getDBLoadBalancer();
+		return new DBSiteStore( $lb );
 	}
 
 	/**
@@ -137,7 +138,7 @@ class DBSiteStoreTest extends MediaWikiTestCase {
 		$this->assertNull( $site );
 
 		$sites = $store->getSites();
-		$this->assertEquals( 0, $sites->count() );
+		$this->assertSame( 0, $sites->count() );
 	}
 
 	/**

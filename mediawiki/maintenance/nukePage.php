@@ -39,7 +39,7 @@ class NukePage extends Maintenance {
 	}
 
 	public function execute() {
-		$name = $this->getArg();
+		$name = $this->getArg( 0 );
 		$delete = $this->hasOption( 'delete' );
 
 		$dbw = $this->getDB( DB_MASTER );
@@ -92,7 +92,11 @@ class NukePage extends Maintenance {
 			if ( $delete ) {
 				$this->output( "Updating site stats..." );
 				$ga = $isGoodArticle ? -1 : 0; // if it was good, decrement that too
-				$stats = new SiteStatsUpdate( 0, -$count, $ga, -1 );
+				$stats = SiteStatsUpdate::factory( [
+					'edits' => -$count,
+					'articles' => $ga,
+					'pages' => -1
+				] );
 				$stats->doUpdate();
 				$this->output( "done.\n" );
 			}

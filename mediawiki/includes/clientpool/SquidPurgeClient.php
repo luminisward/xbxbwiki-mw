@@ -25,7 +25,7 @@
  * Uses asynchronous I/O, allowing purges to be done in a highly parallel
  * manner.
  *
- * Could be replaced by curl_multi_exec() or some such.
+ * @todo Consider using MultiHttpClient.
  */
 class SquidPurgeClient {
 	/** @var string */
@@ -68,12 +68,11 @@ class SquidPurgeClient {
 
 	/**
 	 * @param string $server
-	 * @param array $options
 	 */
-	public function __construct( $server, $options = [] ) {
+	public function __construct( $server ) {
 		$parts = explode( ':', $server, 2 );
 		$this->host = $parts[0];
-		$this->port = isset( $parts[1] ) ? $parts[1] : 80;
+		$this->port = $parts[1] ?? 80;
 	}
 
 	/**
@@ -151,7 +150,7 @@ class SquidPurgeClient {
 			if ( IP::isIPv4( $this->host ) ) {
 				$this->ip = $this->host;
 			} elseif ( IP::isIPv6( $this->host ) ) {
-				throw new MWException( '$wgSquidServers does not support IPv6' );
+				throw new MWException( '$wgCdnServers does not support IPv6' );
 			} else {
 				Wikimedia\suppressWarnings();
 				$this->ip = gethostbyname( $this->host );
@@ -192,11 +191,11 @@ class SquidPurgeClient {
 	/**
 	 * Queue a purge operation
 	 *
-	 * @param string $url
+	 * @param string $url Fully expanded URL (with host and protocol)
 	 */
 	public function queuePurge( $url ) {
 		global $wgSquidPurgeUseHostHeader;
-		$url = CdnCacheUpdate::expand( str_replace( "\n", '', $url ) );
+		$url = str_replace( "\n", '', $url ); // sanity
 		$request = [];
 		if ( $wgSquidPurgeUseHostHeader ) {
 			$url = wfParseUrl( $url );
@@ -211,6 +210,7 @@ class SquidPurgeClient {
 			$request[] = "PURGE $path HTTP/1.1";
 			$request[] = "Host: $host";
 		} else {
+			wfDeprecated( '$wgSquidPurgeUseHostHeader = false', '1.33' );
 			$request[] = "PURGE $url HTTP/1.0";
 		}
 		$request[] = "Connection: Keep-Alive";
@@ -314,7 +314,7 @@ class SquidPurgeClient {
 				}
 				if ( $this->readState == 'status' ) {
 					$this->processStatusLine( $lines[0] );
-				} else { // header
+				} else {
 					$this->processHeaderLine( $lines[0] );
 				}
 				$this->readBuffer = $lines[1];

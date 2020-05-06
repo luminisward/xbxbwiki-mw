@@ -26,6 +26,9 @@
  * @ingroup FileJournal
  */
 
+use Wikimedia\ObjectFactory;
+use Wikimedia\Timestamp\ConvertibleTimestamp;
+
 /**
  * @brief Class for handling file operation journaling.
  *
@@ -37,18 +40,17 @@
 abstract class FileJournal {
 	/** @var string */
 	protected $backend;
-
-	/** @var int */
+	/** @var int|false */
 	protected $ttlDays;
 
 	/**
-	 * Construct a new instance from configuration.
+	 * Construct a new instance from configuration. Do not call this directly, use factory().
 	 *
 	 * @param array $config Includes:
 	 *     'ttlDays' : days to keep log entries around (false means "forever")
 	 */
-	protected function __construct( array $config ) {
-		$this->ttlDays = isset( $config['ttlDays'] ) ? $config['ttlDays'] : false;
+	public function __construct( array $config ) {
+		$this->ttlDays = $config['ttlDays'] ?? false;
 	}
 
 	/**
@@ -60,11 +62,10 @@ abstract class FileJournal {
 	 * @return FileJournal
 	 */
 	final public static function factory( array $config, $backend ) {
-		$class = $config['class'];
-		$jrn = new $class( $config );
-		if ( !$jrn instanceof self ) {
-			throw new InvalidArgumentException( "Class given is not an instance of FileJournal." );
-		}
+		$jrn = ObjectFactory::getObjectFromSpec(
+			$config,
+			[ 'specIsArg' => true, 'assertClass' => __CLASS__ ]
+		);
 		$jrn->backend = $backend;
 
 		return $jrn;
@@ -82,7 +83,9 @@ abstract class FileJournal {
 		}
 		$s = Wikimedia\base_convert( sha1( $s ), 16, 36, 31 );
 
-		return substr( Wikimedia\base_convert( wfTimestamp( TS_MW ), 10, 36, 9 ) . $s, 0, 31 );
+		$timestamp = ConvertibleTimestamp::convert( TS_MW, time() );
+
+		return substr( Wikimedia\base_convert( $timestamp, 10, 36, 9 ) . $s, 0, 31 );
 	}
 
 	/**
@@ -97,7 +100,7 @@ abstract class FileJournal {
 	 * @return StatusValue
 	 */
 	final public function logChangeBatch( array $entries, $batchId ) {
-		if ( !count( $entries ) ) {
+		if ( $entries === [] ) {
 			return StatusValue::newGood();
 		}
 
@@ -149,9 +152,9 @@ abstract class FileJournal {
 	 * Get an array of file change log entries.
 	 * A starting change ID and/or limit can be specified.
 	 *
-	 * @param int $start Starting change ID or null
-	 * @param int $limit Maximum number of items to return
-	 * @param string &$next Updated to the ID of the next entry.
+	 * @param int|null $start Starting change ID or null
+	 * @param int $limit Maximum number of items to return (0 = unlimited)
+	 * @param string|null &$next Updated to the ID of the next entry.
 	 * @return array List of associative arrays, each having:
 	 *     id         : unique, monotonic, ID for this change
 	 *     batch_uuid : UUID for an operation batch

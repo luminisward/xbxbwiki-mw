@@ -43,7 +43,7 @@ abstract class AbstractContent implements Content {
 	protected $model_id;
 
 	/**
-	 * @param string $modelId
+	 * @param string|null $modelId
 	 *
 	 * @since 1.21
 	 */
@@ -145,7 +145,7 @@ abstract class AbstractContent implements Content {
 	/**
 	 * @since 1.21
 	 *
-	 * @param string $format
+	 * @param string|null $format
 	 *
 	 * @return string
 	 *
@@ -180,9 +180,20 @@ abstract class AbstractContent implements Content {
 	}
 
 	/**
+	 * Decides whether two Content objects are equal.
+	 * Two Content objects MUST not be considered equal if they do not share the same content model.
+	 * Two Content objects that are equal SHOULD have the same serialization.
+	 *
+	 * This default implementation relies on equalsInternal() to determin whether the
+	 * Content objects are logically equivalent. Subclasses that need to implement a custom
+	 * equality check should consider overriding equalsInternal(). Subclasses that override
+	 * equals() itself MUST make sure that the implementation returns false for $that === null,
+	 * and true for $that === this. It MUST also return false if $that does not have the same
+	 * content model.
+	 *
 	 * @since 1.21
 	 *
-	 * @param Content $that
+	 * @param Content|null $that
 	 *
 	 * @return bool
 	 *
@@ -201,7 +212,34 @@ abstract class AbstractContent implements Content {
 			return false;
 		}
 
-		return $this->getNativeData() === $that->getNativeData();
+		// For type safety. Needed for odd cases like MessageContent using CONTENT_MODEL_WIKITEXT
+		if ( get_class( $that ) !== get_class( $this ) ) {
+			return false;
+		}
+
+		return $this->equalsInternal( $that );
+	}
+
+	/**
+	 * Checks whether $that is logically equal to this Content object.
+	 *
+	 * This method can be overwritten by subclasses that need to implement custom
+	 * equality checks.
+	 *
+	 * This default implementation checks whether the serializations
+	 * of $this and $that are the same: $this->serialize() === $that->serialize()
+	 *
+	 * Implementors can assume that $that is an instance of the same class
+	 * as the present Content object, as long as equalsInternal() is only called
+	 * by the standard implementation of equals().
+	 *
+	 * @note Do not call this method directly, call equals() instead.
+	 *
+	 * @param Content $that
+	 * @return bool
+	 */
+	protected function equalsInternal( Content $that ) {
+		return $this->serialize() === $that->serialize();
 	}
 
 	/**
@@ -219,9 +257,9 @@ abstract class AbstractContent implements Content {
 	 * @since 1.21
 	 *
 	 * @param Title $title
-	 * @param Content $old
+	 * @param Content|null $old
 	 * @param bool $recursive
-	 * @param ParserOutput $parserOutput
+	 * @param ParserOutput|null $parserOutput
 	 *
 	 * @return DataUpdate[]
 	 *
@@ -491,7 +529,7 @@ abstract class AbstractContent implements Content {
 	 * @since 1.24
 	 *
 	 * @param Title $title Context title for parsing
-	 * @param int|null $revId Revision ID (for {{REVISIONID}})
+	 * @param int|null $revId Revision ID being rendered
 	 * @param ParserOptions|null $options
 	 * @param bool $generateHtml Whether or not to generate HTML
 	 *
@@ -501,10 +539,11 @@ abstract class AbstractContent implements Content {
 		ParserOptions $options = null, $generateHtml = true
 	) {
 		if ( $options === null ) {
-			$options = $this->getContentHandler()->makeParserOptions( 'canonical' );
+			$options = ParserOptions::newCanonical( 'canonical' );
 		}
 
 		$po = new ParserOutput();
+		$options->registerWatcher( [ $po, 'recordOption' ] );
 
 		if ( Hooks::run( 'ContentGetParserOutput',
 			[ $this, $title, $revId, $options, $generateHtml, &$po ] )
@@ -518,6 +557,7 @@ abstract class AbstractContent implements Content {
 		}
 
 		Hooks::run( 'ContentAlterParserOutput', [ $this, $title, $po ] );
+		$options->registerWatcher( null );
 
 		return $po;
 	}
@@ -535,7 +575,8 @@ abstract class AbstractContent implements Content {
 	 * @since 1.24
 	 *
 	 * @param Title $title Context title for parsing
-	 * @param int|null $revId Revision ID (for {{REVISIONID}})
+	 * @param int|null $revId ID of the revision being rendered.
+	 *  See Parser::parse() for the ramifications.
 	 * @param ParserOptions $options
 	 * @param bool $generateHtml Whether or not to generate HTML
 	 * @param ParserOutput &$output The output object to fill (reference).

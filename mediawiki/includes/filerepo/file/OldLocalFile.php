@@ -21,6 +21,8 @@
  * @ingroup FileAbstraction
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * Class to represent a file in the oldimage table
  *
@@ -39,8 +41,8 @@ class OldLocalFile extends LocalFile {
 	/**
 	 * @param Title $title
 	 * @param FileRepo $repo
-	 * @param string|int $time
-	 * @return self
+	 * @param string|int|null $time
+	 * @return static
 	 * @throws MWException
 	 */
 	static function newFromTitle( $title, $repo, $time = null ) {
@@ -49,27 +51,27 @@ class OldLocalFile extends LocalFile {
 			throw new MWException( __METHOD__ . ' got null for $time parameter' );
 		}
 
-		return new self( $title, $repo, $time, null );
+		return new static( $title, $repo, $time, null );
 	}
 
 	/**
 	 * @param Title $title
 	 * @param FileRepo $repo
 	 * @param string $archiveName
-	 * @return self
+	 * @return static
 	 */
 	static function newFromArchiveName( $title, $repo, $archiveName ) {
-		return new self( $title, $repo, null, $archiveName );
+		return new static( $title, $repo, null, $archiveName );
 	}
 
 	/**
 	 * @param stdClass $row
 	 * @param FileRepo $repo
-	 * @return self
+	 * @return static
 	 */
 	static function newFromRow( $row, $repo ) {
 		$title = Title::makeTitle( NS_FILE, $row->oi_name );
-		$file = new self( $title, $repo, null, $row->oi_archive_name );
+		$file = new static( $title, $repo, null, $row->oi_archive_name );
 		$file->loadFromRow( $row, 'oi_' );
 
 		return $file;
@@ -93,54 +95,15 @@ class OldLocalFile extends LocalFile {
 			$conds['oi_timestamp'] = $dbr->timestamp( $timestamp );
 		}
 
-		$fileQuery = self::getQueryInfo();
+		$fileQuery = static::getQueryInfo();
 		$row = $dbr->selectRow(
 			$fileQuery['tables'], $fileQuery['fields'], $conds, __METHOD__, [], $fileQuery['joins']
 		);
 		if ( $row ) {
-			return self::newFromRow( $row, $repo );
+			return static::newFromRow( $row, $repo );
 		} else {
 			return false;
 		}
-	}
-
-	/**
-	 * Fields in the oldimage table
-	 * @deprecated since 1.31, use self::getQueryInfo() instead.
-	 * @return string[]
-	 */
-	static function selectFields() {
-		global $wgActorTableSchemaMigrationStage;
-
-		wfDeprecated( __METHOD__, '1.31' );
-		if ( $wgActorTableSchemaMigrationStage > MIGRATION_WRITE_BOTH ) {
-			// If code is using this instead of self::getQueryInfo(), there's a
-			// decent chance it's going to try to directly access
-			// $row->oi_user or $row->oi_user_text and we can't give it
-			// useful values here once those aren't being written anymore.
-			throw new BadMethodCallException(
-				'Cannot use ' . __METHOD__ . ' when $wgActorTableSchemaMigrationStage > MIGRATION_WRITE_BOTH'
-			);
-		}
-
-		return [
-			'oi_name',
-			'oi_archive_name',
-			'oi_size',
-			'oi_width',
-			'oi_height',
-			'oi_metadata',
-			'oi_bits',
-			'oi_media_type',
-			'oi_major_mime',
-			'oi_minor_mime',
-			'oi_user',
-			'oi_user_text',
-			'oi_actor' => $wgActorTableSchemaMigrationStage > MIGRATION_OLD ? 'oi_actor' : 'NULL',
-			'oi_timestamp',
-			'oi_deleted',
-			'oi_sha1',
-		] + CommentStore::getStore()->getFields( 'oi_description' );
 	}
 
 	/**
@@ -155,7 +118,7 @@ class OldLocalFile extends LocalFile {
 	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()`
 	 */
 	public static function getQueryInfo( array $options = [] ) {
-		$commentQuery = CommentStore::getStore()->getJoin( 'oi_description' );
+		$commentQuery = MediaWikiServices::getInstance()->getCommentStore()->getJoin( 'oi_description' );
 		$actorQuery = ActorMigration::newMigration()->getJoin( 'oi_user' );
 		$ret = [
 			'tables' => [ 'oldimage' ] + $commentQuery['tables'] + $actorQuery['tables'],
@@ -322,14 +285,14 @@ class OldLocalFile extends LocalFile {
 	 * @return string
 	 */
 	function getRel() {
-		return 'archive/' . $this->getHashPath() . $this->getArchiveName();
+		return $this->getArchiveRel( $this->getArchiveName() );
 	}
 
 	/**
 	 * @return string
 	 */
 	function getUrlRel() {
-		return 'archive/' . $this->getHashPath() . rawurlencode( $this->getArchiveName() );
+		return $this->getArchiveRel( rawurlencode( $this->getArchiveName() ) );
 	}
 
 	function upgradeRow() {
@@ -403,23 +366,22 @@ class OldLocalFile extends LocalFile {
 	 * Upload a file directly into archive. Generally for Special:Import.
 	 *
 	 * @param string $srcPath File system path of the source file
-	 * @param string $archiveName Full archive name of the file, in the form
-	 *   $timestamp!$filename, where $filename must match $this->getName()
 	 * @param string $timestamp
 	 * @param string $comment
 	 * @param User $user
 	 * @return Status
 	 */
-	function uploadOld( $srcPath, $archiveName, $timestamp, $comment, $user ) {
+	public function uploadOld( $srcPath, $timestamp, $comment, $user ) {
 		$this->lock();
 
-		$dstRel = 'archive/' . $this->getHashPath() . $archiveName;
+		$archiveName = $this->getArchiveName();
+		$dstRel = $this->getArchiveRel( $archiveName );
 		$status = $this->publishTo( $srcPath, $dstRel );
 
-		if ( $status->isGood() ) {
-			if ( !$this->recordOldUpload( $srcPath, $archiveName, $timestamp, $comment, $user ) ) {
-				$status->fatal( 'filenotfound', $srcPath );
-			}
+		if ( $status->isGood() &&
+			!$this->recordOldUpload( $srcPath, $archiveName, $timestamp, $comment, $user )
+		) {
+			$status->fatal( 'filenotfound', $srcPath );
 		}
 
 		$this->unlock();
@@ -446,7 +408,8 @@ class OldLocalFile extends LocalFile {
 			return false;
 		}
 
-		$commentFields = CommentStore::getStore()->insert( $dbw, 'oi_description', $comment );
+		$commentFields = MediaWikiServices::getInstance()->getCommentStore()
+			->insert( $dbw, 'oi_description', $comment );
 		$actorFields = ActorMigration::newMigration()->getInsertValues( $dbw, 'oi_user', $user );
 		$dbw->insert( 'oldimage',
 			[

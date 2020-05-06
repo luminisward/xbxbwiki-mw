@@ -107,8 +107,7 @@ class ForeignDBRepo extends LocalRepo {
 			'password' => $this->dbPassword,
 			'dbname' => $this->dbName,
 			'flags' => $this->dbFlags,
-			'tablePrefix' => $this->tablePrefix,
-			'foreign' => true,
+			'tablePrefix' => $this->tablePrefix
 		];
 
 		return function ( $index ) use ( $type, $params ) {
@@ -132,9 +131,8 @@ class ForeignDBRepo extends LocalRepo {
 	function getSharedCacheKey( /*...*/ ) {
 		if ( $this->hasSharedCache() ) {
 			$args = func_get_args();
-			array_unshift( $args, $this->dbName, $this->tablePrefix );
 
-			return call_user_func_array( 'wfForeignMemcKey', $args );
+			return wfForeignMemcKey( $this->dbName, $this->tablePrefix, ...$args );
 		} else {
 			return false;
 		}

@@ -25,6 +25,8 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+
 require_once __DIR__ . '/cleanupTable.inc';
 
 /**
@@ -32,7 +34,7 @@ require_once __DIR__ . '/cleanupTable.inc';
  *
  * @ingroup Maintenance
  */
-class ImageCleanup extends TableCleanup {
+class CleanupImages extends TableCleanup {
 	protected $defaultParams = [
 		'table' => 'image',
 		'conds' => [],
@@ -40,14 +42,15 @@ class ImageCleanup extends TableCleanup {
 		'callback' => 'processRow',
 	];
 
+	/** @var LocalRepo|null */
+	private $repo;
+
 	public function __construct() {
 		parent::__construct();
 		$this->addDescription( 'Script to clean up broken, unparseable upload filenames' );
 	}
 
 	protected function processRow( $row ) {
-		global $wgContLang;
-
 		$source = $row->img_name;
 		if ( $source == '' ) {
 			// Ye olde empty rows. Just kill them.
@@ -64,11 +67,13 @@ class ImageCleanup extends TableCleanup {
 		// We also have some HTML entities there
 		$cleaned = Sanitizer::decodeCharReferences( $cleaned );
 
+		$contLang = MediaWikiServices::getInstance()->getContentLanguage();
+
 		// Some are old latin-1
-		$cleaned = $wgContLang->checkTitleEncoding( $cleaned );
+		$cleaned = $contLang->checkTitleEncoding( $cleaned );
 
 		// Many of remainder look like non-normalized unicode
-		$cleaned = $wgContLang->normalize( $cleaned );
+		$cleaned = $contLang->normalize( $cleaned );
 
 		$title = Title::makeTitleSafe( NS_FILE, $cleaned );
 
@@ -109,8 +114,12 @@ class ImageCleanup extends TableCleanup {
 		}
 	}
 
+	/**
+	 * @param string $name
+	 * @return string
+	 */
 	private function filePath( $name ) {
-		if ( !isset( $this->repo ) ) {
+		if ( $this->repo === null ) {
 			$this->repo = RepoGroup::singleton()->getLocalRepo();
 		}
 
@@ -220,5 +229,5 @@ class ImageCleanup extends TableCleanup {
 	}
 }
 
-$maintClass = ImageCleanup::class;
+$maintClass = CleanupImages::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

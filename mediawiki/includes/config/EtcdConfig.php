@@ -161,6 +161,7 @@ class EtcdConfig implements Config, LoggerAwareInterface {
 						if ( is_array( $etcdResponse['config'] ) ) {
 							// Avoid having all servers expire cache keys at the same time
 							$expiry = microtime( true ) + $this->baseCacheTTL;
+							// @phan-suppress-next-line PhanTypeMismatchArgumentInternal
 							$expiry += mt_rand( 0, 1e6 ) / 1e6 * $this->skewCacheTTL;
 							$data = [
 								'config' => $etcdResponse['config'],
@@ -326,7 +327,7 @@ class EtcdConfig implements Config, LoggerAwareInterface {
 	private function unserialize( $string ) {
 		if ( $this->encoding === 'YAML' ) {
 			return yaml_parse( $string );
-		} else { // JSON
+		} else {
 			return json_decode( $string, true );
 		}
 	}

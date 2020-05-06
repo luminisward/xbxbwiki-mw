@@ -23,7 +23,7 @@
  * @file
  * @ingroup Site
  *
- * @license GNU GPL v2+
+ * @license GPL-2.0-or-later
  * @author Jeroen De Dauw < jeroendedauw@gmail.com >
  */
 class Site implements Serializable {
@@ -89,7 +89,7 @@ class Site implements Serializable {
 	 *
 	 * @since 1.21
 	 *
-	 * @var array[]
+	 * @var array[]|false
 	 */
 	protected $localIds = [];
 
@@ -354,7 +354,7 @@ class Site implements Serializable {
 
 	/**
 	 * Returns the full URL for the given page on the site.
-	 * Or false if the needed information is not known.
+	 * Or null if the needed information is not known.
 	 *
 	 * This generated URL is usually based upon the path returned by getLinkPath(),
 	 * but this is not a requirement.
@@ -365,13 +365,13 @@ class Site implements Serializable {
 	 *
 	 * @param bool|string $pageName
 	 *
-	 * @return string|bool
+	 * @return string|null
 	 */
 	public function getPageUrl( $pageName = false ) {
 		$url = $this->getLinkPath();
 
-		if ( $url === false ) {
-			return false;
+		if ( $url === null ) {
+			return null;
 		}
 
 		if ( $pageName !== false ) {
@@ -460,10 +460,10 @@ class Site implements Serializable {
 	 *
 	 * @since 1.21
 	 *
-	 * @param string $languageCode
+	 * @param string|null $languageCode
 	 */
 	public function setLanguageCode( $languageCode ) {
-		if ( !Language::isValidCode( $languageCode ) ) {
+		if ( $languageCode !== null && !Language::isValidCode( $languageCode ) ) {
 			throw new InvalidArgumentException( "$languageCode is not a valid language code." );
 		}
 		$this->languageCode = $languageCode;

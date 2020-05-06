@@ -5,7 +5,7 @@
 			"Pahles"
 		]
 	},
-	"cite-desc": "Voeg <nowiki><ref[ name=id]></nowiki> en <nowiki><references/></nowiki> tags toe veur citate",
+	"cite-desc": "Voeg <code>&lt;ref[ name=id]&gt;</code> en <code>&lt;references/&gt;</code> tags toe veur citate",
 	"cite_error": "Citeerfout: $1",
 	"cite_error_ref_numeric_key": "Ónzjuuste tag <code>&lt;ref&gt;</code>; de naam kin gein simpele integer zeen, gebroek 'ne besjrievendje titel",
 	"cite_error_ref_no_key": "'t Äöpeningslabel <code>&lt;ref&gt;</code> is ónjuus opgemaak of haet 'ne verkieërde naam.",

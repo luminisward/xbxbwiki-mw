@@ -20,7 +20,7 @@
  * @ingroup Media
  * @author Ævar Arnfjörð Bjarmason <avarab@gmail.com>
  * @copyright Copyright © 2005, Ævar Arnfjörð Bjarmason, 2009 Brent Garber
- * @license http://www.gnu.org/copyleft/gpl.html GNU General Public License
+ * @license GPL-2.0-or-later
  * @see http://exif.org/Exif2-2.PDF The Exif 2.2 specification
  * @file
  */
@@ -290,7 +290,7 @@ class Exif {
 			$this->byteOrder = 'BE'; // BE seems about twice as popular as LE in jpg's.
 		}
 
-		$this->debugFile( $this->basename, __FUNCTION__, true );
+		$this->debugFile( __FUNCTION__, true );
 		if ( function_exists( 'exif_read_data' ) ) {
 			Wikimedia\suppressWarnings();
 			$data = exif_read_data( $this->file, 0, true );
@@ -455,8 +455,7 @@ class Exif {
 			$val = substr( $this->mFilteredExifData[$prop], 8 );
 
 			switch ( $charCode ) {
-				case "\x4A\x49\x53\x00\x00\x00\x00\x00":
-					// JIS
+				case "JIS\x00\x00\x00\x00\x00":
 					$charset = "Shift-JIS";
 					break;
 				case "UNICODE\x00":
@@ -544,11 +543,12 @@ class Exif {
 		}
 	}
 
-	/**#@-*/
+	/** #@- */
 
-	/**#@+
+	/** #@+
 	 * @return array
 	 */
+
 	/**
 	 * Get $this->mRawExifData
 	 * @return array
@@ -565,7 +565,7 @@ class Exif {
 		return $this->mFilteredExifData;
 	}
 
-	/**#@-*/
+	/** #@- */
 
 	/**
 	 * The version of the output format
@@ -721,7 +721,7 @@ class Exif {
 		}
 	}
 
-	/**#@-*/
+	/** #@- */
 
 	/**
 	 * Validates if a tag has a legal value according to the Exif spec

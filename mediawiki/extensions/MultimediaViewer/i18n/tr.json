@@ -9,12 +9,11 @@
 			"Meelo",
 			"Sayginer",
 			"Violetanka",
-			"McAang"
+			"McAang",
+			"Hedda"
 		]
 	},
 	"multimediaviewer-desc": "Küçük resimleri daha büyük boyutlara genişleterek, tam ekran arayüzde gösterir.",
-	"multimediaviewer-pref": "Ortam Görüntüleyici",
-	"multimediaviewer-pref-desc": "Bu yeni araçla multimedya görüntüleme deneyiminizi geliştirin. Bu sayede küçük sayfaları daha büyük boyutlarda görüntüleyebilirsiniz. Ayrıca görüntüler tam ekran arayüzle ve tam boyutlu görüntülebeilir.",
 	"multimediaviewer-optin-pref": "<span class=\"plainlinks\">[https://www.mediawiki.org/wiki/Special:MyLanguage/Extension:Media_Viewer/About Ortam Görüntüleyici]</span>'yi etkinleştir",
 	"multimediaviewer-file-page": "İlgili dosya sayfasına git",
 	"multimediaviewer-repository-local": "Bu dosya hakkında daha fazla bilgi",
@@ -27,6 +26,7 @@
 	"multimediaviewer-license-default": "Lisansı göster",
 	"multimediaviewer-permission-title": "Lisans ayrıntıları",
 	"multimediaviewer-permission-link": "şartları görüntüle",
+	"multimediaviewer-permission-link-hide": "şartları gizle",
 	"multimediaviewer-permission-viewmore": "Daha fazla",
 	"multimediaviewer-about-mmv": "Ortam Görüntüleyici hakkında",
 	"multimediaviewer-discuss-mmv": "Bu özelliği tartış",

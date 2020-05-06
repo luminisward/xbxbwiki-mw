@@ -55,12 +55,77 @@
 		},
 		"requires": {
 			"type": "object",
-			"description": "Indicates what versions of MediaWiki core or extensions are required. This syntax may be extended in the future, for example to check dependencies between other services.",
+			"description": "Indicates what versions of PHP, MediaWiki core or extensions are required. This syntax may be extended in the future, for example to check dependencies between other services.",
 			"additionalProperties": false,
 			"properties": {
 				"MediaWiki": {
 					"type": "string",
 					"description": "Version constraint string against MediaWiki core."
+				},
+				"platform": {
+					"type": "object",
+					"description": "Indicates version constraints against platform services.",
+					"additionalProperties": false,
+					"properties": {
+						"php": {
+							"type": "string",
+							"description": "Version constraint string against PHP."
+						},
+						"ability-shell": {
+							"type": "boolean",
+							"default": false,
+							"description": "Whether this extension requires shell access."
+						}
+					},
+					"patternProperties": {
+						"^ext-": {
+							"type": "string",
+							"description": "Required PHP extension.",
+							"enum": ["*"]
+						}
+					}
+				},
+				"extensions": {
+					"type": "object",
+					"description": "Set of version constraint strings against specific extensions."
+				},
+				"skins": {
+					"type": "object",
+					"description": "Set of version constraint strings against specific skins."
+				}
+			}
+		},
+		"dev-requires": {
+			"type": "object",
+			"description": "Indicates what dependencies are required for development purposes such as running tests. This syntax may be extended in the future.",
+			"additionalProperties": false,
+			"properties": {
+				"MediaWiki": {
+					"type": "string",
+					"description": "Version constraint string against MediaWiki core."
+				},
+				"platform": {
+					"type": "object",
+					"description": "Indicates version constraints against platform services.",
+					"additionalProperties": false,
+					"properties": {
+						"php": {
+							"type": "string",
+							"description": "Version constraint string against PHP."
+						},
+						"ability-shell": {
+							"type": "boolean",
+							"default": false,
+							"description": "Whether this extension requires shell access."
+						}
+					},
+					"patternProperties": {
+						"^ext-": {
+							"type": "string",
+							"description": "Required PHP extension.",
+							"enum": ["*"]
+						}
+					}
 				},
 				"extensions": {
 					"type": "object",
@@ -235,6 +300,10 @@
 								"noflip": {
 									"type": "boolean",
 									"description": "Whether to skip CSSJanus LTR-to-RTL flipping for this module. Recommended for styles imported from libraries that already properly handle their RTL styles. Default is false, meaning CSSJanus will be applied on RTL-mode output."
+								},
+								"packageFiles": {
+									"type": ["object", "array"],
+									"description": "Package files that can be require()d"
 								}
 							}
 						},
@@ -285,6 +354,9 @@
 								"class": {
 									"enum": ["ResourceLoaderImageModule"]
 								},
+								"defaultColor": {
+									"type": "string"
+								},
 								"data": {
 									"type": "string"
 								},
@@ -299,6 +371,9 @@
 								},
 								"selectorWithVariant": {
 									"type": "string"
+								},
+								"useDataURI": {
+									"type": "boolean"
 								},
 								"variants": {
 									"type": "object"
@@ -319,7 +394,7 @@
 							"properties": {
 								"class": {
 									"type": "string",
-									"pattern": "^((?!ResourceLoader(File|Image)Module).)*$"
+									"pattern": "^(?!ResourceLoader(File|Image|Wiki)Module).*$"
 								}
 							},
 							"required": ["class"]
@@ -336,9 +411,9 @@
 			"type": "object",
 			"description": "ResourceLoader sources to register"
 		},
-		"ResourceLoaderLESSVars": {
+		"QUnitTestModule": {
 			"type": "object",
-			"description": "ResourceLoader LESS variables"
+			"description": "A ResourceLoaderFileModule definition registered only when wgEnableJavaScriptTest is true."
 		},
 		"ConfigRegistry": {
 			"type": "object",
@@ -565,11 +640,17 @@
 		},
 		"SpecialPages": {
 			"type": "object",
-			"description": "SpecialPages implemented in this extension (mapping of page name to class name)"
+			"description": "SpecialPages implemented in this extension (mapping of page name to class name or to ObjectFactory spec)"
 		},
 		"AutoloadNamespaces": {
 			"type": "object",
-			"description": "Mapping of PSR-4 compliant namespace to directory for autoloading"
+			"description": "Mapping of PSR-4 compliant namespace to directory for autoloading",
+			"patternProperties": {
+				"^[A-Za-z0-9\\\\]+\\\\$": {
+					"type": "string"
+				}
+			},
+			"additionalProperties": false
 		},
 		"AutoloadClasses": {
 			"type": "object"
@@ -649,6 +730,30 @@
 		"SkinOOUIThemes": {
 			"type": "object"
 		},
+		"OOUIThemePaths": {
+			"type": "object",
+			"description": "Map of custom OOUI theme names to paths to load them from. Same format as ResourceLoaderOOUIModule::$builtinThemePaths.",
+			"patternProperties": {
+				"^[A-Za-z]+$": {
+					"type": "object",
+					"additionalProperties": false,
+					"properties": {
+						"scripts": {
+							"type": "string",
+							"description": "Path to script file."
+						},
+						"styles": {
+							"type": "string",
+							"description": "Path to style files. '{module}' will be replaced with the module's name."
+						},
+						"images": {
+							"type": [ "string", "null" ],
+							"description": "Path to images (optional). '{module}' will be replaced with the module's name."
+						}
+					}
+				}
+			}
+		},
 		"PasswordPolicy": {
 			"type": "object",
 			"description": "Password policies"
@@ -658,6 +763,21 @@
 			"description": "Preferred file extensions for uploading",
 			"items": {
 				"type": "string"
+			}
+		},
+		"RawHtmlMessages": {
+			"type": "array",
+			"description": "Messages which are rendered as raw HTML",
+			"items": {
+				"type": "string"
+			}
+		},
+		"ReauthenticateTime": {
+			"type": "object",
+			"patternProperties": {
+				".*": {
+					"type": "integer"
+				}
 			}
 		},
 		"callback": {
@@ -697,7 +817,7 @@
 		},
 		"ParserTestFiles": {
 			"type": "array",
-			"description": "Parser test suite files to be run by parserTests.php when no specific filename is passed to it"
+			"description": "DEPRECATED: Parser test suite files to be run by parserTests.php when no specific filename is passed to it"
 		},
 		"ServiceWiringFiles": {
 			"type": "array",

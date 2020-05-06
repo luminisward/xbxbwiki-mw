@@ -45,10 +45,10 @@ if ( isset( $options['limit'] ) ) {
 	$limit = 1000;
 	$untilHappy = true;
 }
-$type = isset( $options['type'] ) ? $options['type'] : ConcatenatedGzipHistoryBlob::class;
+$type = $options['type'] ?? ConcatenatedGzipHistoryBlob::class;
 
-$dbr = $this->getDB( DB_REPLICA );
-$revQuery = Revision::getQueryInfo( [ 'page', 'text' ] );
+$dbr = wfGetDB( DB_REPLICA );
+$revQuery = Revision::getQueryInfo( [ 'page' ] );
 $res = $dbr->select(
 	$revQuery['tables'],
 	$revQuery['fields'],

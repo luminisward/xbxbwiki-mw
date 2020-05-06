@@ -14,7 +14,9 @@
 			"Macofe",
 			"Sujiniku",
 			"Otokoume",
-			"おはぐろ蜻蛉"
+			"おはぐろ蜻蛉",
+			"Omotecho",
+			"Aefgh39622"
 		]
 	},
 	"wikieditor": "高度なウィキテキスト編集インターフェイス",
@@ -23,7 +25,8 @@
 	"wikieditor-loading": "読み込み中...",
 	"wikieditor-toolbar": "編集ツールバー",
 	"wikieditor-toolbar-desc": "使いやすさの向上したページ編集ツールバー",
-	"wikieditor-toolbar-preference": "改良型編集ツールバーを有効にする",
+	"wikieditor-toolbar-preference": "編集ツールバーを有効にする",
+	"wikieditor-toolbar-preference-help": "これの別名は「2010年版ウィキテキストエディター」です。",
 	"wikieditor-toolbar-loading": "読み込み中...",
 	"wikieditor-toolbar-tool-bold": "太字",
 	"wikieditor-toolbar-tool-bold-example": "太字文",
@@ -136,6 +139,7 @@
 	"wikieditor-toolbar-tool-replace-success": "$1 {{PLURAL:$1|回置換}}されました。",
 	"wikieditor-toolbar-tool-replace-emptysearch": "検索するものを何も入力していません。",
 	"wikieditor-toolbar-tool-replace-invalidregex": "入力された正規表現に誤りがあります: $1",
+	"wikieditor-toolbar-tool-replace-word": "単語単位で探す",
 	"wikieditor-toolbar-section-characters": "特殊文字",
 	"wikieditor-toolbar-section-help": "ヘルプ",
 	"wikieditor-toolbar-help-heading-description": "解説",

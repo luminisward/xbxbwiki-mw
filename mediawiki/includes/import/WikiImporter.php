@@ -24,6 +24,8 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * XML file reader for the page data importer.
  *
@@ -31,7 +33,8 @@
  * @ingroup SpecialPage
  */
 class WikiImporter {
-	private $reader = null;
+	/** @var XMLReader */
+	private $reader;
 	private $foreignNamespaces = null;
 	private $mLogItemCallback, $mUploadCallback, $mRevisionCallback, $mPageCallback;
 	private $mSiteInfoCallback, $mPageOutCallback;
@@ -118,10 +121,7 @@ class WikiImporter {
 		wfDebug( "IMPORT: $data\n" );
 	}
 
-	public function notice( $msg /*, $param, ...*/ ) {
-		$params = func_get_args();
-		array_shift( $params );
-
+	public function notice( $msg, ...$params ) {
 		if ( is_callable( $this->mNoticeCallback ) ) {
 			call_user_func( $this->mNoticeCallback, $msg, $params );
 		} else { # No ImportReporter -> CLI
@@ -258,7 +258,7 @@ class WikiImporter {
 			return true;
 		} elseif (
 			$namespace >= 0 &&
-			MWNamespace::exists( intval( $namespace ) )
+			MediaWikiServices::getInstance()->getNamespaceInfo()->exists( intval( $namespace ) )
 		) {
 			$namespace = intval( $namespace );
 			$this->setImportTitleFactory( new NamespaceImportTitleFactory( $namespace ) );
@@ -284,19 +284,19 @@ class WikiImporter {
 
 			if ( !$title || $title->isExternal() ) {
 				$status->fatal( 'import-rootpage-invalid' );
+			} elseif (
+				!MediaWikiServices::getInstance()->getNamespaceInfo()->
+				hasSubpages( $title->getNamespace() )
+			) {
+				$displayNSText = $title->getNamespace() == NS_MAIN
+					? wfMessage( 'blanknamespace' )->text()
+					: MediaWikiServices::getInstance()->getContentLanguage()->
+						getNsText( $title->getNamespace() );
+				$status->fatal( 'import-rootpage-nosubpage', $displayNSText );
 			} else {
-				if ( !MWNamespace::hasSubpages( $title->getNamespace() ) ) {
-					global $wgContLang;
-
-					$displayNSText = $title->getNamespace() == NS_MAIN
-						? wfMessage( 'blanknamespace' )->text()
-						: $wgContLang->getNsText( $title->getNamespace() );
-					$status->fatal( 'import-rootpage-nosubpage', $displayNSText );
-				} else {
-					// set namespace to 'all', so the namespace check in processTitle() can pass
-					$this->setTargetNamespace( null );
-					$this->setImportTitleFactory( new SubpageImportTitleFactory( $title ) );
-				}
+				// set namespace to 'all', so the namespace check in processTitle() can pass
+				$this->setTargetNamespace( null );
+				$this->setImportTitleFactory( new SubpageImportTitleFactory( $title ) );
 			}
 		}
 		return $status;
@@ -431,8 +431,7 @@ class WikiImporter {
 			}
 		}
 
-		$args = func_get_args();
-		return Hooks::run( 'AfterImportPage', $args );
+		return Hooks::run( 'AfterImportPage', func_get_args() );
 	}
 
 	/**
@@ -468,7 +467,7 @@ class WikiImporter {
 
 	/**
 	 * Notify the callback function when a new "<page>" is reached.
-	 * @param Title $title
+	 * @param array $title
 	 */
 	function pageCallback( $title ) {
 		if ( isset( $this->mPageCallback ) ) {
@@ -487,8 +486,7 @@ class WikiImporter {
 	private function pageOutCallback( $title, $foreignTitle, $revCount,
 			$sucCount, $pageInfo ) {
 		if ( isset( $this->mPageOutCallback ) ) {
-			$args = func_get_args();
-			call_user_func_array( $this->mPageOutCallback, $args );
+			call_user_func_array( $this->mPageOutCallback, func_get_args() );
 		}
 	}
 
@@ -535,7 +533,7 @@ class WikiImporter {
 	 * Fetches text contents of the current element, assuming
 	 * no sub-elements or such scary things.
 	 * @return string
-	 * @access private
+	 * @private
 	 */
 	public function nodeContents() {
 		if ( $this->reader->isEmptyElement ) {
@@ -741,6 +739,9 @@ class WikiImporter {
 		return $this->logItemCallback( $revision );
 	}
 
+	/**
+	 * @suppress PhanTypeInvalidDimOffset Phan not reading the reference inside the hook
+	 */
 	private function handlePage() {
 		// Handle page data.
 		$this->debug( "Enter page handler." );
@@ -784,7 +785,7 @@ class WikiImporter {
 			} elseif ( $tag == 'revision' || $tag == 'upload' ) {
 				if ( !isset( $title ) ) {
 					$title = $this->processTitle( $pageInfo['title'],
-						isset( $pageInfo['ns'] ) ? $pageInfo['ns'] : null );
+						$pageInfo['ns'] ?? null );
 
 					// $title is either an array of two titles or false.
 					if ( is_array( $title ) ) {
@@ -892,6 +893,7 @@ class WikiImporter {
 				) . " exceeds the maximum allowable size ($wgMaxArticleSize KB)" );
 		}
 
+		// FIXME: process schema version 11!
 		$revision = new WikiRevision( $this->config );
 
 		if ( isset( $revisionInfo['id'] ) ) {
@@ -913,11 +915,7 @@ class WikiImporter {
 
 			$revision->setText( $text );
 		}
-		if ( isset( $revisionInfo['timestamp'] ) ) {
-			$revision->setTimestamp( $revisionInfo['timestamp'] );
-		} else {
-			$revision->setTimestamp( wfTimestampNow() );
-		}
+		$revision->setTimestamp( $revisionInfo['timestamp'] ?? wfTimestampNow() );
 
 		if ( isset( $revisionInfo['comment'] ) ) {
 			$revision->setComment( $revisionInfo['comment'] );
@@ -1015,7 +1013,7 @@ class WikiImporter {
 	 */
 	private function processUpload( $pageInfo, $uploadInfo ) {
 		$revision = new WikiRevision( $this->config );
-		$text = isset( $uploadInfo['text'] ) ? $uploadInfo['text'] : '';
+		$text = $uploadInfo['text'] ?? '';
 
 		$revision->setTitle( $pageInfo['_title'] );
 		$revision->setID( $pageInfo['id'] );
@@ -1105,14 +1103,23 @@ class WikiImporter {
 		} elseif ( !$title->canExist() ) {
 			$this->notice( 'import-error-special', $title->getPrefixedText() );
 			return false;
-		} elseif ( !$title->userCan( 'edit' ) && !$commandLineMode ) {
-			# Do not import if the importing wiki user cannot edit this page
-			$this->notice( 'import-error-edit', $title->getPrefixedText() );
-			return false;
-		} elseif ( !$title->exists() && !$title->userCan( 'create' ) && !$commandLineMode ) {
-			# Do not import if the importing wiki user cannot create this page
-			$this->notice( 'import-error-create', $title->getPrefixedText() );
-			return false;
+		} elseif ( !$commandLineMode ) {
+			$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
+			$user = RequestContext::getMain()->getUser();
+
+			if ( !$permissionManager->userCan( 'edit', $user, $title ) ) {
+				# Do not import if the importing wiki user cannot edit this page
+				$this->notice( 'import-error-edit', $title->getPrefixedText() );
+
+				return false;
+			}
+
+			if ( !$title->exists() && !$permissionManager->userCan( 'create', $user, $title ) ) {
+				# Do not import if the importing wiki user cannot create this page
+				$this->notice( 'import-error-create', $title->getPrefixedText() );
+
+				return false;
+			}
 		}
 
 		return [ $title, $foreignTitle ];

@@ -35,8 +35,14 @@ class ApiQueryBacklinks extends ApiQueryGeneratorBase {
 	 */
 	private $rootTitle;
 
-	private $params, $cont, $redirect;
+	private $params;
+	/** @var array */
+	private $cont;
+	private $redirect;
 	private $bl_ns, $bl_from, $bl_from_ns, $bl_table, $bl_code, $bl_title, $bl_fields, $hasNS;
+
+	/** @var string */
+	private $helpUrl;
 
 	/**
 	 * Maps ns and title to pageid
@@ -187,7 +193,7 @@ class ApiQueryBacklinks extends ApiQueryGeneratorBase {
 			}
 
 			if ( is_null( $resultPageSet ) ) {
-				$a = [ 'pageid' => intval( $row->page_id ) ];
+				$a = [ 'pageid' => (int)$row->page_id ];
 				ApiQueryBase::addTitleInfo( $a, $t );
 				if ( $row->page_is_redirect ) {
 					$a['redirect'] = true;
@@ -306,7 +312,7 @@ class ApiQueryBacklinks extends ApiQueryGeneratorBase {
 			}
 
 			if ( is_null( $resultPageSet ) ) {
-				$a['pageid'] = intval( $row->page_id );
+				$a = [ 'pageid' => (int)$row->page_id ];
 				ApiQueryBase::addTitleInfo( $a, Title::makeTitle( $row->page_namespace, $row->page_title ) );
 				if ( $row->page_is_redirect ) {
 					$a['redirect'] = true;
@@ -336,7 +342,7 @@ class ApiQueryBacklinks extends ApiQueryGeneratorBase {
 			$this->params['limit'] = $this->getMain()->canApiHighLimits() ? $botMax : $userMax;
 			$result->addParsedLimit( $this->getModuleName(), $this->params['limit'] );
 		} else {
-			$this->params['limit'] = intval( $this->params['limit'] );
+			$this->params['limit'] = (int)$this->params['limit'];
 			$this->validateLimit( 'limit', $this->params['limit'], 1, $userMax, $botMax );
 		}
 
@@ -418,7 +424,7 @@ class ApiQueryBacklinks extends ApiQueryGeneratorBase {
 		if ( is_null( $resultPageSet ) ) {
 			// Try to add the result data in one go and pray that it fits
 			$code = $this->bl_code;
-			$data = array_map( function ( $arr ) use ( $result, $code ) {
+			$data = array_map( function ( $arr ) use ( $code ) {
 				if ( isset( $arr['redirlinks'] ) ) {
 					$arr['redirlinks'] = array_values( $arr['redirlinks'] );
 					ApiResult::setIndexedTagName( $arr['redirlinks'], $code );

@@ -60,6 +60,7 @@ class LanguageUzTest extends LanguageClassesTestCase {
 	}
 
 	# #### HELPERS #####################################################
+
 	/**
 	 * Wrapper to verify text stay the same after applying conversion
 	 * @param string $text Text to convert
@@ -90,7 +91,7 @@ class LanguageUzTest extends LanguageClassesTestCase {
 
 	/**
 	 * Verifiy the given Cyrillic text is not converted when using
-	 * using the cyrillic variant and converted to Latin when using
+	 * using the Cyrillic variant and converted to Latin when using
 	 * the Latin variant.
 	 * @param string $text Text to convert
 	 * @param string $msg Optional message
@@ -112,7 +113,7 @@ class LanguageUzTest extends LanguageClassesTestCase {
 		$this->assertConverted( $text, 'uz-cyrl', $msg );
 	}
 
-	/** Wrapper for converter::convertTo() method*/
+	/** Wrapper for converter::convertTo() method */
 	protected function convertTo( $text, $variant ) {
 		return $this->getLang()->mConverter->convertTo( $text, $variant );
 	}

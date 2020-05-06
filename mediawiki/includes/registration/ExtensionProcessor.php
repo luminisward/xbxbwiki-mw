@@ -45,10 +45,11 @@ class ExtensionProcessor implements Processor {
 		'MediaHandlers',
 		'PasswordPolicy',
 		'RateLimits',
+		'RawHtmlMessages',
+		'ReauthenticateTime',
 		'RecentChangesFlags',
 		'RemoveCredentialsBlacklist',
 		'RemoveGroups',
-		'ResourceLoaderLESSVars',
 		'ResourceLoaderSources',
 		'RevokePermissions',
 		'SessionProviders',
@@ -64,6 +65,7 @@ class ExtensionProcessor implements Processor {
 	protected static $coreAttributes = [
 		'SkinOOUIThemes',
 		'TrackingCategories',
+		'RestRoutes',
 	];
 
 	/**
@@ -106,7 +108,7 @@ class ExtensionProcessor implements Processor {
 	];
 
 	/**
-	 * Things that are not 'attributes', but are not in
+	 * Things that are not 'attributes', and are not in
 	 * $globalSettings or $creditsAttributes.
 	 *
 	 * @var array
@@ -118,6 +120,8 @@ class ExtensionProcessor implements Processor {
 		'ResourceFileModulePaths',
 		'ResourceModules',
 		'ResourceModuleSkinStyles',
+		'OOUIThemePaths',
+		'QUnitTestModule',
 		'ExtensionMessagesFiles',
 		'MessagesDirs',
 		'type',
@@ -163,6 +167,11 @@ class ExtensionProcessor implements Processor {
 	protected $credits = [];
 
 	/**
+	 * @var array
+	 */
+	protected $config = [];
+
+	/**
 	 * Any thing else in the $info that hasn't
 	 * already been processed
 	 *
@@ -182,7 +191,6 @@ class ExtensionProcessor implements Processor {
 	 * @param string $path
 	 * @param array $info
 	 * @param int $version manifest_version for info
-	 * @return array
 	 */
 	public function extractInfo( $path, array $info, $version ) {
 		$dir = dirname( $path );
@@ -290,6 +298,7 @@ class ExtensionProcessor implements Processor {
 
 		return [
 			'globals' => $this->globals,
+			'config' => $this->config,
 			'defines' => $this->defines,
 			'callbacks' => $this->callbacks,
 			'credits' => $this->credits,
@@ -297,8 +306,76 @@ class ExtensionProcessor implements Processor {
 		];
 	}
 
-	public function getRequirements( array $info ) {
-		return isset( $info['requires'] ) ? $info['requires'] : [];
+	public function getRequirements( array $info, $includeDev ) {
+		// Quick shortcuts
+		if ( !$includeDev || !isset( $info['dev-requires'] ) ) {
+			return $info['requires'] ?? [];
+		}
+
+		if ( !isset( $info['requires'] ) ) {
+			return $info['dev-requires'] ?? [];
+		}
+
+		// OK, we actually have to merge everything
+		$merged = [];
+
+		// Helper that combines version requirements by
+		// picking the non-null if one is, or combines
+		// the two. Note that it is not possible for
+		// both inputs to be null.
+		$pick = function ( $a, $b ) {
+			if ( $a === null ) {
+				return $b;
+			} elseif ( $b === null ) {
+				return $a;
+			} else {
+				return "$a $b";
+			}
+		};
+
+		$req = $info['requires'];
+		$dev = $info['dev-requires'];
+		if ( isset( $req['MediaWiki'] ) || isset( $dev['MediaWiki'] ) ) {
+			$merged['MediaWiki'] = $pick(
+				$req['MediaWiki'] ?? null,
+				$dev['MediaWiki'] ?? null
+			);
+		}
+
+		$platform = array_merge(
+			array_keys( $req['platform'] ?? [] ),
+			array_keys( $dev['platform'] ?? [] )
+		);
+		if ( $platform ) {
+			foreach ( $platform as $pkey ) {
+				if ( $pkey === 'php' ) {
+					$value = $pick(
+						$req['platform']['php'] ?? null,
+						$dev['platform']['php'] ?? null
+					);
+				} else {
+					// Prefer dev value, but these should be constant
+					// anyways (ext-* and ability-*)
+					$value = $dev['platform'][$pkey] ?? $req['platform'][$pkey];
+				}
+				$merged['platform'][$pkey] = $value;
+			}
+		}
+
+		foreach ( [ 'extensions', 'skins' ] as $thing ) {
+			$things = array_merge(
+				array_keys( $req[$thing] ?? [] ),
+				array_keys( $dev[$thing] ?? [] )
+			);
+			foreach ( $things as $name ) {
+				$merged[$thing][$name] = $pick(
+					$req[$thing][$name] ?? null,
+					$dev[$thing][$name] ?? null
+				);
+			}
+		}
+
+		return $merged;
 	}
 
 	protected function extractHooks( array $info ) {
@@ -359,9 +436,7 @@ class ExtensionProcessor implements Processor {
 	}
 
 	protected function extractResourceLoaderModules( $dir, array $info ) {
-		$defaultPaths = isset( $info['ResourceFileModulePaths'] )
-			? $info['ResourceFileModulePaths']
-			: false;
+		$defaultPaths = $info['ResourceFileModulePaths'] ?? false;
 		if ( isset( $defaultPaths['localBasePath'] ) ) {
 			if ( $defaultPaths['localBasePath'] === '' ) {
 				// Avoid double slashes (e.g. /extensions/Example//path)
@@ -371,7 +446,7 @@ class ExtensionProcessor implements Processor {
 			}
 		}
 
-		foreach ( [ 'ResourceModules', 'ResourceModuleSkinStyles' ] as $setting ) {
+		foreach ( [ 'ResourceModules', 'ResourceModuleSkinStyles', 'OOUIThemePaths' ] as $setting ) {
 			if ( isset( $info[$setting] ) ) {
 				foreach ( $info[$setting] as $name => $data ) {
 					if ( isset( $data['localBasePath'] ) ) {
@@ -385,9 +460,26 @@ class ExtensionProcessor implements Processor {
 					if ( $defaultPaths ) {
 						$data += $defaultPaths;
 					}
-					$this->globals["wg$setting"][$name] = $data;
+					if ( $setting === 'OOUIThemePaths' ) {
+						$this->attributes[$setting][$name] = $data;
+					} else {
+						$this->globals["wg$setting"][$name] = $data;
+					}
 				}
 			}
+		}
+
+		if ( isset( $info['QUnitTestModule'] ) ) {
+			$data = $info['QUnitTestModule'];
+			if ( isset( $data['localBasePath'] ) ) {
+				if ( $data['localBasePath'] === '' ) {
+					// Avoid double slashes (e.g. /extensions/Example//path)
+					$data['localBasePath'] = $dir;
+				} else {
+					$data['localBasePath'] = "$dir/{$data['localBasePath']}";
+				}
+			}
+			$this->attributes['QUnitTestModules']["test.{$info['name']}"] = $data;
 		}
 	}
 
@@ -426,7 +518,7 @@ class ExtensionProcessor implements Processor {
 	protected function extractCredits( $path, array $info ) {
 		$credits = [
 			'path' => $path,
-			'type' => isset( $info['type'] ) ? $info['type'] : 'other',
+			'type' => $info['type'] ?? 'other',
 		];
 		foreach ( self::$creditsAttributes as $attr ) {
 			if ( isset( $info[$attr] ) ) {
@@ -480,11 +572,7 @@ class ExtensionProcessor implements Processor {
 	 * @param string $dir
 	 */
 	protected function extractConfig2( array $info, $dir ) {
-		if ( isset( $info['config_prefix'] ) ) {
-			$prefix = $info['config_prefix'];
-		} else {
-			$prefix = 'wg';
-		}
+		$prefix = $info['config_prefix'] ?? 'wg';
 		if ( isset( $info['config'] ) ) {
 			foreach ( $info['config'] as $key => $data ) {
 				$value = $data['value'];
@@ -495,6 +583,11 @@ class ExtensionProcessor implements Processor {
 					$value = "$dir/$value";
 				}
 				$this->addConfigGlobal( "$prefix$key", $value, $info['name'] );
+				$data['providedby'] = $info['name'];
+				if ( isset( $info['ConfigRegistry'][0] ) ) {
+					$data['configregistry'] = array_keys( $info['ConfigRegistry'] )[0];
+				}
+				$this->config[$key] = $data;
 			}
 		}
 	}

@@ -23,6 +23,7 @@
 
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 /**
  * Helper class to manage Redis connections.
@@ -81,9 +82,7 @@ class RedisConnectionPool implements LoggerAwareInterface {
 				__CLASS__ . ' requires a Redis client library. ' .
 				'See https://www.mediawiki.org/wiki/Redis#Setup' );
 		}
-		$this->logger = isset( $options['logger'] )
-			? $options['logger']
-			: new \Psr\Log\NullLogger();
+		$this->logger = $options['logger'] ?? new NullLogger();
 		$this->connectTimeout = $options['connectTimeout'];
 		$this->readTimeout = $options['readTimeout'];
 		$this->persistent = $options['persistent'];
@@ -91,6 +90,10 @@ class RedisConnectionPool implements LoggerAwareInterface {
 		if ( !isset( $options['serializer'] ) || $options['serializer'] === 'php' ) {
 			$this->serializer = Redis::SERIALIZER_PHP;
 		} elseif ( $options['serializer'] === 'igbinary' ) {
+			if ( !defined( 'Redis::SERIALIZER_IGBINARY' ) ) {
+				throw new InvalidArgumentException(
+					__CLASS__ . ': configured serializer "igbinary" not available' );
+			}
 			$this->serializer = Redis::SERIALIZER_IGBINARY;
 		} elseif ( $options['serializer'] === 'none' ) {
 			$this->serializer = Redis::SERIALIZER_NONE;
@@ -100,10 +103,6 @@ class RedisConnectionPool implements LoggerAwareInterface {
 		$this->id = $id;
 	}
 
-	/**
-	 * @param LoggerInterface $logger
-	 * @return null
-	 */
 	public function setLogger( LoggerInterface $logger ) {
 		$this->logger = $logger;
 	}
@@ -170,11 +169,14 @@ class RedisConnectionPool implements LoggerAwareInterface {
 	 *
 	 * @param string $server A hostname/port combination or the absolute path of a UNIX socket.
 	 *                       If a hostname is specified but no port, port 6379 will be used.
-	 * @param LoggerInterface $logger PSR-3 logger intance. [optional]
-	 * @return RedisConnRef|bool Returns false on failure
+	 * @param LoggerInterface|null $logger PSR-3 logger intance. [optional]
+	 * @return RedisConnRef|Redis|bool Returns false on failure
 	 * @throws MWException
 	 */
 	public function getConnection( $server, LoggerInterface $logger = null ) {
+		// The above @return also documents 'Redis' for convenience with IDEs.
+		// RedisConnRef uses PHP magic methods, which wouldn't be recognised.
+
 		$logger = $logger ?: $this->logger;
 		// Check the listing "dead" servers which have had a connection errors.
 		// Servers are marked dead for a limited period of time, to
@@ -247,13 +249,11 @@ class RedisConnectionPool implements LoggerAwareInterface {
 
 				return false;
 			}
-			if ( $this->password !== null ) {
-				if ( !$conn->auth( $this->password ) ) {
-					$logger->error(
-						'Authentication error connecting to "{redis_server}"',
-						[ 'redis_server' => $server ]
-					);
-				}
+			if ( ( $this->password !== null ) && !$conn->auth( $this->password ) ) {
+				$logger->error(
+					'Authentication error connecting to "{redis_server}"',
+					[ 'redis_server' => $server ]
+				);
 			}
 		} catch ( RedisException $e ) {
 			$this->downServers[$server] = time() + self::SERVER_DOWN_TTL;
@@ -366,15 +366,13 @@ class RedisConnectionPool implements LoggerAwareInterface {
 	 * @return bool Success
 	 */
 	public function reauthenticateConnection( $server, Redis $conn ) {
-		if ( $this->password !== null ) {
-			if ( !$conn->auth( $this->password ) ) {
-				$this->logger->error(
-					'Authentication error connecting to "{redis_server}"',
-					[ 'redis_server' => $server ]
-				);
+		if ( $this->password !== null && !$conn->auth( $this->password ) ) {
+			$this->logger->error(
+				'Authentication error connecting to "{redis_server}"',
+				[ 'redis_server' => $server ]
+			);
 
-				return false;
-			}
+			return false;
 		}
 
 		return true;
@@ -384,7 +382,7 @@ class RedisConnectionPool implements LoggerAwareInterface {
 	 * Adjust or reset the connection handle read timeout value
 	 *
 	 * @param Redis $conn
-	 * @param int $timeout Optional
+	 * @param int|null $timeout Optional
 	 */
 	public function resetTimeout( Redis $conn, $timeout = null ) {
 		$conn->setOption( Redis::OPT_READ_TIMEOUT, $timeout ?: $this->readTimeout );

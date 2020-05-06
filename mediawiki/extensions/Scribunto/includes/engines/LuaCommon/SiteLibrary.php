@@ -1,13 +1,14 @@
 <?php
 
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
+use MediaWiki\MediaWikiServices;
+
 class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 	private static $namespacesCacheLang = null;
 	private static $namespacesCache = null;
 	private static $interwikiMapCache = [];
 	private $pagesInCategoryCache = [];
 
-	function register() {
+	public function register() {
 		global $wgContLang, $wgNamespaceAliases;
 
 		$lib = [
@@ -90,6 +91,13 @@ class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 		return $this->getEngine()->registerInterface( 'mw.site.lua', $lib, $info );
 	}
 
+	/**
+	 * Handler for pagesInCategory
+	 * @internal
+	 * @param string|null $category
+	 * @param string|null $which
+	 * @return int[]|int[][]
+	 */
 	public function pagesInCategory( $category = null, $which = null ) {
 		$this->checkType( 'pagesInCategory', 1, $category, 'string' );
 		$this->checkTypeOptional( 'pagesInCategory', 2, $which, 'string', 'all' );
@@ -122,16 +130,34 @@ class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 		return [ $this->pagesInCategoryCache[$cacheKey][$which] ];
 	}
 
+	/**
+	 * Handler for pagesInNamespace
+	 * @internal
+	 * @param int|string|null $ns
+	 * @return int[]
+	 */
 	public function pagesInNamespace( $ns = null ) {
 		$this->checkType( 'pagesInNamespace', 1, $ns, 'number' );
 		return [ (int)SiteStats::pagesInNs( intval( $ns ) ) ];
 	}
 
+	/**
+	 * Handler for usersInGroup
+	 * @internal
+	 * @param string|null $group
+	 * @return int[]
+	 */
 	public function usersInGroup( $group = null ) {
 		$this->checkType( 'usersInGroup', 1, $group, 'string' );
 		return [ (int)SiteStats::numberingroup( strtolower( $group ) ) ];
 	}
 
+	/**
+	 * Handler for getNsIndex
+	 * @internal
+	 * @param string|null $name
+	 * @return int[]|bool[]
+	 */
 	public function getNsIndex( $name = null ) {
 		global $wgContLang;
 		$this->checkType( 'getNsIndex', 1, $name, 'string' );
@@ -140,6 +166,12 @@ class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 		return [ $wgContLang->getNsIndex( $name ) ];
 	}
 
+	/**
+	 * Handler for interwikiMap
+	 * @internal
+	 * @param string|null $filter
+	 * @return array[]
+	 */
 	public function interwikiMap( $filter = null ) {
 		global $wgLocalInterwikis, $wgExtraInterlanguageLinkPrefixes;
 		$this->checkTypeOptional( 'interwikiMap', 1, $filter, 'string', null );
@@ -158,7 +190,8 @@ class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 			// Not expensive because we can have a max of three cache misses in the
 			// entire page parse.
 			$interwikiMap = [];
-			$prefixes = Interwiki::getAllPrefixes( $local );
+			$lookup = MediaWikiServices::getInstance()->getInterwikiLookup();
+			$prefixes = $lookup->getAllPrefixes( $local );
 			foreach ( $prefixes as $row ) {
 				$prefix = $row['iw_prefix'];
 				$val = [

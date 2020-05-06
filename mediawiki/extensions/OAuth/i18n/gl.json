@@ -1,11 +1,12 @@
 {
 	"@metadata": {
 		"authors": [
-			"Elisardojm",
-			"Toliño",
-			"Fisterraeomar",
 			"Banjo",
-			"Macofe"
+			"Elisardojm",
+			"Fisterraeomar",
+			"Iváns",
+			"Macofe",
+			"Toliño"
 		]
 	},
 	"mwoauth-desc": "Permite o uso do OAuth 1.0a para autorización de API",
@@ -40,6 +41,7 @@
 	"mwoauth-consumer-restrictions": "Restricións de uso:",
 	"mwoauth-consumer-restrictions-json": "Restricións de uso (JSON):",
 	"mwoauth-consumer-rsakey": "Clave pública RSA (opcional):",
+	"mwoauth-consumer-rsakey-help": "Introducir unha chave pública para usar o método de sinatura RSA-SHA1. Deixar baleiro para usar HMAC-SHA1 cun segredo aleatorio. En caso de non estar seguro, deixalo baleiro.",
 	"mwoauth-consumer-secretkey": "Pase secreto do consumidor:",
 	"mwoauth-consumer-accesstoken": "Pase de acceso:",
 	"mwoauth-consumer-reason": "Motivo:",
@@ -65,7 +67,6 @@
 	"mwoauth-consumer-stage-disabled": "desactivado",
 	"mwoauth-consumer-stage-suppressed": "suprimido",
 	"oauthconsumerregistration": "Rexistro de consumidor OAuth",
-	"mwoauthconsumerregistration-notloggedin": "Debe acceder ao sistema para acceder a esta páxina.",
 	"mwoauthconsumerregistration-navigation": "Navegación:",
 	"mwoauthconsumerregistration-propose": "Propoñer un novo consumidor",
 	"mwoauthconsumerregistration-list": "A miña lista de consumidores",
@@ -163,8 +164,7 @@
 	"mwoauthlistconsumers-status-rejected": "rexeitado",
 	"mwoauthlistconsumers-status-expired": "caducado",
 	"oauthmanagemygrants": "Administrar as aplicacións conectadas",
-	"mwoauthmanagemygrants-text": "Esta páxina mostra as aplicacións que poden utilizar a súa conta. Para calquera aplicación, o alcance do seu acceso está limitado polos permisos que se lle outorgaron no momento de autorizala. Se autorizou unha aplicación para que acceda a varios proxectos no seu nome, verá axustes separados a continuación por cada un dos proxectos.\n\nAs aplicacións conectadas acceden á súa conta mediante o protocolo OAuth. <span class=\"plainlinks\">([https://www.mediawiki.org/wiki/Special:MyLanguage/Help:OAuth Máis información sobre as aplicacións conectadas])</span>",
-	"mwoauthmanagemygrants-notloggedin": "Debe acceder ao sistema para acceder a esta páxina.",
+	"mwoauthmanagemygrants-text": "Esta páxina amosa as aplicacións que poden utilizar a súa conta. Para calquera aplicación, o alcance do seu acceso está limitado polos permisos que se lle outorgaron no momento de autorizala. Se autorizou unha aplicación para que acceda a varios proxectos no seu nome, verá axustes separados a continuación por cada un dos proxectos.\n\nAs aplicacións conectadas acceden á súa conta mediante o protocolo OAuth. <span class=\"plainlinks\">([https://www.mediawiki.org/wiki/Special:MyLanguage/Help:OAuth Máis información sobre as aplicacións conectadas])</span>",
 	"mwoauthmanagemygrants-navigation": "Navegación:",
 	"mwoauthmanagemygrants-showlist": "Lista de aplicacións conectadas",
 	"mwoauthmanagemygrants-none": "Non hai aplicacións conectadas coa súa conta.",
@@ -215,7 +215,7 @@
 	"mwoauthserver-invalid-request-token": "Pase non válido na súa solicitude",
 	"mwoauthserver-invalid-user": "Para usar Aplicacións conectadas neste sitio, vostede debe ter unha conta en todos os proxectos. Cando teña unha conta en todos os proxectos, vostede pode intentar conectar de novo con \"$1\".\n\n<span class=\"plainlinks mw-mwoautherror-details\">Necesaria conexión unificada, $2</span>",
 	"mwoauthserver-consumer-no-secret": "Algo foi mal ó conectar esta aplicación.\n\n<span class=\"plainlinks mw-mwoautherror-details\">O consumidor non ten unha clave secreta, $1</span>",
-	"mwoauthserver-consumer-owner-only": "\"$1\" é unha Aplicación Conectada reservada ó propietario. Para buscar o identificador de acceso, vexa [[$2]].\n\n<span class=\"plainlinks mw-mwoautherror-details\">O consumidor está reservado ó propietario, $3</span>",
+	"mwoauthserver-consumer-owner-only": "\"$1\" é unha Aplicación Conectada reservada ó propietario. Para procurar o identificador de acceso, vexa [[$2]].\n\n<span class=\"plainlinks mw-mwoautherror-details\">O consumidor está reservado ó propietario, $3</span>",
 	"mwoauth-invalid-authorization-title": "Erro de autorización OAuth",
 	"mwoauth-invalid-authorization": "As cabeceiras de autorización da súa solicitude non son válidas: $1",
 	"mwoauth-invalid-authorization-wrong-wiki": "As cabeceiras de autorización da súa solicitude non son válidas para $1",

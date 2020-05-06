@@ -20,16 +20,20 @@ namespace MediaWiki\Extensions\OAuth;
 if ( getenv( 'MW_INSTALL_PATH' ) ) {
 	$IP = getenv( 'MW_INSTALL_PATH' );
 } else {
-	$IP = __DIR__.'/../../..';
+	$IP = __DIR__ . '/../../..';
 }
 
 require_once "$IP/maintenance/Maintenance.php";
 
+use MediaWiki\Extensions\OAuth\Backend\Consumer;
+use MediaWiki\Extensions\OAuth\Backend\ConsumerAcceptance;
+use MediaWiki\MediaWikiServices;
+
 class MigrateCentralWiki extends \Maintenance {
 	public function __construct() {
 		parent::__construct();
-		$this->mDescription = "Migrate central wiki from one wiki to another. " .
-			"OAuth should be in Read Only mode while this is running.";
+		$this->addDescription( "Migrate central wiki from one wiki to another. " .
+			"OAuth should be in Read Only mode while this is running." );
 		$this->addOption( 'old', 'Previous central wiki', true, true );
 		$this->addOption( 'target', 'New central wiki', true, true );
 		$this->addOption( 'table',
@@ -45,19 +49,22 @@ class MigrateCentralWiki extends \Maintenance {
 
 		if ( $table === 'oauth_registered_consumer' ) {
 			$idKey = 'oarc_id';
-			$cmrClass = 'MediaWiki\Extensions\OAuth\MWOAuthConsumer';
+			$cmrClass = Consumer::class;
 			$type = 'consumer';
 		} elseif ( $table === 'oauth_accepted_consumer' ) {
 			$idKey = 'oaac_id';
-			$cmrClass = 'MediaWiki\Extensions\OAuth\MWOAuthConsumerAcceptance';
+			$cmrClass = ConsumerAcceptance::class;
 			$type = 'grant';
 		} else {
 			$this->error( "Invalid table name. Must be one of 'oauth_registered_consumer' " .
 				"or 'oauth_accepted_consumer'.\n", 1 );
+			throw new \LogicException();
 		}
 
-		$oldDb = wfGetLB( $oldWiki )->getConnectionRef( DB_MASTER, [], $oldWiki );
-		$targetDb = wfGetLB( $targetWiki )->getConnectionRef( DB_MASTER, [], $targetWiki );
+		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+		$oldDb = $lbFactory->getMainLB( $oldWiki )->getConnectionRef( DB_MASTER, [], $oldWiki );
+		$targetDb = $lbFactory->getMainLB( $targetWiki )
+			->getConnectionRef( DB_MASTER, [], $targetWiki );
 		$targetDb->daoReadOnly = false;
 
 		$newMax = $targetDb->selectField(
@@ -98,5 +105,5 @@ class MigrateCentralWiki extends \Maintenance {
 
 }
 
-$maintClass = "MediaWiki\Extensions\OAuth\MigrateCentralWiki";
+$maintClass = MigrateCentralWiki::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

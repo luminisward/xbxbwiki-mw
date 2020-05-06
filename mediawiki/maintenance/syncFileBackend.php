@@ -49,7 +49,11 @@ class SyncFileBackend extends Maintenance {
 		$src = FileBackendGroup::singleton()->get( $this->getOption( 'src' ) );
 
 		$posDir = $this->getOption( 'posdir' );
-		$posFile = $posDir ? $posDir . '/' . wfWikiID() : false;
+		if ( $posDir != '' ) {
+			$posFile = "$posDir/" . rawurlencode( $src->getDomainId() );
+		} else {
+			$posFile = false;
+		}
 
 		if ( $this->hasOption( 'posdump' ) ) {
 			// Just dump the current position into the specified position dir
@@ -254,7 +258,7 @@ class SyncFileBackend extends Maintenance {
 					'src' => $fsFile->getPath(), 'dst' => $dPath, 'overwrite' => 1 ];
 			} elseif ( $sExists === false ) { // does not exist in source
 				$ops[] = [ 'op' => 'delete', 'src' => $dPath, 'ignoreMissingSource' => 1 ];
-			} else { // error
+			} else {
 				$this->error( "Unable to sync '$dPath': could not stat file." );
 				$status->fatal( 'backend-fail-internal', $src->getName() );
 

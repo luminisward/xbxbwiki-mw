@@ -1,5 +1,7 @@
 <?php
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * Implementation of near match title search.
  * TODO: split into service/implementation.
@@ -37,10 +39,10 @@ class SearchNearMatcher {
 
 	/**
 	 * Do a near match (see SearchEngine::getNearMatch) and wrap it into a
-	 * SearchResultSet.
+	 * ISearchResultSet.
 	 *
 	 * @param string $searchterm
-	 * @return SearchResultSet
+	 * @return ISearchResultSet
 	 */
 	public function getNearMatchResultSet( $searchterm ) {
 		return new SearchNearMatchResultSet( $this->getNearMatch( $searchterm ) );
@@ -53,7 +55,6 @@ class SearchNearMatcher {
 	 */
 	protected function getNearMatchInternal( $searchterm ) {
 		$lang = $this->language;
-
 		$allSearchTerms = [ $searchterm ];
 
 		if ( $lang->hasVariants() ) {
@@ -66,6 +67,13 @@ class SearchNearMatcher {
 		$titleResult = null;
 		if ( !Hooks::run( 'SearchGetNearMatchBefore', [ $allSearchTerms, &$titleResult ] ) ) {
 			return $titleResult;
+		}
+
+		// Most of our handling here deals with finding a valid title for the search term,
+		// but almost anything starting with '#' is "valid" and points to Main_Page#searchterm.
+		// Rather than doing something completely wrong, do nothing.
+		if ( $searchterm === '' || $searchterm[0] === '#' ) {
+			return null;
 		}
 
 		foreach ( $allSearchTerms as $term ) {
@@ -144,7 +152,7 @@ class SearchNearMatcher {
 		# There may have been a funny upload, or it may be on a shared
 		# file repository such as Wikimedia Commons.
 		if ( $title->getNamespace() == NS_FILE ) {
-			$image = wfFindFile( $title );
+			$image = MediaWikiServices::getInstance()->getRepoGroup()->findFile( $title );
 			if ( $image ) {
 				return $title;
 			}
@@ -159,7 +167,7 @@ class SearchNearMatcher {
 		# Quoted term? Try without the quotes...
 		$matches = [];
 		if ( preg_match( '/^"([^"]+)"$/', $searchterm, $matches ) ) {
-			return self::getNearMatch( $matches[1] );
+			return $this->getNearMatch( $matches[1] );
 		}
 
 		return null;

@@ -21,6 +21,8 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+
 require_once __DIR__ . '/Maintenance.php';
 
 /**
@@ -28,7 +30,7 @@ require_once __DIR__ . '/Maintenance.php';
  *
  * @ingroup Maintenance
  */
-class MaintenanceFormatInstallDoc extends Maintenance {
+class FormatInstallDoc extends Maintenance {
 	function __construct() {
 		parent::__construct();
 		$this->addArg( 'path', 'The file name to format', false );
@@ -61,10 +63,10 @@ class MaintenanceFormatInstallDoc extends Maintenance {
 		$outText = InstallDocFormatter::format( $inText );
 
 		if ( $this->hasOption( 'html' ) ) {
-			global $wgParser;
+			$parser = MediaWikiServices::getInstance()->getParser();
 			$opt = new ParserOptions;
 			$title = Title::newFromText( 'Text file' );
-			$out = $wgParser->parse( $outText, $title, $opt );
+			$out = $parser->parse( $outText, $title, $opt );
 			$outText = "<html><body>\n" . $out->getText() . "\n</body></html>\n";
 		}
 
@@ -72,5 +74,5 @@ class MaintenanceFormatInstallDoc extends Maintenance {
 	}
 }
 
-$maintClass = MaintenanceFormatInstallDoc::class;
+$maintClass = FormatInstallDoc::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

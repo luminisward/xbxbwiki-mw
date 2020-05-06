@@ -32,13 +32,10 @@ class UploadSourceField extends HTMLTextField {
 		$label = Html::rawElement( 'label', [ 'for' => $id ], $this->mLabel );
 
 		if ( !empty( $this->mParams['radio'] ) ) {
-			if ( isset( $this->mParams['radio-id'] ) ) {
-				$radioId = $this->mParams['radio-id'];
-			} else {
+			$radioId = $this->mParams['radio-id'] ??
 				// Old way. For the benefit of extensions that do not define
 				// the 'radio-id' key.
-				$radioId = 'wpSourceType' . $this->mParams['upload-type'];
-			}
+				'wpSourceType' . $this->mParams['upload-type'];
 
 			$attribs = [
 				'name' => 'wpSourceType',
@@ -61,8 +58,6 @@ class UploadSourceField extends HTMLTextField {
 	 * @return int
 	 */
 	function getSize() {
-		return isset( $this->mParams['size'] )
-			? $this->mParams['size']
-			: 60;
+		return $this->mParams['size'] ?? 60;
 	}
 }

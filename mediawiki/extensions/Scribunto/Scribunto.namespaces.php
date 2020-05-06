@@ -233,6 +233,11 @@ $namespaceNames['hy'] = [
 	829 => 'Մոդուլի_քննարկում',
 ];
 
+$namespaceNames['inh'] = [
+	828 => 'Модуль',
+	829 => 'Модуль_ювцар',
+];
+
 $namespaceNames['id'] = [
 	828 => 'Modul',
 	829 => 'Pembicaraan_Modul',
@@ -281,6 +286,11 @@ $namespaceNames['ku'] = [
 $namespaceNames['lb'] = [
 	828 => 'Modul',
 	829 => 'Modul_Diskussioun',
+];
+
+$namespaceNames['lfn'] = [
+	828 => 'Modulo',
+	829 => 'Modulo_Discute',
 ];
 
 $namespaceNames['lrc'] = [
@@ -332,6 +342,11 @@ $namespaceNames['mzn'] = [
 	829 => 'ماژول_گپ',
 ];
 
+$namespaceNames['nap'] = [
+	828 => 'Modulo',
+	829 => 'Modulo_chiàcchiera',
+];
+
 $namespaceNames['nb'] = [
 	828 => 'Modul',
 	829 => 'Moduldiskusjon',
@@ -352,9 +367,19 @@ $namespaceNames['nn'] = [
 	829 => 'Moduldiskusjon',
 ];
 
+$namespaceNames['nqo'] = [
+	828 => 'ߗߋ߬ߞߙߊߞߏ',
+	829 => 'ߗߋ߬ߞߙߊߞߏ ߢߊߝߐߞߣߍ',
+];
+
 $namespaceNames['or'] = [
 	828 => 'ମଡ୍ୟୁଲ',
 	829 => 'ମଡ୍ୟୁଲ_ଆଲୋଚନା',
+];
+
+$namespaceNames['pa'] = [
+	828 => 'ਮੌਡਿਊਲ',
+	829 => 'ਮੌਡਿਊਲ_ਗੱਲ-ਬਾਤ',
 ];
 
 $namespaceNames['pl'] = [
@@ -392,6 +417,11 @@ $namespaceNames['sa'] = [
 	829 => 'पटलसम्भाषणम्',
 ];
 
+$namespaceNames['sat'] = [
+	828 => 'ᱢᱳᱰᱩᱞ',
+	829 => 'ᱢᱳᱰᱩᱞ_ᱜᱟᱞᱢᱟᱨᱟᱣ',
+];
+
 $namespaceNames['sd'] = [
 	828 => 'ماڊيول',
 	829 => 'ماڊيول_بحث',
@@ -400,6 +430,11 @@ $namespaceNames['sd'] = [
 $namespaceNames['sh'] = [
 	828 => 'Modul',
 	829 => 'Razgovor_o_modulu',
+];
+
+$namespaceNames['shn'] = [
+	828 => 'မေႃႇၵျူး',
+	829 => 'ဢုပ်ႇၵုမ်_မေႃႇၵျူး',
 ];
 
 $namespaceNames['sk'] = [
@@ -444,7 +479,7 @@ $namespaceNames['tcy'] = [
 
 $namespaceNames['te'] = [
 	828 => 'మాడ్యూల్',
-	829 => 'మాడ్యూల్_సంభాషణ',
+	829 => 'మాడ్యూల్ చర్చ',
 ];
 
 $namespaceNames['tg'] = [

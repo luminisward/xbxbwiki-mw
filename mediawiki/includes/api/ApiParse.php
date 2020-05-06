@@ -21,6 +21,7 @@
  */
 
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Revision\RevisionRecord;
 
 /**
  * @ingroup API
@@ -83,7 +84,7 @@ class ApiParse extends ApiBase {
 		// The parser needs $wgTitle to be set, apparently the
 		// $title parameter in Parser::parse isn't enough *sigh*
 		// TODO: Does this still need $wgTitle?
-		global $wgParser, $wgTitle;
+		global $wgTitle;
 
 		$redirValues = null;
 
@@ -105,7 +106,7 @@ class ApiParse extends ApiBase {
 				}
 
 				$this->checkTitleUserPermissions( $rev->getTitle(), 'read' );
-				if ( !$rev->userCan( Revision::DELETED_TEXT, $this->getUser() ) ) {
+				if ( !$rev->userCan( RevisionRecord::DELETED_TEXT, $this->getUser() ) ) {
 					$this->dieWithError(
 						[ 'apierror-permissiondenied', $this->msg( 'action-deletedtext' ) ]
 					);
@@ -314,20 +315,23 @@ class ApiParse extends ApiBase {
 
 			$outputPage = new OutputPage( $context );
 			$outputPage->addParserOutputMetadata( $p_result );
+			if ( $this->content ) {
+				$outputPage->addContentOverride( $titleObj, $this->content );
+			}
 			$context->setOutput( $outputPage );
 
 			if ( $skin ) {
 				// Based on OutputPage::headElement()
 				$skin->setupSkinUserCss( $outputPage );
 				// Based on OutputPage::output()
-				foreach ( $skin->getDefaultModules() as $group ) {
-					$outputPage->addModules( $group );
-				}
+				$outputPage->loadSkinModules( $skin );
 			}
+
+			Hooks::run( 'ApiParseMakeOutputPage', [ $this, $outputPage ] );
 		}
 
 		if ( !is_null( $oldid ) ) {
-			$result_array['revid'] = intval( $oldid );
+			$result_array['revid'] = (int)$oldid;
 		}
 
 		if ( $params['redirects'] && !is_null( $redirValues ) ) {
@@ -338,7 +342,7 @@ class ApiParse extends ApiBase {
 			$result_array['text'] = $p_result->getText( [
 				'allowTOC' => !$params['disabletoc'],
 				'enableSectionEditLinks' => !$params['disableeditsection'],
-				'unwrap' => $params['wrapoutputclass'] === '',
+				'wrapperDivClass' => $params['wrapoutputclass'],
 				'deduplicateStyles' => !$params['disablestylededuplication'],
 			] );
 			$result_array[ApiResult::META_BC_SUBELEMENTS][] = 'text';
@@ -414,11 +418,13 @@ class ApiParse extends ApiBase {
 		if ( isset( $prop['modules'] ) ) {
 			if ( $skin ) {
 				$result_array['modules'] = $outputPage->getModules();
-				$result_array['modulescripts'] = $outputPage->getModuleScripts();
+				// Deprecated since 1.32 (T188689)
+				$result_array['modulescripts'] = [];
 				$result_array['modulestyles'] = $outputPage->getModuleStyles();
 			} else {
 				$result_array['modules'] = array_values( array_unique( $p_result->getModules() ) );
-				$result_array['modulescripts'] = array_values( array_unique( $p_result->getModuleScripts() ) );
+				// Deprecated since 1.32 (T188689)
+				$result_array['modulescripts'] = [];
 				$result_array['modulestyles'] = array_values( array_unique( $p_result->getModuleStyles() ) );
 			}
 		}
@@ -483,8 +489,10 @@ class ApiParse extends ApiBase {
 				$this->dieWithError( 'apierror-parsetree-notwikitext', 'notwikitext' );
 			}
 
-			$wgParser->startExternalParse( $titleObj, $popts, Parser::OT_PREPROCESS );
-			$xml = $wgParser->preprocessToDom( $this->content->getNativeData() )->__toString();
+			$parser = MediaWikiServices::getInstance()->getParser();
+			$parser->startExternalParse( $titleObj, $popts, Parser::OT_PREPROCESS );
+			// @phan-suppress-next-line PhanUndeclaredMethod
+			$xml = $parser->preprocessToDom( $this->content->getText() )->__toString();
 			$result_array['parsetree'] = $xml;
 			$result_array[ApiResult::META_BC_SUBELEMENTS][] = 'parsetree';
 		}
@@ -556,23 +564,23 @@ class ApiParse extends ApiBase {
 		WikiPage $page, $popts, $suppressCache, $pageId, $rev, $getContent
 	) {
 		$revId = $rev ? $rev->getId() : null;
-		$isDeleted = $rev && $rev->isDeleted( Revision::DELETED_TEXT );
+		$isDeleted = $rev && $rev->isDeleted( RevisionRecord::DELETED_TEXT );
 
 		if ( $getContent || $this->section !== false || $isDeleted ) {
 			if ( $rev ) {
-				$this->content = $rev->getContent( Revision::FOR_THIS_USER, $this->getUser() );
+				$this->content = $rev->getContent( RevisionRecord::FOR_THIS_USER, $this->getUser() );
 				if ( !$this->content ) {
 					$this->dieWithError( [ 'apierror-missingcontent-revid', $revId ] );
 				}
 			} else {
-				$this->content = $page->getContent( Revision::FOR_THIS_USER, $this->getUser() );
+				$this->content = $page->getContent( RevisionRecord::FOR_THIS_USER, $this->getUser() );
 				if ( !$this->content ) {
 					$this->dieWithError( [ 'apierror-missingcontent-pageid', $page->getId() ] );
 				}
 			}
 			$this->contentIsDeleted = $isDeleted;
 			$this->contentIsSuppressed = $rev &&
-				$rev->isDeleted( Revision::DELETED_TEXT | Revision::DELETED_RESTRICTED );
+				$rev->isDeleted( RevisionRecord::DELETED_TEXT | RevisionRecord::DELETED_RESTRICTED );
 		}
 
 		if ( $this->section !== false ) {
@@ -591,7 +599,9 @@ class ApiParse extends ApiBase {
 			$pout = $page->getParserOutput( $popts, $revId, $suppressCache );
 		}
 		if ( !$pout ) {
-			$this->dieWithError( [ 'apierror-nosuchrevid', $revId ?: $page->getLatest() ] ); // @codeCoverageIgnore
+			// @codeCoverageIgnoreStart
+			$this->dieWithError( [ 'apierror-nosuchrevid', $revId ?: $page->getLatest() ] );
+			// @codeCoverageIgnoreEnd
 		}
 
 		return $pout;
@@ -622,13 +632,12 @@ class ApiParse extends ApiBase {
 	 * This mimicks the behavior of EditPage in formatting a summary
 	 *
 	 * @param Title $title of the page being parsed
-	 * @param Array $params the API parameters of the request
+	 * @param array $params The API parameters of the request
 	 * @return Content|bool
 	 */
 	private function formatSummary( $title, $params ) {
-		global $wgParser;
-		$summary = !is_null( $params['summary'] ) ? $params['summary'] : '';
-		$sectionTitle = !is_null( $params['sectiontitle'] ) ? $params['sectiontitle'] : '';
+		$summary = $params['summary'] ?? '';
+		$sectionTitle = $params['sectiontitle'] ?? '';
 
 		if ( $this->section === 'new' && ( $sectionTitle === '' || $summary === '' ) ) {
 			if ( $sectionTitle !== '' ) {
@@ -636,8 +645,9 @@ class ApiParse extends ApiBase {
 			}
 			if ( $summary !== '' ) {
 				$summary = wfMessage( 'newsectionsummary' )
-					->rawParams( $wgParser->stripSectionName( $summary ) )
-						->inContentLanguage()->text();
+					->rawParams( MediaWikiServices::getInstance()->getParser()
+						->stripSectionName( $summary ) )
+					->inContentLanguage()->text();
 			}
 		}
 		return Linker::formatComment( $summary, $title, $this->section === 'new' );
@@ -694,7 +704,7 @@ class ApiParse extends ApiBase {
 			$hiddencats[$row->page_title] = isset( $row->pp_propname );
 		}
 
-		$linkCache = LinkCache::singleton();
+		$linkCache = MediaWikiServices::getInstance()->getLinkCache();
 
 		foreach ( $links as $link => $sortkey ) {
 			$entry = [];
@@ -865,7 +875,10 @@ class ApiParse extends ApiBase {
 			],
 			'disablelimitreport' => false,
 			'disableeditsection' => false,
-			'disabletidy' => false,
+			'disabletidy' => [
+				ApiBase::PARAM_DFLT => false,
+				ApiBase::PARAM_DEPRECATED => true, // Since 1.32
+			],
 			'disablestylededuplication' => false,
 			'generatexml' => [
 				ApiBase::PARAM_DFLT => false,

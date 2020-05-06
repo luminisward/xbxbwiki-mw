@@ -21,7 +21,9 @@
  * @author Niklas Laxström
  * @ingroup Cache
  */
+
 use MediaWiki\MediaWikiServices;
+use Wikimedia\Rdbms\ILoadBalancer;
 
 /**
  * Caches user genders when needed to use correct namespace aliases.
@@ -33,6 +35,17 @@ class GenderCache {
 	protected $default;
 	protected $misses = 0;
 	protected $missLimit = 1000;
+
+	/** @var NamespaceInfo */
+	private $nsInfo;
+
+	/** @var ILoadBalancer|null */
+	private $loadBalancer;
+
+	public function __construct( NamespaceInfo $nsInfo = null, ILoadBalancer $loadBalancer = null ) {
+		$this->nsInfo = $nsInfo ?? MediaWikiServices::getInstance()->getNamespaceInfo();
+		$this->loadBalancer = $loadBalancer;
+	}
 
 	/**
 	 * @deprecated in 1.28 see MediaWikiServices::getInstance()->getGenderCache()
@@ -85,7 +98,7 @@ class GenderCache {
 		/* Undefined if there is a valid username which for some reason doesn't
 		 * exist in the database.
 		 */
-		return isset( $this->cache[$username] ) ? $this->cache[$username] : $this->getDefault();
+		return $this->cache[$username] ?? $this->getDefault();
 	}
 
 	/**
@@ -97,7 +110,7 @@ class GenderCache {
 	public function doLinkBatch( $data, $caller = '' ) {
 		$users = [];
 		foreach ( $data as $ns => $pagenames ) {
-			if ( !MWNamespace::hasGenderDistinction( $ns ) ) {
+			if ( !$this->nsInfo->hasGenderDistinction( $ns ) ) {
 				continue;
 			}
 			foreach ( array_keys( $pagenames ) as $username ) {
@@ -122,7 +135,7 @@ class GenderCache {
 			if ( !$titleObj ) {
 				continue;
 			}
-			if ( !MWNamespace::hasGenderDistinction( $titleObj->getNamespace() ) ) {
+			if ( !$this->nsInfo->hasGenderDistinction( $titleObj->getNamespace() ) ) {
 				continue;
 			}
 			$users[] = $titleObj->getText();
@@ -157,7 +170,13 @@ class GenderCache {
 			return;
 		}
 
-		$dbr = wfGetDB( DB_REPLICA );
+		// Only query database, when load balancer is provided by service wiring
+		// This maybe not happen when running as part of the installer
+		if ( $this->loadBalancer === null ) {
+			return;
+		}
+
+		$dbr = $this->loadBalancer->getConnectionRef( DB_REPLICA );
 		$table = [ 'user', 'user_properties' ];
 		$fields = [ 'user_name', 'up_value' ];
 		$conds = [ 'user_name' => $usersToCheck ];
@@ -171,7 +190,7 @@ class GenderCache {
 		$res = $dbr->select( $table, $fields, $conds, $comment, [], $joins );
 
 		foreach ( $res as $row ) {
-			$this->cache[$row->user_name] = $row->up_value ? $row->up_value : $default;
+			$this->cache[$row->user_name] = $row->up_value ?: $default;
 		}
 	}
 

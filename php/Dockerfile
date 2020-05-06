@@ -1,5 +1,5 @@
-FROM php:7.1-fpm
-# RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
+FROM php:7.3-fpm
+RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
 RUN apt-get update && apt-get install -y \
     git \
     zlib1g-dev libicu-dev g++ \
@@ -17,5 +17,5 @@ RUN apt-get update && apt-get install -y \
     pdo_pgsql \
     && pecl install apcu \
     && docker-php-ext-enable apcu
-    # && pecl install xdebug \
-    # && docker-php-ext-enable xdebug 
+# RUN && pecl install xdebug \
+#     && docker-php-ext-enable xdebug

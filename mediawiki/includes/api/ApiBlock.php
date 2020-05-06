@@ -20,6 +20,8 @@
  * @file
  */
 
+use MediaWiki\Block\DatabaseBlock;
+
 /**
  * API module that facilitates the blocking of users. Requires API write mode
  * to be enabled.
@@ -27,6 +29,8 @@
  * @ingroup API
  */
 class ApiBlock extends ApiBase {
+
+	use ApiBlockInfoTrait;
 
 	/**
 	 * Blocks the user specified in the parameters for the given expiry, with the
@@ -43,15 +47,28 @@ class ApiBlock extends ApiBase {
 		$this->requireOnlyOneParameter( $params, 'user', 'userid' );
 
 		# T17810: blocked admins should have limited access here
-		if ( $user->isBlocked() ) {
+		$block = $user->getBlock();
+		if ( $block ) {
 			$status = SpecialBlock::checkUnblockSelf( $params['user'], $user );
 			if ( $status !== true ) {
 				$this->dieWithError(
 					$status,
 					null,
-					[ 'blockinfo' => ApiQueryUserInfo::getBlockInfo( $user->getBlock() ) ]
+					[ 'blockinfo' => $this->getBlockDetails( $block ) ]
 				);
 			}
+		}
+
+		$editingRestriction = 'sitewide';
+		$pageRestrictions = '';
+		$namespaceRestrictions = '';
+		if ( $this->getConfig()->get( 'EnablePartialBlocks' ) ) {
+			if ( $params['partial'] ) {
+				$editingRestriction = 'partial';
+			}
+
+			$pageRestrictions = implode( "\n", (array)$params['pagerestrictions'] );
+			$namespaceRestrictions = implode( "\n", (array)$params['namespacerestrictions'] );
 		}
 
 		if ( $params['userid'] !== null ) {
@@ -67,7 +84,7 @@ class ApiBlock extends ApiBase {
 
 			// T40633 - if the target is a user (not an IP address), but it
 			// doesn't exist or is unusable, error.
-			if ( $type === Block::TYPE_USER &&
+			if ( $type === DatabaseBlock::TYPE_USER &&
 				( $target->isAnon() /* doesn't exist */ || !User::isUsableName( $params['user'] ) )
 			) {
 				$this->dieWithError( [ 'nosuchusershort', $params['user'] ], 'nosuchuser' );
@@ -81,7 +98,8 @@ class ApiBlock extends ApiBase {
 			}
 		}
 
-		if ( $params['hidename'] && !$user->isAllowed( 'hideuser' ) ) {
+		if ( $params['hidename'] &&
+			 !$this->getPermissionManager()->userHasRight( $user, 'hideuser' ) ) {
 			$this->dieWithError( 'apierror-canthide' );
 		}
 		if ( $params['noemail'] && !SpecialBlock::canBlockEmail( $user ) ) {
@@ -107,6 +125,9 @@ class ApiBlock extends ApiBase {
 			'Watch' => $params['watchuser'],
 			'Confirm' => true,
 			'Tags' => $params['tags'],
+			'EditingRestriction' => $editingRestriction,
+			'PageRestrictions' => $pageRestrictions,
+			'NamespaceRestrictions' => $namespaceRestrictions,
 		];
 
 		$status = SpecialBlock::validateTarget( $params['user'], $user );
@@ -119,13 +140,15 @@ class ApiBlock extends ApiBase {
 			$this->dieStatus( $this->errorArrayToStatus( $retval ) );
 		}
 
-		list( $target, /*...*/ ) = SpecialBlock::getTargetAndType( $params['user'] );
+		$res = [];
+
 		$res['user'] = $params['user'];
+		list( $target, /*...*/ ) = SpecialBlock::getTargetAndType( $params['user'] );
 		$res['userID'] = $target instanceof User ? $target->getId() : 0;
 
-		$block = Block::newFromTarget( $target, null, true );
-		if ( $block instanceof Block ) {
-			$res['expiry'] = ApiResult::formatExpiry( $block->mExpiry, 'infinite' );
+		$block = DatabaseBlock::newFromTarget( $target, null, true );
+		if ( $block instanceof DatabaseBlock ) {
+			$res['expiry'] = ApiResult::formatExpiry( $block->getExpiry(), 'infinite' );
 			$res['id'] = $block->getId();
 		} else {
 			# should be unreachable
@@ -142,6 +165,12 @@ class ApiBlock extends ApiBase {
 		$res['allowusertalk'] = $params['allowusertalk'];
 		$res['watchuser'] = $params['watchuser'];
 
+		if ( $this->getConfig()->get( 'EnablePartialBlocks' ) ) {
+			$res['partial'] = $params['partial'];
+			$res['pagerestrictions'] = $params['pagerestrictions'];
+			$res['namespacerestrictions'] = $params['namespacerestrictions'];
+		}
+
 		$this->getResult()->addValue( null, $this->getModuleName(), $res );
 	}
 
@@ -154,7 +183,7 @@ class ApiBlock extends ApiBase {
 	}
 
 	public function getAllowedParams() {
-		return [
+		$params = [
 			'user' => [
 				ApiBase::PARAM_TYPE => 'user',
 			],
@@ -176,6 +205,21 @@ class ApiBlock extends ApiBase {
 				ApiBase::PARAM_ISMULTI => true,
 			],
 		];
+
+		if ( $this->getConfig()->get( 'EnablePartialBlocks' ) ) {
+			$params['partial'] = false;
+			$params['pagerestrictions'] = [
+				ApiBase::PARAM_ISMULTI => true,
+				ApiBase::PARAM_ISMULTI_LIMIT1 => 10,
+				ApiBase::PARAM_ISMULTI_LIMIT2 => 10,
+			];
+			$params['namespacerestrictions'] = [
+				ApiBase::PARAM_ISMULTI => true,
+				ApiBase::PARAM_TYPE => 'namespace',
+			];
+		}
+
+		return $params;
 	}
 
 	public function needsToken() {

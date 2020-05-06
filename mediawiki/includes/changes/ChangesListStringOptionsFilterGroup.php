@@ -155,6 +155,7 @@ class ChangesListStringOptionsFilterGroup extends ChangesListFilterGroup {
 	 * Registers a filter in this group
 	 *
 	 * @param ChangesListStringOptionsFilter $filter
+	 * @suppress PhanParamSignaturePHPDocMismatchHasParamType,PhanParamSignatureMismatch
 	 */
 	public function registerFilter( ChangesListStringOptionsFilter $filter ) {
 		$this->filters[$filter->getName()] = $filter;
@@ -200,19 +201,16 @@ class ChangesListStringOptionsFilterGroup extends ChangesListFilterGroup {
 
 		sort( $selectedValues );
 
-		call_user_func_array(
-			$this->queryCallable,
-			[
-				get_class( $specialPage ),
-				$specialPage->getContext(),
-				$dbr,
-				&$tables,
-				&$fields,
-				&$conds,
-				&$query_options,
-				&$join_conds,
-				$selectedValues
-			]
+		( $this->queryCallable )(
+			get_class( $specialPage ),
+			$specialPage->getContext(),
+			$dbr,
+			$tables,
+			$fields,
+			$conds,
+			$query_options,
+			$join_conds,
+			$selectedValues
 		);
 	}
 

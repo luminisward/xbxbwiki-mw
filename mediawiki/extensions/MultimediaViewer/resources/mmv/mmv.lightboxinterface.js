@@ -15,7 +15,7 @@
  * along with MultimediaViewer.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-( function ( mw, $, oo ) {
+( function () {
 	var LIP;
 
 	/**
@@ -46,7 +46,7 @@
 		this.init();
 		mw.mmv.ui.Element.call( this, this.$wrapper );
 	}
-	oo.inheritClass( LightboxInterface, mw.mmv.ui.Element );
+	OO.inheritClass( LightboxInterface, mw.mmv.ui.Element );
 	LIP = LightboxInterface.prototype;
 
 	/**
@@ -62,6 +62,7 @@
 	 */
 	LIP.init = function () {
 		// SVG filter, needed to achieve blur in Firefox
+		// eslint-disable-next-line no-jquery/no-parse-html-literal
 		this.$filter = $( '<svg><filter id="gaussian-blur"><fegaussianblur stdDeviation="3"></filter></svg>' );
 
 		this.$wrapper = $( '<div>' )
@@ -118,6 +119,7 @@
 	 * @param {string} alt
 	 */
 	LIP.setFileReuseData = function ( image, repo, caption, alt ) {
+		this.buttons.set( image );
 		this.fileReuse.set( image, repo, caption, alt );
 		this.downloadDialog.set( image, repo );
 	};
@@ -320,7 +322,7 @@
 				delayIn: tooltipDelay,
 				gravity: this.correctEW( 'ne' )
 			} )
-			.click( function () {
+			.on( 'click', function () {
 				if ( ui.isFullscreen ) {
 					ui.$main.trigger( $.Event( 'jq-fullscreen-change.lip' ) );
 				}
@@ -335,7 +337,7 @@
 				delayIn: tooltipDelay,
 				gravity: this.correctEW( 'ne' )
 			} )
-			.click( function ( e ) {
+			.on( 'click', function ( e ) {
 				if ( ui.isFullscreen ) {
 					ui.exitFullscreen();
 
@@ -353,6 +355,7 @@
 			} );
 
 		// If the browser doesn't support fullscreen mode, hide the fullscreen button
+		// This horrendous hack comes from jquery.fullscreen.js
 		if ( $.support.fullscreen ) {
 			this.$fullscreenButton.show();
 		} else {
@@ -506,4 +509,4 @@
 	};
 
 	mw.mmv.LightboxInterface = LightboxInterface;
-}( mediaWiki, jQuery, OO ) );
+}() );

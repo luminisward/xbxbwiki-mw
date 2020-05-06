@@ -1,7 +1,7 @@
 /**
  * @class jQuery.plugin.lengthLimit
  */
-( function ( $, mw ) {
+( function () {
 
 	var
 		eventKeys = [
@@ -31,7 +31,7 @@
 	 * function, if none, pass empty string.
 	 * @param {string} newVal New value that may have to be trimmed down.
 	 * @param {number} byteLimit Number of bytes the value may be in size.
-	 * @param {Function} [filterFn] See jQuery#byteLimit.
+	 * @param {Function} [filterFunction] See jQuery#byteLimit.
 	 * @return {Object}
 	 * @return {string} return.newVal
 	 * @return {boolean} return.trimmed
@@ -39,18 +39,18 @@
 	mw.log.deprecate( $, 'trimByteLength', trimByteLength,
 		'Use require( \'mediawiki.String\' ).trimByteLength instead.', '$.trimByteLength' );
 
-	function lengthLimit( trimFn, limit, filterFn ) {
+	function lengthLimit( trimFn, limit, filterFunction ) {
 		var allowNativeMaxlength = trimFn === trimByteLength;
 
 		// If the first argument is the function,
-		// set filterFn to the first argument's value and ignore the second argument.
-		if ( $.isFunction( limit ) ) {
-			filterFn = limit;
+		// set filterFunction to the first argument's value and ignore the second argument.
+		if ( typeof limit === 'function' ) {
+			filterFunction = limit;
 			limit = undefined;
 		// Either way, verify it is a function so we don't have to call
 		// isFunction again after this.
-		} else if ( !filterFn || !$.isFunction( filterFn ) ) {
-			filterFn = undefined;
+		} else if ( !filterFunction || typeof filterFunction !== 'function' ) {
+			filterFunction = undefined;
 		}
 
 		// The following is specific to each element in the collection.
@@ -79,15 +79,15 @@
 				return;
 			}
 
-			if ( filterFn ) {
+			if ( filterFunction ) {
 				// Save function for reference
-				$el.data( 'lengthLimit.callback', filterFn );
+				$el.data( 'lengthLimit.callback', filterFunction );
 			}
 
 			// Remove old event handlers (if there are any)
 			$el.off( '.lengthLimit' );
 
-			if ( filterFn || !allowNativeMaxlength ) {
+			if ( filterFunction || !allowNativeMaxlength ) {
 				// Disable the native maxLength (if there is any), because it interferes
 				// with the (differently calculated) character/byte limit.
 				// Aside from being differently calculated,
@@ -127,12 +127,13 @@
 			// we can trim the previous one).
 			// See https://www.w3.org/TR/DOM-Level-3-Events/#events-keyboard-event-order for
 			// the order and characteristics of the key events.
-			$el.on( eventKeys, function () {
+
+			function enforceLimit() {
 				var res = trimFn(
 					prevSafeVal,
 					this.value,
 					elLimit,
-					filterFn
+					filterFunction
 				);
 
 				// Only set value property if it was trimmed, because whenever the
@@ -149,6 +150,15 @@
 				// trimFn to compare the new value to an empty string instead of the
 				// old value, resulting in trimming always from the end (T42850).
 				prevSafeVal = res.newVal;
+			}
+
+			$el.on( eventKeys, function ( e ) {
+				if ( e.type === 'cut' || e.type === 'paste' ) {
+					// For 'cut'/'paste', the input value is only updated after the event handlers resolve.
+					setTimeout( enforceLimit.bind( this ) );
+				} else {
+					enforceLimit.call( this );
+				}
 			} );
 		} );
 	}
@@ -165,12 +175,12 @@
 	 *
 	 * @param {number} [limit] Limit to enforce, fallsback to maxLength-attribute,
 	 *  called with fetched value as argument.
-	 * @param {Function} [filterFn] Function to call on the string before assessing the length.
+	 * @param {Function} [filterFunction] Function to call on the string before assessing the length.
 	 * @return {jQuery}
 	 * @chainable
 	 */
-	$.fn.byteLimit = function ( limit, filterFn ) {
-		return lengthLimit.call( this, trimByteLength, limit, filterFn );
+	$.fn.byteLimit = function ( limit, filterFunction ) {
+		return lengthLimit.call( this, trimByteLength, limit, filterFunction );
 	};
 
 	/**
@@ -189,16 +199,16 @@
 	 *
 	 * @param {number} [limit] Limit to enforce, fallsback to maxLength-attribute,
 	 *  called with fetched value as argument.
-	 * @param {Function} [filterFn] Function to call on the string before assessing the length.
+	 * @param {Function} [filterFunction] Function to call on the string before assessing the length.
 	 * @return {jQuery}
 	 * @chainable
 	 */
-	$.fn.codePointLimit = function ( limit, filterFn ) {
-		return lengthLimit.call( this, trimCodePointLength, limit, filterFn );
+	$.fn.codePointLimit = function ( limit, filterFunction ) {
+		return lengthLimit.call( this, trimCodePointLength, limit, filterFunction );
 	};
 
 	/**
 	 * @class jQuery
 	 * @mixins jQuery.plugin.lengthLimit
 	 */
-}( jQuery, mediaWiki ) );
+}() );

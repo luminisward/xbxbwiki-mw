@@ -2,8 +2,9 @@
 	"@metadata": {
 		"authors": [
 			"Milicevic01",
+			"Obsuser",
 			"Srdjan m",
-			"Obsuser"
+			"Zoranzoki21"
 		]
 	},
 	"mwoauth-field-hidden": "(ova informacija je skrivena)",
@@ -14,6 +15,7 @@
 	"mwoauth-consumer-name": "Ime aplikacije:",
 	"mwoauth-consumer-user": "Izdavač:",
 	"mwoauth-consumer-stage": "Trenutni status:",
+	"mwoauth-consumer-email": "Imejl adresa za kontakt:",
 	"mwoauth-consumer-description": "Opis aplikacije:",
 	"mwoauth-consumer-wiki": "Primenjljivi projekti:",
 	"mwoauth-consumer-rsakey": "Javni RSA ključ:",
@@ -22,7 +24,6 @@
 	"mwoauth-consumer-stage-expired": "isteklo",
 	"mwoauth-consumer-stage-approved": "odobreno",
 	"mwoauth-consumer-stage-disabled": "onemogućeno",
-	"mwoauthconsumerregistration-notloggedin": "Morate se prijaviti da bi pristupili ovoj stranici.",
 	"mwoauthconsumerregistration-navigation": "Navigacija:",
 	"mwoauthconsumerregistration-user": "Izdavač",
 	"mwoauthconsumerregistration-description": "Opis",
@@ -57,7 +58,6 @@
 	"mwoauthlistconsumers-status-rejected": "odbijeno",
 	"mwoauthlistconsumers-status-expired": "isteklo",
 	"oauthmanagemygrants": "Upravljanje prikačenim aplikacijama",
-	"mwoauthmanagemygrants-notloggedin": "Morate se prijaviti da bi pristupili ovoj stranici.",
 	"mwoauthmanagemygrants-navigation": "Navigacija:",
 	"mwoauthmanagemygrants-showlist": "Spisak povezanih alikacija",
 	"mwoauthmanagemygrants-none": "Nema aplikacija povezanih sa vašim nalogom.",
@@ -70,6 +70,7 @@
 	"mwoauthmanagemygrants-update": "Primeni",
 	"mwoauthmanagemygrants-renounce": "Skini ovlašćenja",
 	"mwoauthmanagemygrants-action": "Izmeni status:",
+	"mwoauthconsumer-consumer-logpagetext": "Dnevnik odobravanja, odbijanja i onemogućavanja registrovanih korisnika OAuth-a.",
 	"mwoauth-form-description-allwikis-nogrants": "Zdravo $1,\n\n'''$2''' želi da dobije osnovni pristup u vaše ime na svim projektima ovog sajta.",
 	"mwoauth-form-button-approve": "Dozvoli",
 	"mwoauth-form-button-cancel": "Otkaži",

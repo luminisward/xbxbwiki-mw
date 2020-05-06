@@ -52,7 +52,7 @@ abstract class ImageQueryPage extends QueryPage {
 			$i = 0;
 			foreach ( $res as $row ) {
 				$i++;
-				$namespace = isset( $row->namespace ) ? $row->namespace : NS_FILE;
+				$namespace = $row->namespace ?? NS_FILE;
 				$title = Title::makeTitleSafe( $namespace, $row->title );
 				if ( $title instanceof Title && $title->getNamespace() == NS_FILE ) {
 					$gallery->add( $title, $this->getCellHtml( $row ) );
@@ -68,6 +68,7 @@ abstract class ImageQueryPage extends QueryPage {
 
 	// Gotta override this since it's abstract
 	function formatResult( $skin, $result ) {
+		return false;
 	}
 
 	/**

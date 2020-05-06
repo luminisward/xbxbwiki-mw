@@ -15,7 +15,7 @@
  * along with MultimediaViewer.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-( function ( mw, $, oo ) {
+( function () {
 	var TTFP;
 
 	/**
@@ -76,7 +76,7 @@
 		this.init();
 	}
 
-	oo.inheritClass( TruncatableTextField, mw.mmv.ui.Element );
+	OO.inheritClass( TruncatableTextField, mw.mmv.ui.Element );
 
 	TTFP = TruncatableTextField.prototype;
 
@@ -105,7 +105,7 @@
 	};
 
 	TTFP.attach = function () {
-		$( window ).on( 'resize.mmv-ttf', $.debounce( 100, $.proxy( this.repaint, this ) ) );
+		$( window ).on( 'resize.mmv-ttf', $.debounce( 100, this.repaint.bind( this ) ) );
 	};
 
 	TTFP.unattach = function () {
@@ -128,8 +128,7 @@
 	TTFP.empty = function () {
 		this.$element.empty();
 		this.$container
-			.removeClass( this.options.styles.join( ' ' ) )
-			.removeClass( 'mw-mmv-ttf-untruncated mw-mmv-ttf-truncated' )
+			.removeClass( this.options.styles.concat( [ 'mw-mmv-ttf-untruncated', 'mw-mmv-ttf-truncated' ] ) )
 			.addClass( 'empty' );
 		this.$ellipsis.hide();
 		this.setTitle( '', '' );
@@ -220,11 +219,11 @@
 			field = this;
 
 		this.$container
-			.removeClass( this.options.styles.join( ' ' ) )
-			.removeClass( 'mw-mmv-ttf-untruncated mw-mmv-ttf-truncated' )
+			.removeClass( this.options.styles.concat( [ 'mw-mmv-ttf-untruncated', 'mw-mmv-ttf-truncated' ] ) )
 			.addClass( newClass );
 		this.expanded = false;
 
+		// eslint-disable-next-line no-jquery/no-each-util
 		$.each( this.options.styles, function ( k, v ) {
 			if ( !field.isTruncatable() ) {
 				return false;
@@ -237,4 +236,4 @@
 	};
 
 	mw.mmv.ui.TruncatableTextField = TruncatableTextField;
-}( mediaWiki, jQuery, OO ) );
+}() );

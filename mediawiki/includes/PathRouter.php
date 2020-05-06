@@ -53,8 +53,8 @@
  *   - In a pattern $1, $2, etc... will be replaced with the relevant contents
  *   - If you used a keyed array as a path pattern, $key will be replaced with
  *     the relevant contents
- *   - The default behavior is equivalent to `array( 'title' => '$1' )`,
- *     if you don't want the title parameter you can explicitly use `array( 'title' => false )`
+ *   - The default behavior is equivalent to `[ 'title' => '$1' ]`,
+ *     if you don't want the title parameter you can explicitly use `[ 'title' => false ]`
  *   - You can specify a value that won't have replacements in it
  *     using `'foo' => [ 'value' => 'bar' ];`
  *
@@ -80,7 +80,7 @@ class PathRouter {
 	/**
 	 * Protected helper to do the actual bulk work of adding a single pattern.
 	 * This is in a separate method so that add() can handle the difference between
-	 * a single string $path and an array() $path that contains multiple path
+	 * a single string $path and an array $path that contains multiple path
 	 * patterns each with an associated $key to pass on.
 	 * @param string $path
 	 * @param array $params
@@ -133,10 +133,8 @@ class PathRouter {
 		// Loop over our options and convert any single value $# restrictions
 		// into an array so we only have to do in_array tests.
 		foreach ( $options as $optionName => $optionData ) {
-			if ( preg_match( '/^\$\d+$/u', $optionName ) ) {
-				if ( !is_array( $optionData ) ) {
-					$options[$optionName] = [ $optionData ];
-				}
+			if ( preg_match( '/^\$\d+$/u', $optionName ) && !is_array( $optionData ) ) {
+				$options[$optionName] = [ $optionData ];
 			}
 		}
 
@@ -240,6 +238,28 @@ class PathRouter {
 		// matches are tested first
 		$this->sortByWeight();
 
+		$matches = $this->internalParse( $path );
+		if ( is_null( $matches ) ) {
+			// Try with the normalized path (T100782)
+			$path = wfRemoveDotSegments( $path );
+			$path = preg_replace( '#/+#', '/', $path );
+			$matches = $this->internalParse( $path );
+		}
+
+		// We know the difference between null (no matches) and
+		// [] (a match with no data) but our WebRequest caller
+		// expects [] even when we have no matches so return
+		// a [] when we have null
+		return $matches ?? [];
+	}
+
+	/**
+	 * Match a path against each defined pattern
+	 *
+	 * @param string $path
+	 * @return array|null
+	 */
+	protected function internalParse( $path ) {
 		$matches = null;
 
 		foreach ( $this->patterns as $pattern ) {
@@ -248,17 +268,12 @@ class PathRouter {
 				break;
 			}
 		}
-
-		// We know the difference between null (no matches) and
-		// array() (a match with no data) but our WebRequest caller
-		// expects array() even when we have no matches so return
-		// a array() when we have null
-		return is_null( $matches ) ? [] : $matches;
+		return $matches;
 	}
 
 	/**
 	 * @param string $path
-	 * @param string $pattern
+	 * @param object $pattern
 	 * @return array|null
 	 */
 	protected static function extractTitle( $path, $pattern ) {
@@ -319,13 +334,8 @@ class PathRouter {
 					$value = $paramData['value'];
 				} elseif ( isset( $paramData['pattern'] ) ) {
 					// For patterns we have to make value replacements on the string
-					$value = $paramData['pattern'];
-					$replacer = new PathRouterPatternReplacer;
-					$replacer->params = $m;
-					if ( isset( $pattern->key ) ) {
-						$replacer->key = $pattern->key;
-					}
-					$value = $replacer->replace( $value );
+					$value = self::expandParamValue( $m, $pattern->key ?? null,
+						$paramData['pattern'] );
 					if ( $value === false ) {
 						// Pattern required data that wasn't available, abort
 						return null;
@@ -352,48 +362,61 @@ class PathRouter {
 		return $matches;
 	}
 
-}
-
-class PathRouterPatternReplacer {
-
-	public $key, $params, $error;
-
 	/**
-	 * Replace keys inside path router patterns with text.
-	 * We do this inside of a replacement callback because after replacement we can't tell the
-	 * difference between a $1 that was not replaced and a $1 that was part of
-	 * the content a $1 was replaced with.
-	 * @param string $value
+	 * Replace $key etc. in param values with the matched strings from the path.
+	 *
+	 * @param array $pathMatches The match results from the path
+	 * @param string|null $key The key of the matching pattern
+	 * @param string $value The param value to be expanded
 	 * @return string|false
 	 */
-	public function replace( $value ) {
-		$this->error = false;
-		$value = preg_replace_callback( '/\$(\d+|key)/u', [ $this, 'callback' ], $value );
-		if ( $this->error ) {
+	protected static function expandParamValue( $pathMatches, $key, $value ) {
+		$error = false;
+
+		$replacer = function ( $m ) use ( $pathMatches, $key, &$error ) {
+			if ( $m[1] == "key" ) {
+				if ( is_null( $key ) ) {
+					$error = true;
+
+					return '';
+				}
+
+				return $key;
+			} else {
+				$d = $m[1];
+				if ( !isset( $pathMatches["par$d"] ) ) {
+					$error = true;
+
+					return '';
+				}
+
+				return rawurldecode( $pathMatches["par$d"] );
+			}
+		};
+
+		$value = preg_replace_callback( '/\$(\d+|key)/u', $replacer, $value );
+		if ( $error ) {
 			return false;
 		}
+
 		return $value;
 	}
 
 	/**
-	 * @param array $m
-	 * @return string
+	 * @internal For use by Title and WebRequest only.
+	 * @param array $actionPaths
+	 * @param string $articlePath
+	 * @return string[]|false
 	 */
-	protected function callback( $m ) {
-		if ( $m[1] == "key" ) {
-			if ( is_null( $this->key ) ) {
-				$this->error = true;
-				return '';
-			}
-			return $this->key;
-		} else {
-			$d = $m[1];
-			if ( !isset( $this->params["par$d"] ) ) {
-				$this->error = true;
-				return '';
-			}
-			return rawurldecode( $this->params["par$d"] );
+	public static function getActionPaths( array $actionPaths, $articlePath ) {
+		if ( !$actionPaths ) {
+			return false;
 		}
+		// Processing of urls for this feature requires that 'view' is set.
+		// By default, set it to the pretty article path.
+		if ( !isset( $actionPaths['view'] ) ) {
+			$actionPaths['view'] = $articlePath;
+		}
+		return $actionPaths;
 	}
-
 }

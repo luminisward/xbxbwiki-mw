@@ -27,9 +27,7 @@ use MediaWiki\Site\MediaWikiPageNameNormalizer;
  *
  * @author Marius Hoch
  */
-class MediaWikiPageNameNormalizerTest extends PHPUnit\Framework\TestCase {
-
-	use MediaWikiCoversValidator;
+class MediaWikiPageNameNormalizerTest extends MediaWikiIntegrationTestCase {
 
 	/**
 	 * @dataProvider normalizePageTitleProvider
@@ -107,9 +105,8 @@ class MediaWikiPageNameNormalizerTestMockHttp extends Http {
 	 */
 	public static $response;
 
-	public static function get( $url, $options = [], $caller = __METHOD__ ) {
+	public static function get( $url, array $options = [], $caller = __METHOD__ ) {
 		PHPUnit_Framework_Assert::assertInternalType( 'string', $url );
-		PHPUnit_Framework_Assert::assertInternalType( 'array', $options );
 		PHPUnit_Framework_Assert::assertInternalType( 'string', $caller );
 
 		return self::$response;

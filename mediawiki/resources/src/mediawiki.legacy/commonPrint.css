@@ -6,6 +6,8 @@
  * Copyright Alexander Limi
  */
 
+/* stylelint-disable selector-class-pattern */
+
 /**
  * Hide all the elements irrelevant for printing
  * Skins however can and should override.
@@ -16,7 +18,6 @@
 .catlinks,
 .magnify,
 .mw-cite-backlink,
-.mw-jump,
 .mw-editsection,
 .mw-editsection-like,
 .mw-hidden-catlinks,
@@ -27,7 +28,6 @@
 /* Various content ids, in alphabetical order */
 #column-one,
 #footer-places,
-#jump-to-nav,
 #mw-navigation,
 #siteNotice,
 /* Deprecated, changed in core */
@@ -124,7 +124,7 @@ pre,
 	background: #fff;
 	color: #000;
 	border: 1pt dashed #000;
-	padding: 1em 0;
+	padding: 1em;
 	font-size: 8pt;
 	white-space: pre-wrap;
 	word-wrap: break-word;
@@ -242,11 +242,6 @@ div.floatleft {
 	border: 0;
 }
 
-div.floatleft p,
-div.floatright p {
-	font-style: italic;
-}
-
 .center {
 	text-align: center;
 }
@@ -272,7 +267,7 @@ div.thumbinner {
 	color: #666;
 	text-align: center;
 	/* new block formatting context,
-	 * to clear background from floating content  */
+	 * to clear background from floating content */
 	overflow: hidden;
 	min-width: 100px;
 }
@@ -290,8 +285,8 @@ img.thumbborder {
 /**
  * Table rendering
  */
-/* Compare `table.wikitable` in shared.css */
-table.wikitable,
+/* Compare `.wikitable` in shared.css */
+.wikitable,
 .mw_metadata {
 	background: #fff;
 	margin: 1em 0;
@@ -300,16 +295,16 @@ table.wikitable,
 	font-size: 10pt;
 }
 
-table.wikitable > caption,
+.wikitable > caption,
 .mw_metadata caption {
 	padding: 5px;
 	font-size: 10pt;
 }
 
-table.wikitable > tr > th,
-table.wikitable > tr > td,
-table.wikitable > * > tr > th,
-table.wikitable > * > tr > td,
+.wikitable > tr > th,
+.wikitable > tr > td,
+.wikitable > * > tr > th,
+.wikitable > * > tr > td,
 .mw_metadata th,
 .mw_metadata td {
 	/* Important is required to override any inline styles provided by editors */
@@ -320,8 +315,8 @@ table.wikitable > * > tr > td,
 	padding: 0.4em 0.6em;
 }
 
-table.wikitable > tr > th,
-table.wikitable > * > tr > th,
+.wikitable > tr > th,
+.wikitable > * > tr > th,
 .mw_metadata th {
 	text-align: center;
 }

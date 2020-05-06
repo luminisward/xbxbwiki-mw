@@ -19,7 +19,11 @@
  *
  * @file
  */
+use MediaWiki\Block\DatabaseBlock;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Revision\MutableRevisionRecord;
+use MediaWiki\Revision\RevisionRecord;
+use MediaWiki\Revision\SlotRecord;
 
 /**
  * Class for viewing MediaWiki article and history.
@@ -28,64 +32,100 @@ use MediaWiki\MediaWikiServices;
  *
  * @todo Move and rewrite code to an Action class
  *
- * See design.txt for an overview.
  * Note: edit user interface and cache support functions have been
  * moved to separate EditPage and HTMLFileCache classes.
  */
 class Article implements Page {
-	/** @var IContextSource The context this Article is executed in */
+	/**
+	 * @var IContextSource|null The context this Article is executed in.
+	 * If null, RequestContext::getMain() is used.
+	 */
 	protected $mContext;
 
-	/** @var WikiPage The WikiPage object of this instance */
+	/** @var WikiPage|null The WikiPage object of this instance */
 	protected $mPage;
 
-	/** @var ParserOptions ParserOptions object for $wgUser articles */
+	/**
+	 * @var ParserOptions|null ParserOptions object for $wgUser articles.
+	 * Initialized by getParserOptions by calling $this->mPage->makeParserOptions().
+	 */
 	public $mParserOptions;
 
 	/**
-	 * @var string Text of the revision we are working on
-	 * @todo BC cruft
-	 */
-	public $mContent;
-
-	/**
-	 * @var Content Content of the revision we are working on
+	 * @var Content|null Content of the main slot of $this->mRevision.
+	 * @note This variable is read only, setting it has no effect.
+	 *       Extensions that wish to override the output of Article::view should use a hook.
+	 * @todo MCR: Remove in 1.33
+	 * @deprecated since 1.32
 	 * @since 1.21
 	 */
 	public $mContentObject;
 
-	/** @var bool Is the content ($mContent) already loaded? */
+	/**
+	 * @var bool Is the target revision loaded? Set by fetchRevisionRecord().
+	 *
+	 * @deprecated since 1.32. Whether content has been loaded should not be relevant to
+	 * code outside this class.
+	 */
 	public $mContentLoaded = false;
 
-	/** @var int|null The oldid of the article that is to be shown, 0 for the current revision */
+	/**
+	 * @var int|null The oldid of the article that was requested to be shown,
+	 * 0 for the current revision.
+	 * @see $mRevIdFetched
+	 */
 	public $mOldId;
 
-	/** @var Title Title from which we were redirected here */
+	/** @var Title|null Title from which we were redirected here, if any. */
 	public $mRedirectedFrom = null;
 
 	/** @var string|bool URL to redirect to or false if none */
 	public $mRedirectUrl = false;
 
-	/** @var int Revision ID of revision we are working on */
+	/**
+	 * @var int Revision ID of revision that was loaded.
+	 * @see $mOldId
+	 * @deprecated since 1.32, use getRevIdFetched() instead.
+	 */
 	public $mRevIdFetched = 0;
 
-	/** @var Revision Revision we are working on */
+	/**
+	 * @var Status|null represents the outcome of fetchRevisionRecord().
+	 * $fetchResult->value is the RevisionRecord object, if the operation was successful.
+	 *
+	 * The information in $fetchResult is duplicated by the following deprecated public fields:
+	 * $mRevIdFetched, $mContentLoaded. $mRevision (and $mContentObject) also typically duplicate
+	 * information of the loaded revision, but may be overwritten by extensions or due to errors.
+	 */
+	private $fetchResult = null;
+
+	/**
+	 * @var Revision|null Revision to be shown. Initialized by getOldIDFromRequest()
+	 * or fetchContentObject(). Normally loaded from the database, but may be replaced
+	 * by an extension, or be a fake representing an error message or some such.
+	 * While the output of Article::view is typically based on this revision,
+	 * it may be overwritten by error messages or replaced by extensions.
+	 */
 	public $mRevision = null;
 
-	/** @var ParserOutput */
-	public $mParserOutput;
+	/**
+	 * @var ParserOutput|null|false The ParserOutput generated for viewing the page,
+	 * initialized by view(). If no ParserOutput could be generated, this is set to false.
+	 * @deprecated since 1.32
+	 */
+	public $mParserOutput = null;
 
 	/**
 	 * @var bool Whether render() was called. With the way subclasses work
 	 * here, there doesn't seem to be any other way to stop calling
 	 * OutputPage::enableSectionEditLinks() and still have it work as it did before.
 	 */
-	private $disableSectionEditForRender = false;
+	protected $viewIsRenderAction = false;
 
 	/**
 	 * Constructor and clear the article
 	 * @param Title $title Reference to a Title object.
-	 * @param int $oldId Revision ID, null to fetch from request, zero for current
+	 * @param int|null $oldId Revision ID, null to fetch from request, zero for current
 	 */
 	public function __construct( Title $title, $oldId = null ) {
 		$this->mOldId = $oldId;
@@ -119,7 +159,7 @@ class Article implements Page {
 	 */
 	public static function newFromTitle( $title, IContextSource $context ) {
 		if ( NS_MEDIA == $title->getNamespace() ) {
-			// FIXME: where should this go?
+			// XXX: This should not be here, but where should it go?
 			$title = Title::makeTitle( NS_FILE, $title->getDBkey() );
 		}
 
@@ -201,6 +241,11 @@ class Article implements Page {
 		$this->mRedirectedFrom = null; # Title object if set
 		$this->mRevIdFetched = 0;
 		$this->mRedirectUrl = false;
+		$this->mRevision = null;
+		$this->mContentObject = null;
+		$this->fetchResult = null;
+
+		// TODO hard-deprecate direct access to public fields
 
 		$this->mPage->clear();
 	}
@@ -216,25 +261,15 @@ class Article implements Page {
 	 * This function has side effects! Do not use this function if you
 	 * only want the real revision text if any.
 	 *
-	 * @return Content Return the content of this revision
+	 * @deprecated since 1.32, use getRevisionFetched() or fetchRevisionRecord() instead.
+	 *
+	 * @return Content
 	 *
 	 * @since 1.21
 	 */
 	protected function getContentObject() {
 		if ( $this->mPage->getId() === 0 ) {
-			# If this is a MediaWiki:x message, then load the messages
-			# and return the message value for x.
-			if ( $this->getTitle()->getNamespace() == NS_MEDIAWIKI ) {
-				$text = $this->getTitle()->getDefaultMessageText();
-				if ( $text === false ) {
-					$text = '';
-				}
-
-				$content = ContentHandler::makeContent( $text, $this->getTitle() );
-			} else {
-				$message = $this->getContext()->getUser()->isLoggedIn() ? 'noarticletext' : 'noarticletextanon';
-				$content = new MessageContent( $message, null, 'parsemag' );
-			}
+			$content = $this->getSubstituteContent();
 		} else {
 			$this->fetchContentObject();
 			$content = $this->mContentObject;
@@ -244,7 +279,49 @@ class Article implements Page {
 	}
 
 	/**
-	 * @return int The oldid of the article that is to be shown, 0 for the current revision
+	 * Returns Content object to use when the page does not exist.
+	 *
+	 * @return Content
+	 */
+	private function getSubstituteContent() {
+		# If this is a MediaWiki:x message, then load the messages
+		# and return the message value for x.
+		if ( $this->getTitle()->getNamespace() == NS_MEDIAWIKI ) {
+			$text = $this->getTitle()->getDefaultMessageText();
+			if ( $text === false ) {
+				$text = '';
+			}
+
+			$content = ContentHandler::makeContent( $text, $this->getTitle() );
+		} else {
+			$message = $this->getContext()->getUser()->isLoggedIn() ? 'noarticletext' : 'noarticletextanon';
+			$content = new MessageContent( $message, null );
+		}
+
+		return $content;
+	}
+
+	/**
+	 * Returns ParserOutput to use when a page does not exist. In some cases, we still want to show
+	 * "virtual" content, e.g. in the MediaWiki namespace, or in the File namespace for non-local
+	 * files.
+	 *
+	 * @param ParserOptions $options
+	 *
+	 * @return ParserOutput
+	 */
+	protected function getEmptyPageParserOutput( ParserOptions $options ) {
+		$content = $this->getSubstituteContent();
+
+		return $content->getParserOutput( $this->getTitle(), 0, $options );
+	}
+
+	/**
+	 * @see getOldIDFromRequest()
+	 * @see getRevIdFetched()
+	 *
+	 * @return int The oldid of the article that is was requested in the constructor or via the
+	 *         context's WebRequest.
 	 */
 	public function getOldID() {
 		if ( is_null( $this->mOldId ) ) {
@@ -279,15 +356,23 @@ class Article implements Page {
 				if ( $this->mRevision !== null ) {
 					// Revision title doesn't match the page title given?
 					if ( $this->mPage->getId() != $this->mRevision->getPage() ) {
-						$function = [ get_class( $this->mPage ), 'newFromID' ];
-						$this->mPage = call_user_func( $function, $this->mRevision->getPage() );
+						$function = get_class( $this->mPage ) . '::newFromID';
+						$this->mPage = $function( $this->mRevision->getPage() );
 					}
 				}
 			}
 		}
 
+		$rl = MediaWikiServices::getInstance()->getRevisionLookup();
+		$oldRev = $this->mRevision ? $this->mRevision->getRevisionRecord() : null;
 		if ( $request->getVal( 'direction' ) == 'next' ) {
-			$nextid = $this->getTitle()->getNextRevisionID( $oldid );
+			$nextid = 0;
+			if ( $oldRev ) {
+				$nextRev = $rl->getNextRevision( $oldRev );
+				if ( $nextRev ) {
+					$nextid = $nextRev->getId();
+				}
+			}
 			if ( $nextid ) {
 				$oldid = $nextid;
 				$this->mRevision = null;
@@ -295,12 +380,20 @@ class Article implements Page {
 				$this->mRedirectUrl = $this->getTitle()->getFullURL( 'redirect=no' );
 			}
 		} elseif ( $request->getVal( 'direction' ) == 'prev' ) {
-			$previd = $this->getTitle()->getPreviousRevisionID( $oldid );
+			$previd = 0;
+			if ( $oldRev ) {
+				$prevRev = $rl->getPreviousRevision( $oldRev );
+				if ( $prevRev ) {
+					$previd = $prevRev->getId();
+				}
+			}
 			if ( $previd ) {
 				$oldid = $previd;
 				$this->mRevision = null;
 			}
 		}
+
+		$this->mRevIdFetched = $this->mRevision ? $this->mRevision->getId() : 0;
 
 		return $oldid;
 	}
@@ -309,6 +402,7 @@ class Article implements Page {
 	 * Get text content object
 	 * Does *NOT* follow redirects.
 	 * @todo When is this null?
+	 * @deprecated since 1.32, use fetchRevisionRecord() instead.
 	 *
 	 * @note Code that wants to retrieve page content from the database should
 	 * use WikiPage::getContent().
@@ -318,74 +412,141 @@ class Article implements Page {
 	 * @since 1.21
 	 */
 	protected function fetchContentObject() {
-		if ( $this->mContentLoaded ) {
-			return $this->mContentObject;
+		if ( !$this->mContentLoaded ) {
+			$this->fetchRevisionRecord();
+		}
+
+		return $this->mContentObject;
+	}
+
+	/**
+	 * Fetches the revision to work on.
+	 * The revision is typically loaded from the database, but may also be a fake representing
+	 * an error message or content supplied by an extension. Refer to $this->fetchResult for
+	 * the revision actually loaded from the database, and any errors encountered while doing
+	 * that.
+	 *
+	 * @return RevisionRecord|null
+	 */
+	protected function fetchRevisionRecord() {
+		if ( $this->fetchResult ) {
+			return $this->mRevision ? $this->mRevision->getRevisionRecord() : null;
 		}
 
 		$this->mContentLoaded = true;
-		$this->mContent = null;
+		$this->mContentObject = null;
 
 		$oldid = $this->getOldID();
 
-		# Pre-fill content with error message so that if something
-		# fails we'll have something telling us what we intended.
-		// XXX: this isn't page content but a UI message. horrible.
-		$this->mContentObject = new MessageContent( 'missing-revision', [ $oldid ] );
-
-		if ( $oldid ) {
-			# $this->mRevision might already be fetched by getOldIDFromRequest()
-			if ( !$this->mRevision ) {
-				$this->mRevision = Revision::newFromId( $oldid );
-				if ( !$this->mRevision ) {
-					wfDebug( __METHOD__ . " failed to retrieve specified revision, id $oldid\n" );
-					return false;
-				}
-			}
-		} else {
-			$oldid = $this->mPage->getLatest();
+		// $this->mRevision might already be fetched by getOldIDFromRequest()
+		if ( !$this->mRevision ) {
 			if ( !$oldid ) {
-				wfDebug( __METHOD__ . " failed to find page data for title " .
-					$this->getTitle()->getPrefixedText() . "\n" );
-				return false;
-			}
+				$this->mRevision = $this->mPage->getRevision();
 
-			# Update error message with correct oldid
-			$this->mContentObject = new MessageContent( 'missing-revision', [ $oldid ] );
+				if ( !$this->mRevision ) {
+					wfDebug( __METHOD__ . " failed to find page data for title " .
+						$this->getTitle()->getPrefixedText() . "\n" );
 
-			$this->mRevision = $this->mPage->getRevision();
+					// Just for sanity, output for this case is done by showMissingArticle().
+					$this->fetchResult = Status::newFatal( 'noarticletext' );
+					$this->applyContentOverride( $this->makeFetchErrorContent() );
+					return null;
+				}
+			} else {
+				$this->mRevision = Revision::newFromId( $oldid );
 
-			if ( !$this->mRevision ) {
-				wfDebug( __METHOD__ . " failed to retrieve current page, rev_id $oldid\n" );
-				return false;
+				if ( !$this->mRevision ) {
+					wfDebug( __METHOD__ . " failed to load revision, rev_id $oldid\n" );
+
+					$this->fetchResult = Status::newFatal( 'missing-revision', $oldid );
+					$this->applyContentOverride( $this->makeFetchErrorContent() );
+					return null;
+				}
 			}
 		}
 
-		// @todo FIXME: Horrible, horrible! This content-loading interface just plain sucks.
-		// We should instead work with the Revision object when we need it...
-		// Loads if user is allowed
-		$content = $this->mRevision->getContent(
-			Revision::FOR_THIS_USER,
+		$this->mRevIdFetched = $this->mRevision->getId();
+		$this->fetchResult = Status::newGood( $this->mRevision );
+
+		if (
+			!$this->mRevision->userCan( RevisionRecord::DELETED_TEXT, $this->getContext()->getUser() )
+		) {
+			wfDebug( __METHOD__ . " failed to retrieve content of revision " .
+				$this->mRevision->getId() . "\n" );
+
+			// Just for sanity, output for this case is done by showDeletedRevisionHeader().
+			$this->fetchResult = Status::newFatal( 'rev-deleted-text-permission' );
+			$this->applyContentOverride( $this->makeFetchErrorContent() );
+			return null;
+		}
+
+		if ( Hooks::isRegistered( 'ArticleAfterFetchContentObject' ) ) {
+			$contentObject = $this->mRevision->getContent(
+				RevisionRecord::FOR_THIS_USER,
+				$this->getContext()->getUser()
+			);
+
+			$hookContentObject = $contentObject;
+
+				// Avoid PHP 7.1 warning of passing $this by reference
+			$articlePage = $this;
+
+			Hooks::run(
+				'ArticleAfterFetchContentObject',
+				[ &$articlePage, &$hookContentObject ],
+				'1.32'
+			);
+
+			if ( $hookContentObject !== $contentObject ) {
+				// A hook handler is trying to override the content
+				$this->applyContentOverride( $hookContentObject );
+			}
+		}
+
+		// For B/C only
+		$this->mContentObject = $this->mRevision->getContent(
+			RevisionRecord::FOR_THIS_USER,
 			$this->getContext()->getUser()
 		);
 
-		if ( !$content ) {
-			wfDebug( __METHOD__ . " failed to retrieve content of revision " .
-				$this->mRevision->getId() . "\n" );
-			return false;
+		return $this->mRevision->getRevisionRecord();
+	}
+
+	/**
+	 * Returns a Content object representing any error in $this->fetchContent, or null
+	 * if there is no such error.
+	 *
+	 * @return Content|null
+	 */
+	private function makeFetchErrorContent() {
+		if ( !$this->fetchResult || $this->fetchResult->isOK() ) {
+			return null;
 		}
 
-		$this->mContentObject = $content;
-		$this->mRevIdFetched = $this->mRevision->getId();
+		return new MessageContent( $this->fetchResult->getMessage() );
+	}
 
-		// Avoid PHP 7.1 warning of passing $this by reference
-		$articlePage = $this;
+	/**
+	 * Applies a content override by constructing a fake Revision object and assigning
+	 * it to mRevision. The fake revision will not have a user, timestamp or summary set.
+	 *
+	 * This mechanism exists mainly to accommodate extensions that use the
+	 * ArticleAfterFetchContentObject. Once that hook has been removed, there should no longer
+	 * be a need for a fake revision object. fetchRevisionRecord() presently also uses this mechanism
+	 * to report errors, but that could be changed to use $this->fetchResult instead.
+	 *
+	 * @param Content $override Content to be used instead of the actual page content,
+	 *        coming from an extension or representing an error message.
+	 */
+	private function applyContentOverride( Content $override ) {
+		// Construct a fake revision
+		$rev = new MutableRevisionRecord( $this->getTitle() );
+		$rev->setContent( SlotRecord::MAIN, $override );
 
-		Hooks::run(
-			'ArticleAfterFetchContentObject',
-			[ &$articlePage, &$this->mContentObject ]
-		);
+		$this->mRevision = new Revision( $rev );
 
-		return $this->mContentObject;
+		// For B/C only
+		$this->mContentObject = $override;
 	}
 
 	/**
@@ -404,25 +565,32 @@ class Article implements Page {
 
 	/**
 	 * Get the fetched Revision object depending on request parameters or null
-	 * on failure.
+	 * on failure. The revision returned may be a fake representing an error message or
+	 * wrapping content supplied by an extension. Refer to $this->fetchResult for the
+	 * revision actually loaded from the database.
 	 *
 	 * @since 1.19
 	 * @return Revision|null
 	 */
 	public function getRevisionFetched() {
-		$this->fetchContentObject();
+		$this->fetchRevisionRecord();
 
-		return $this->mRevision;
+		if ( $this->fetchResult->isOK() ) {
+			return $this->mRevision;
+		}
 	}
 
 	/**
 	 * Use this to fetch the rev ID used on page views
 	 *
+	 * Before fetchRevisionRecord was called, this returns the page's latest revision,
+	 * regardless of what getOldID() returns.
+	 *
 	 * @return int Revision ID of last article revision
 	 */
 	public function getRevIdFetched() {
-		if ( $this->mRevIdFetched ) {
-			return $this->mRevIdFetched;
+		if ( $this->fetchResult && $this->fetchResult->isOK() ) {
+			return $this->fetchResult->value->getId();
 		} else {
 			return $this->mPage->getLatest();
 		}
@@ -433,7 +601,7 @@ class Article implements Page {
 	 * page of the given title.
 	 */
 	public function view() {
-		global $wgUseFileCache, $wgDebugToolbar;
+		global $wgUseFileCache;
 
 		# Get variables from query string
 		# As side effect this will load the revision and update the title
@@ -481,14 +649,15 @@ class Article implements Page {
 		if ( $outputPage->isPrintable() ) {
 			$parserOptions->setIsPrintable( true );
 			$poOptions['enableSectionEditLinks'] = false;
-		} elseif ( $this->disableSectionEditForRender
-			|| !$this->isCurrent() || !$this->getTitle()->quickUserCan( 'edit', $user )
+		} elseif ( $this->viewIsRenderAction || !$this->isCurrent() ||
+			!MediaWikiServices::getInstance()->getPermissionManager()
+				->quickUserCan( 'edit', $user, $this->getTitle() )
 		) {
 			$poOptions['enableSectionEditLinks'] = false;
 		}
 
 		# Try client and file cache
-		if ( !$wgDebugToolbar && $oldid === 0 && $this->mPage->checkTouched() ) {
+		if ( $oldid === 0 && $this->mPage->checkTouched() ) {
 			# Try to stream the output from file cache
 			if ( $wgUseFileCache && $this->tryFileCache() ) {
 				wfDebug( __METHOD__ . ": done file cache\n" );
@@ -558,11 +727,9 @@ class Article implements Page {
 					}
 					break;
 				case 3:
-					# This will set $this->mRevision if needed
-					$this->fetchContentObject();
-
 					# Are we looking at an old revision
-					if ( $oldid && $this->mRevision ) {
+					$rev = $this->fetchRevisionRecord();
+					if ( $oldid && $this->fetchResult->isOK() ) {
 						$this->setOldSubtitle( $oldid );
 
 						if ( !$this->showDeletedRevisionHeader() ) {
@@ -586,10 +753,21 @@ class Article implements Page {
 							"<div id='mw-clearyourcache' lang='$lang' dir='$dir' class='mw-content-$dir'>\n$1\n</div>",
 							'clearyourcache'
 						);
-					} elseif ( !Hooks::run( 'ArticleContentViewCustom',
-						[ $this->fetchContentObject(), $this->getTitle(), $outputPage ] )
+					} elseif ( !Hooks::run( 'ArticleRevisionViewCustom', [
+							$rev,
+							$this->getTitle(),
+							$oldid,
+							$outputPage,
+						] )
 					) {
-						# Allow extensions do their own custom view for certain pages
+						// NOTE: sync with hooks called in DifferenceEngine::renderNewRevision()
+						// Allow extensions do their own custom view for certain pages
+						$outputDone = true;
+					} elseif ( !Hooks::run( 'ArticleContentViewCustom',
+						[ $this->fetchContentObject(), $this->getTitle(), $outputPage ], '1.32' )
+					) {
+						// NOTE: sync with hooks called in DifferenceEngine::renderNewRevision()
+						// Allow extensions do their own custom view for certain pages
 						$outputDone = true;
 					}
 					break;
@@ -597,36 +775,55 @@ class Article implements Page {
 					# Run the parse, protected by a pool counter
 					wfDebug( __METHOD__ . ": doing uncached parse\n" );
 
-					$content = $this->getContentObject();
-					$poolArticleView = new PoolWorkArticleView( $this->getPage(), $parserOptions,
-						$this->getRevIdFetched(), $useParserCache, $content );
+					$rev = $this->fetchRevisionRecord();
+					$error = null;
 
-					if ( !$poolArticleView->execute() ) {
+					if ( $rev ) {
+						$poolArticleView = new PoolWorkArticleView(
+							$this->getPage(),
+							$parserOptions,
+							$this->getRevIdFetched(),
+							$useParserCache,
+							$rev,
+							// permission checking was done earlier via showDeletedRevisionHeader()
+							RevisionRecord::RAW
+						);
+						$ok = $poolArticleView->execute();
 						$error = $poolArticleView->getError();
+						$this->mParserOutput = $poolArticleView->getParserOutput() ?: null;
+
+						# Don't cache a dirty ParserOutput object
+						if ( $poolArticleView->getIsDirty() ) {
+							$outputPage->setCdnMaxage( 0 );
+							$outputPage->addHTML( "<!-- parser cache is expired, " .
+								"sending anyway due to pool overload-->\n" );
+						}
+					} else {
+						$ok = false;
+					}
+
+					if ( !$ok ) {
 						if ( $error ) {
 							$outputPage->clearHTML(); // for release() errors
 							$outputPage->enableClientCache( false );
 							$outputPage->setRobotPolicy( 'noindex,nofollow' );
 
-							$errortext = $error->getWikiText( false, 'view-pool-error' );
-							$outputPage->addWikiText( Html::errorBox( $errortext ) );
+							$errortext = $error->getWikiText(
+								false, 'view-pool-error', $this->getContext()->getLanguage()
+							);
+							$outputPage->wrapWikiTextAsInterface( 'errorbox', $errortext );
 						}
 						# Connection or timeout error
 						return;
 					}
 
-					$this->mParserOutput = $poolArticleView->getParserOutput();
-					$outputPage->addParserOutput( $this->mParserOutput, $poOptions );
-					if ( $content->getRedirectTarget() ) {
-						$outputPage->addSubtitle( "<span id=\"redirectsub\">" .
-							$this->getContext()->msg( 'redirectpagesub' )->parse() . "</span>" );
+					if ( $this->mParserOutput ) {
+						$outputPage->addParserOutput( $this->mParserOutput, $poOptions );
 					}
 
-					# Don't cache a dirty ParserOutput object
-					if ( $poolArticleView->getIsDirty() ) {
-						$outputPage->setCdnMaxage( 0 );
-						$outputPage->addHTML( "<!-- parser cache is expired, " .
-							"sending anyway due to pool overload-->\n" );
+					if ( $rev && $this->getRevisionRedirectTarget( $rev ) ) {
+						$outputPage->addSubtitle( "<span id=\"redirectsub\">" .
+							$this->getContext()->msg( 'redirectpagesub' )->parse() . "</span>" );
 					}
 
 					$outputDone = true;
@@ -637,11 +834,13 @@ class Article implements Page {
 			}
 		}
 
-		# Get the ParserOutput actually *displayed* here.
-		# Note that $this->mParserOutput is the *current*/oldid version output.
+		// Get the ParserOutput actually *displayed* here.
+		// Note that $this->mParserOutput is the *current*/oldid version output.
+		// Note that the ArticleViewHeader hook is allowed to set $outputDone to a
+		// ParserOutput instance.
 		$pOutput = ( $outputDone instanceof ParserOutput )
 			? $outputDone // object fetched by hook
-			: $this->mParserOutput;
+			: ( $this->mParserOutput ?: null ); // ParserOutput or null, avoid false
 
 		# Adjust title for main page & pages with displaytitle
 		if ( $pOutput ) {
@@ -664,12 +863,12 @@ class Article implements Page {
 		$outputPage->adaptCdnTTL( $this->mPage->getTimestamp(), IExpiringStore::TTL_DAY );
 
 		# Check for any __NOINDEX__ tags on the page using $pOutput
-		$policy = $this->getRobotPolicy( 'view', $pOutput );
+		$policy = $this->getRobotPolicy( 'view', $pOutput ?: null );
 		$outputPage->setIndexPolicy( $policy['index'] );
-		$outputPage->setFollowPolicy( $policy['follow'] );
+		$outputPage->setFollowPolicy( $policy['follow'] ); // FIXME: test this
 
 		$this->showViewFooter();
-		$this->mPage->doViewUpdates( $user, $oldid );
+		$this->mPage->doViewUpdates( $user, $oldid ); // FIXME: test this
 
 		# Load the postEdit module if the user just saved this revision
 		# See also EditPage::setPostEditCookie
@@ -680,8 +879,20 @@ class Article implements Page {
 			# Clear the cookie. This also prevents caching of the response.
 			$request->response()->clearCookie( $cookieKey );
 			$outputPage->addJsConfigVars( 'wgPostEdit', $postEdit );
-			$outputPage->addModules( 'mediawiki.action.view.postEdit' );
+			$outputPage->addModules( 'mediawiki.action.view.postEdit' ); // FIXME: test this
 		}
+	}
+
+	/**
+	 * @param RevisionRecord $revision
+	 * @return null|Title
+	 */
+	private function getRevisionRedirectTarget( RevisionRecord $revision ) {
+		// TODO: find a *good* place for the code that determines the redirect target for
+		// a given revision!
+		// NOTE: Use main slot content. Compare code in DerivedPageDataUpdater::revisionIsRedirect.
+		$content = $revision->getContent( SlotRecord::MAIN );
+		return $content ? $content->getRedirectTarget() : null;
 	}
 
 	/**
@@ -689,10 +900,13 @@ class Article implements Page {
 	 * @param ParserOutput $pOutput
 	 */
 	public function adjustDisplayTitle( ParserOutput $pOutput ) {
+		$out = $this->getContext()->getOutput();
+
 		# Adjust the title if it was set by displaytitle, -{T|}- or language conversion
 		$titleText = $pOutput->getTitleText();
 		if ( strval( $titleText ) !== '' ) {
-			$this->getContext()->getOutput()->setPageTitle( $titleText );
+			$out->setPageTitle( $titleText );
+			$out->setDisplayTitle( $titleText );
 		}
 	}
 
@@ -733,7 +947,7 @@ class Article implements Page {
 		);
 
 		// DifferenceEngine directly fetched the revision:
-		$this->mRevIdFetched = $de->mNewid;
+		$this->mRevIdFetched = $de->getNewid();
 		$de->showDiffPage( $diffOnly );
 
 		// Run view updates for the newer revision being diffed (and shown
@@ -750,7 +964,7 @@ class Article implements Page {
 	 * @return array The policy that should be set
 	 * @todo actions other than 'view'
 	 */
-	public function getRobotPolicy( $action, $pOutput = null ) {
+	public function getRobotPolicy( $action, ParserOutput $pOutput = null ) {
 		global $wgArticleRobotPolicies, $wgNamespaceRobotPolicies, $wgDefaultRobotPolicy;
 
 		$ns = $this->getTitle()->getNamespace();
@@ -765,7 +979,7 @@ class Article implements Page {
 			} else {
 				$specificTarget = $titleText;
 			}
-			if ( Block::newFromTarget( $specificTarget, $vagueTarget ) instanceof Block ) {
+			if ( DatabaseBlock::newFromTarget( $specificTarget, $vagueTarget ) instanceof DatabaseBlock ) {
 				return [
 					'index' => 'noindex',
 					'follow' => 'nofollow'
@@ -937,13 +1151,11 @@ class Article implements Page {
 	 * [[MediaWiki:Talkpagetext]]. For Article::view().
 	 */
 	public function showNamespaceHeader() {
-		if ( $this->getTitle()->isTalkPage() ) {
-			if ( !wfMessage( 'talkpageheader' )->isDisabled() ) {
-				$this->getContext()->getOutput()->wrapWikiMsg(
-					"<div class=\"mw-talkpageheader\">\n$1\n</div>",
-					[ 'talkpageheader' ]
-				);
-			}
+		if ( $this->getTitle()->isTalkPage() && !wfMessage( 'talkpageheader' )->isDisabled() ) {
+			$this->getContext()->getOutput()->wrapWikiMsg(
+				"<div class=\"mw-talkpageheader\">\n$1\n</div>",
+				[ 'talkpageheader' ]
+			);
 		}
 	}
 
@@ -974,14 +1186,20 @@ class Article implements Page {
 	 * @return bool
 	 */
 	public function showPatrolFooter() {
-		global $wgUseNPPatrol, $wgUseRCPatrol, $wgUseFilePatrol, $wgEnableAPI, $wgEnableWriteAPI;
+		global $wgUseNPPatrol, $wgUseRCPatrol, $wgUseFilePatrol;
+
+		// Allow hooks to decide whether to not output this at all
+		if ( !Hooks::run( 'ArticleShowPatrolFooter', [ $this ] ) ) {
+			return false;
+		}
 
 		$outputPage = $this->getContext()->getOutput();
 		$user = $this->getContext()->getUser();
 		$title = $this->getTitle();
 		$rc = false;
 
-		if ( !$title->quickUserCan( 'patrol', $user )
+		if ( !MediaWikiServices::getInstance()->getPermissionManager()
+				->quickUserCan( 'patrol', $user, $title )
 			|| !( $wgUseRCPatrol || $wgUseNPPatrol
 				|| ( $wgUseFilePatrol && $title->inNamespace( NS_FILE ) ) )
 		) {
@@ -1108,7 +1326,10 @@ class Article implements Page {
 		}
 
 		$outputPage->preventClickjacking();
-		if ( $wgEnableAPI && $wgEnableWriteAPI && $user->isAllowed( 'writeapi' ) ) {
+		if ( MediaWikiServices::getInstance()
+				->getPermissionManager()
+				->userHasRight( $user, 'writeapi' )
+		) {
 			$outputPage->addModules( 'mediawiki.page.patrol.ajax' );
 		}
 
@@ -1155,6 +1376,8 @@ class Article implements Page {
 
 		$title = $this->getTitle();
 
+		$services = MediaWikiServices::getInstance();
+
 		# Show info in user (talk) namespace. Does the user exist? Is he blocked?
 		if ( $title->getNamespace() == NS_USER
 			|| $title->getNamespace() == NS_USER_TALK
@@ -1162,17 +1385,23 @@ class Article implements Page {
 			$rootPart = explode( '/', $title->getText() )[0];
 			$user = User::newFromName( $rootPart, false /* allow IP users */ );
 			$ip = User::isIP( $rootPart );
-			$block = Block::newFromTarget( $user, $user );
+			$block = DatabaseBlock::newFromTarget( $user, $user );
 
 			if ( !( $user && $user->isLoggedIn() ) && !$ip ) { # User does not exist
 				$outputPage->wrapWikiMsg( "<div class=\"mw-userpage-userdoesnotexist error\">\n\$1\n</div>",
 					[ 'userpage-userdoesnotexist-view', wfEscapeWikiText( $rootPart ) ] );
-			} elseif ( !is_null( $block ) && $block->getType() != Block::TYPE_AUTO ) {
-				# Show log extract if the user is currently blocked
+			} elseif (
+				!is_null( $block ) &&
+				$block->getType() != DatabaseBlock::TYPE_AUTO &&
+				( $block->isSitewide() || $user->isBlockedFrom( $title ) )
+			) {
+				// Show log extract if the user is sitewide blocked or is partially
+				// blocked and not allowed to edit their user page or user talk page
 				LogEventsList::showLogExtract(
 					$outputPage,
 					'block',
-					MWNamespace::getCanonicalName( NS_USER ) . ':' . $block->getTarget(),
+					$services->getNamespaceInfo()->getCanonicalName( NS_USER ) . ':' .
+						$block->getTarget(),
 					'',
 					[
 						'lim' => 1,
@@ -1194,11 +1423,11 @@ class Article implements Page {
 		# Show delete and move logs if there were any such events.
 		# The logging query can DOS the site when bots/crawlers cause 404 floods,
 		# so be careful showing this. 404 pages must be cheap as they are hard to cache.
-		$cache = MediaWikiServices::getInstance()->getMainObjectStash();
-		$key = $cache->makeKey( 'page-recent-delete', md5( $title->getPrefixedText() ) );
+		$dbCache = ObjectCache::getInstance( 'db-replicated' );
+		$key = $dbCache->makeKey( 'page-recent-delete', md5( $title->getPrefixedText() ) );
 		$loggedIn = $this->getContext()->getUser()->isLoggedIn();
 		$sessionExists = $this->getContext()->getRequest()->getSession()->isPersistent();
-		if ( $loggedIn || $cache->get( $key ) || $sessionExists ) {
+		if ( $loggedIn || $dbCache->get( $key ) || $sessionExists ) {
 			$logTypes = [ 'delete', 'move', 'protect' ];
 
 			$dbr = wfGetDB( DB_REPLICA );
@@ -1242,13 +1471,16 @@ class Article implements Page {
 
 		# Show error message
 		$oldid = $this->getOldID();
+		$pm = MediaWikiServices::getInstance()->getPermissionManager();
 		if ( !$oldid && $title->getNamespace() === NS_MEDIAWIKI && $title->hasSourceText() ) {
-			$outputPage->addParserOutput( $this->getContentObject()->getParserOutput( $title ) );
+			// use fake Content object for system message
+			$parserOptions = ParserOptions::newCanonical( 'canonical' );
+			$outputPage->addParserOutput( $this->getEmptyPageParserOutput( $parserOptions ) );
 		} else {
 			if ( $oldid ) {
 				$text = wfMessage( 'missing-revision', $oldid )->plain();
-			} elseif ( $title->quickUserCan( 'create', $this->getContext()->getUser() )
-				&& $title->quickUserCan( 'edit', $this->getContext()->getUser() )
+			} elseif ( $pm->quickUserCan( 'create', $this->getContext()->getUser(), $title ) &&
+				$pm->quickUserCan( 'edit', $this->getContext()->getUser(), $title )
 			) {
 				$message = $this->getContext()->getUser()->isLoggedIn() ? 'noarticletext' : 'noarticletextanon';
 				$text = wfMessage( $message )->plain();
@@ -1258,7 +1490,7 @@ class Article implements Page {
 
 			$dir = $this->getContext()->getLanguage()->getDir();
 			$lang = $this->getContext()->getLanguage()->getHtmlCode();
-			$outputPage->addWikiText( Xml::openElement( 'div', [
+			$outputPage->addWikiTextAsInterface( Xml::openElement( 'div', [
 				'class' => "noarticletext mw-content-$dir",
 				'dir' => $dir,
 				'lang' => $lang,
@@ -1273,7 +1505,7 @@ class Article implements Page {
 	 * @return bool True if the view is allowed, false if not.
 	 */
 	public function showDeletedRevisionHeader() {
-		if ( !$this->mRevision->isDeleted( Revision::DELETED_TEXT ) ) {
+		if ( !$this->mRevision->isDeleted( RevisionRecord::DELETED_TEXT ) ) {
 			// Not deleted
 			return true;
 		}
@@ -1281,7 +1513,7 @@ class Article implements Page {
 		$outputPage = $this->getContext()->getOutput();
 		$user = $this->getContext()->getUser();
 		// If the user is not allowed to see it...
-		if ( !$this->mRevision->userCan( Revision::DELETED_TEXT, $user ) ) {
+		if ( !$this->mRevision->userCan( RevisionRecord::DELETED_TEXT, $user ) ) {
 			$outputPage->wrapWikiMsg( "<div class='mw-warning plainlinks'>\n$1\n</div>\n",
 				'rev-deleted-text-permission' );
 
@@ -1291,7 +1523,7 @@ class Article implements Page {
 			# Give explanation and add a link to view the revision...
 			$oldid = intval( $this->getOldID() );
 			$link = $this->getTitle()->getFullURL( "oldid={$oldid}&unhide=1" );
-			$msg = $this->mRevision->isDeleted( Revision::DELETED_RESTRICTED ) ?
+			$msg = $this->mRevision->isDeleted( RevisionRecord::DELETED_RESTRICTED ) ?
 				'rev-suppressed-text-unhide' : 'rev-deleted-text-unhide';
 			$outputPage->wrapWikiMsg( "<div class='mw-warning plainlinks'>\n$1\n</div>\n",
 				[ $msg, $link ] );
@@ -1299,7 +1531,7 @@ class Article implements Page {
 			return false;
 		// We are allowed to see...
 		} else {
-			$msg = $this->mRevision->isDeleted( Revision::DELETED_RESTRICTED ) ?
+			$msg = $this->mRevision->isDeleted( RevisionRecord::DELETED_RESTRICTED ) ?
 				'rev-suppressed-text-view' : 'rev-deleted-text-view';
 			$outputPage->wrapWikiMsg( "<div class='mw-warning plainlinks'>\n$1\n</div>\n", $msg );
 
@@ -1383,8 +1615,9 @@ class Article implements Page {
 					'oldid' => $oldid
 				] + $extraParams
 			);
-		$prev = $this->getTitle()->getPreviousRevisionID( $oldid );
-		$prevlink = $prev
+		$rl = MediaWikiServices::getInstance()->getRevisionLookup();
+		$prevExist = (bool)$rl->getPreviousRevision( $revision->getRevisionRecord() );
+		$prevlink = $prevExist
 			? Linker::linkKnown(
 				$this->getTitle(),
 				$context->msg( 'previousrevision' )->escaped(),
@@ -1395,7 +1628,7 @@ class Article implements Page {
 				] + $extraParams
 			)
 			: $context->msg( 'previousrevision' )->escaped();
-		$prevdiff = $prev
+		$prevdiff = $prevExist
 			? Linker::linkKnown(
 				$this->getTitle(),
 				$context->msg( 'diff' )->escaped(),
@@ -1435,7 +1668,7 @@ class Article implements Page {
 		}
 
 		// the outer div is need for styling the revision info and nav in MobileFrontend
-		$outputPage->addSubtitle( "<div class=\"mw-revision\">" . $revisionInfo .
+		$outputPage->addSubtitle( "<div class=\"mw-revision warningbox\">" . $revisionInfo .
 			"<div id=\"mw-revision-nav\">" . $cdel .
 			$context->msg( 'revision-nav' )->rawParams(
 				$prevdiff, $prevlink, $lnk, $curdiff, $nextlink, $nextdiff
@@ -1532,7 +1765,8 @@ class Article implements Page {
 	public function render() {
 		$this->getContext()->getRequest()->response()->header( 'X-Robots-Tag: noindex' );
 		$this->getContext()->getOutput()->setArticleBodyOnly( true );
-		$this->disableSectionEditForRender = true;
+		// We later set 'enableSectionEditLinks=false' based on this; also used by ImagePage
+		$this->viewIsRenderAction = true;
 		$this->view();
 	}
 
@@ -1613,7 +1847,10 @@ class Article implements Page {
 			[ 'delete', $this->getTitle()->getPrefixedText() ] )
 		) {
 			# Flag to hide all contents of the archived revisions
-			$suppress = $request->getCheck( 'wpSuppress' ) && $user->isAllowed( 'suppressrevision' );
+
+			$suppress = $request->getCheck( 'wpSuppress' ) && MediaWikiServices::getInstance()
+					->getPermissionManager()
+					->userHasRight( $user, 'suppressrevision' );
 
 			$this->doDelete( $reason, $suppress );
 
@@ -1652,7 +1889,7 @@ class Article implements Page {
 				__METHOD__
 			);
 
-			// @todo FIXME: i18n issue/patchwork message
+			// @todo i18n issue/patchwork message
 			$context->getOutput()->addHTML(
 				'<strong class="mw-delete-warning-revisions">' .
 				$context->msg( 'historywarning' )->numParams( $revisions )->parse() .
@@ -1679,7 +1916,7 @@ class Article implements Page {
 
 	/**
 	 * Output deletion confirmation dialog
-	 * @todo FIXME: Move to another file?
+	 * @todo Move to another file?
 	 * @param string $reason Prefilled reason
 	 */
 	public function confirmDelete( $reason ) {
@@ -1715,6 +1952,8 @@ class Article implements Page {
 
 		$outputPage->enableOOUI();
 
+		$fields = [];
+
 		$options = Xml::listDropDownOptions(
 			$ctx->msg( 'deletereason-dropdown' )->inContentLanguage()->text(),
 			[ 'other' => $ctx->msg( 'deletereasonotherlist' )->inContentLanguage()->text() ]
@@ -1738,15 +1977,13 @@ class Article implements Page {
 
 		// HTML maxlength uses "UTF-16 code units", which means that characters outside BMP
 		// (e.g. emojis) count for two each. This limit is overridden in JS to instead count
-		// Unicode codepoints (or 255 UTF-8 bytes for old schema).
-		$conf = $this->getContext()->getConfig();
-		$oldCommentSchema = $conf->get( 'CommentTableSchemaMigrationStage' ) === MIGRATION_OLD;
+		// Unicode codepoints.
 		$fields[] = new OOUI\FieldLayout(
 			new OOUI\TextInputWidget( [
 				'name' => 'wpReason',
 				'inputId' => 'wpReason',
 				'tabIndex' => 2,
-				'maxLength' => $oldCommentSchema ? 255 : CommentStore::COMMENT_CHARACTER_LIMIT,
+				'maxLength' => CommentStore::COMMENT_CHARACTER_LIMIT,
 				'infusable' => true,
 				'value' => $reason,
 				'autofocus' => true,
@@ -1772,8 +2009,8 @@ class Article implements Page {
 				]
 			);
 		}
-
-		if ( $user->isAllowed( 'suppressrevision' ) ) {
+		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
+		if ( $permissionManager->userHasRight( $user, 'suppressrevision' ) ) {
 			$fields[] = new OOUI\FieldLayout(
 				new OOUI\CheckboxInputWidget( [
 					'name' => 'wpSuppress',
@@ -1831,7 +2068,7 @@ class Article implements Page {
 			] )
 		);
 
-		if ( $user->isAllowed( 'editinterface' ) ) {
+		if ( $permissionManager->userHasRight( $user, 'editinterface' ) ) {
 			$link = Linker::linkKnown(
 				$ctx->msg( 'deletereason-dropdown' )->inContentLanguage()->getTitle(),
 				wfMessage( 'delete-edit-reasonlist' )->escaped(),
@@ -1850,25 +2087,31 @@ class Article implements Page {
 	 * Perform a deletion and output success or failure messages
 	 * @param string $reason
 	 * @param bool $suppress
+	 * @param bool $immediate false allows deleting over time via the job queue
+	 * @throws FatalError
+	 * @throws MWException
 	 */
-	public function doDelete( $reason, $suppress = false ) {
+	public function doDelete( $reason, $suppress = false, $immediate = false ) {
 		$error = '';
 		$context = $this->getContext();
 		$outputPage = $context->getOutput();
 		$user = $context->getUser();
-		$status = $this->mPage->doDeleteArticleReal( $reason, $suppress, 0, true, $error, $user );
+		$status = $this->mPage->doDeleteArticleReal( $reason, $suppress, 0, true, $error, $user,
+			[], 'delete', $immediate );
 
-		if ( $status->isGood() ) {
+		if ( $status->isOK() ) {
 			$deleted = $this->getTitle()->getPrefixedText();
 
 			$outputPage->setPageTitle( wfMessage( 'actioncomplete' ) );
 			$outputPage->setRobotPolicy( 'noindex,nofollow' );
 
-			$loglink = '[[Special:Log/delete|' . wfMessage( 'deletionlog' )->text() . ']]';
-
-			$outputPage->addWikiMsg( 'deletedtext', wfEscapeWikiText( $deleted ), $loglink );
-
-			Hooks::run( 'ArticleDeleteAfterSuccess', [ $this->getTitle(), $outputPage ] );
+			if ( $status->isGood() ) {
+				$loglink = '[[Special:Log/delete|' . wfMessage( 'deletionlog' )->text() . ']]';
+				$outputPage->addWikiMsg( 'deletedtext', wfEscapeWikiText( $deleted ), $loglink );
+				Hooks::run( 'ArticleDeleteAfterSuccess', [ $this->getTitle(), $outputPage ] );
+			} else {
+				$outputPage->addWikiMsg( 'delete-scheduled', wfEscapeWikiText( $deleted ) );
+			}
 
 			$outputPage->returnToMain( false );
 		} else {
@@ -1878,8 +2121,9 @@ class Article implements Page {
 			);
 
 			if ( $error == '' ) {
-				$outputPage->addWikiText(
-					"<div class=\"error mw-error-cannotdelete\">\n" . $status->getWikiText() . "\n</div>"
+				$outputPage->wrapWikiTextAsInterface(
+					'error mw-error-cannotdelete',
+					$status->getWikiText( false, false, $context->getLanguage() )
 				);
 				$deleteLogPage = new LogPage( 'delete' );
 				$outputPage->addHTML( Xml::element( 'h2', null, $deleteLogPage->getName()->text() ) );
@@ -1952,17 +2196,17 @@ class Article implements Page {
 		return $cacheable;
 	}
 
-	/**#@-*/
+	/** #@- */
 
 	/**
 	 * Lightweight method to get the parser output for a page, checking the parser cache
-	 * and so on. Doesn't consider most of the stuff that WikiPage::view is forced to
+	 * and so on. Doesn't consider most of the stuff that Article::view() is forced to
 	 * consider, so it's not appropriate to use there.
 	 *
 	 * @since 1.16 (r52326) for LiquidThreads
 	 *
 	 * @param int|null $oldid Revision ID or null
-	 * @param User $user The relevant user
+	 * @param User|null $user The relevant user
 	 * @return ParserOutput|bool ParserOutput or false if the given revision ID is not found
 	 */
 	public function getParserOutput( $oldid = null, User $user = null ) {
@@ -2094,10 +2338,10 @@ class Article implements Page {
 	 */
 	public function doDeleteArticleReal(
 		$reason, $suppress = false, $u1 = null, $u2 = null, &$error = '', User $user = null,
-		$tags = []
+		$tags = [], $immediate = false
 	) {
 		return $this->mPage->doDeleteArticleReal(
-			$reason, $suppress, $u1, $u2, $error, $user, $tags
+			$reason, $suppress, $u1, $u2, $error, $user, $tags, 'delete', $immediate
 		);
 	}
 
@@ -2105,8 +2349,13 @@ class Article implements Page {
 	 * Call to WikiPage function for backwards compatibility.
 	 * @see WikiPage::doDeleteUpdates
 	 */
-	public function doDeleteUpdates( $id, Content $content = null ) {
-		return $this->mPage->doDeleteUpdates( $id, $content );
+	public function doDeleteUpdates(
+		$id,
+		Content $content = null,
+		$revision = null,
+		User $user = null
+	) {
+		$this->mPage->doDeleteUpdates( $id, $content, $revision, $user );
 	}
 
 	/**
@@ -2114,11 +2363,11 @@ class Article implements Page {
 	 * @deprecated since 1.29. Use WikiPage::doEditContent() directly instead
 	 * @see WikiPage::doEditContent
 	 */
-	public function doEditContent( Content $content, $summary, $flags = 0, $baseRevId = false,
+	public function doEditContent( Content $content, $summary, $flags = 0, $originalRevId = false,
 		User $user = null, $serialFormat = null
 	) {
 		wfDeprecated( __METHOD__, '1.29' );
-		return $this->mPage->doEditContent( $content, $summary, $flags, $baseRevId,
+		return $this->mPage->doEditContent( $content, $summary, $flags, $originalRevId,
 			$user, $serialFormat
 		);
 	}
@@ -2193,7 +2442,7 @@ class Article implements Page {
 	 * Call to WikiPage function for backwards compatibility.
 	 * @see WikiPage::getComment
 	 */
-	public function getComment( $audience = Revision::FOR_PUBLIC, User $user = null ) {
+	public function getComment( $audience = RevisionRecord::FOR_PUBLIC, User $user = null ) {
 		return $this->mPage->getComment( $audience, $user );
 	}
 
@@ -2225,7 +2474,7 @@ class Article implements Page {
 	 * Call to WikiPage function for backwards compatibility.
 	 * @see WikiPage::getCreator
 	 */
-	public function getCreator( $audience = Revision::FOR_PUBLIC, User $user = null ) {
+	public function getCreator( $audience = RevisionRecord::FOR_PUBLIC, User $user = null ) {
 		return $this->mPage->getCreator( $audience, $user );
 	}
 
@@ -2337,7 +2586,7 @@ class Article implements Page {
 	 * Call to WikiPage function for backwards compatibility.
 	 * @see WikiPage::getUser
 	 */
-	public function getUser( $audience = Revision::FOR_PUBLIC, User $user = null ) {
+	public function getUser( $audience = RevisionRecord::FOR_PUBLIC, User $user = null ) {
 		return $this->mPage->getUser( $audience, $user );
 	}
 
@@ -2345,7 +2594,7 @@ class Article implements Page {
 	 * Call to WikiPage function for backwards compatibility.
 	 * @see WikiPage::getUserText
 	 */
-	public function getUserText( $audience = Revision::FOR_PUBLIC, User $user = null ) {
+	public function getUserText( $audience = RevisionRecord::FOR_PUBLIC, User $user = null ) {
 		return $this->mPage->getUserText( $audience, $user );
 	}
 
@@ -2516,7 +2765,7 @@ class Article implements Page {
 	 * @see WikiPage::setTimestamp
 	 */
 	public function setTimestamp( $ts ) {
-		return $this->mPage->setTimestamp( $ts );
+		$this->mPage->setTimestamp( $ts );
 	}
 
 	/**
@@ -2615,15 +2864,19 @@ class Article implements Page {
 	/**
 	 * @param string $reason
 	 * @param bool $suppress
-	 * @param int $u1 Unused
-	 * @param bool $u2 Unused
+	 * @param int|null $u1 Unused
+	 * @param bool|null $u2 Unused
 	 * @param string &$error
+	 * @param bool $immediate false allows deleting over time via the job queue
 	 * @return bool
+	 * @throws FatalError
+	 * @throws MWException
 	 */
 	public function doDeleteArticle(
-		$reason, $suppress = false, $u1 = null, $u2 = null, &$error = ''
+		$reason, $suppress = false, $u1 = null, $u2 = null, &$error = '', $immediate = false
 	) {
-		return $this->mPage->doDeleteArticle( $reason, $suppress, $u1, $u2, $error );
+		return $this->mPage->doDeleteArticle( $reason, $suppress, $u1, $u2, $error,
+			null, $immediate );
 	}
 
 	/**
@@ -2636,7 +2889,10 @@ class Article implements Page {
 	 * @return array
 	 */
 	public function doRollback( $fromP, $summary, $token, $bot, &$resultDetails, User $user = null ) {
-		$user = is_null( $user ) ? $this->getContext()->getUser() : $user;
+		if ( !$user ) {
+			$user = $this->getContext()->getUser();
+		}
+
 		return $this->mPage->doRollback( $fromP, $summary, $token, $bot, $resultDetails, $user );
 	}
 
@@ -2649,7 +2905,10 @@ class Article implements Page {
 	 * @return array
 	 */
 	public function commitRollback( $fromP, $summary, $bot, &$resultDetails, User $guser = null ) {
-		$guser = is_null( $guser ) ? $this->getContext()->getUser() : $guser;
+		if ( !$guser ) {
+			$guser = $this->getContext()->getUser();
+		}
+
 		return $this->mPage->commitRollback( $fromP, $summary, $bot, $resultDetails, $guser );
 	}
 

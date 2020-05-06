@@ -1,15 +1,16 @@
 {
 	"@metadata": {
 		"authors": [
-			"Beta16",
-			"Ricordisamoa",
 			"Alexmar983",
+			"Beta16",
+			"Giromin Cangiaxo",
 			"Nemo bis",
-			"Selven",
-			"Giromin Cangiaxo"
+			"Ricordisamoa",
+			"Sakretsu",
+			"Selven"
 		]
 	},
-	"mwoauth-desc": "Consente l'utilizzo di OAuth 1.0a per le API di autorizzazione",
+	"mwoauth-desc": "Consente l'utilizzo di OAuth 1.0a e OAuth 2.0 per le API di autorizzazione",
 	"mwoauth-verified": "Ora è consentito all'applicazione di accedere a MediaWiki per tuo conto.\n\nPer completare il processo, inserisci questo valore per la verifica nel'applicazione: '''$1'''",
 	"mwoauth-db-readonly": "Il database di OAuth è temporaneamente bloccato. Riprova tra pochi minuti.",
 	"mwoauth-missing-field": "Valore mancante per il campo \"$1\".",
@@ -18,7 +19,7 @@
 	"mwoauth-field-hidden": "(questa informazione è nascosta)",
 	"mwoauth-field-private": "(questa informazione è privata)",
 	"mwoauth-prefs-managegrants": "Applicazioni collegate:",
-	"mwoauth-prefs-managegrantslink": "Gestisci $1 {{PLURAL:$1|applicazione collegata|applicazioni collegate}}",
+	"mwoauth-prefs-managegrantslink": "Gestisci {{PLURAL:$1|$1 applicazione collegata|$1 applicazioni collegate|0=applicazioni collegate}}",
 	"mwoauth-consumer-allwikis": "Tutti i progetti su questo sito",
 	"mwoauth-consumer-key": "Chiave cliente:",
 	"mwoauth-consumer-name": "Nome applicazione:",
@@ -62,14 +63,13 @@
 	"mwoauth-consumer-stage-disabled": "disabilitato",
 	"mwoauth-consumer-stage-suppressed": "soppresso",
 	"oauthconsumerregistration": "Registrazione cliente OAuth",
-	"mwoauthconsumerregistration-notloggedin": "Devi effettuare l'accesso per accedere a questa pagina.",
 	"mwoauthconsumerregistration-navigation": "Navigazione:",
 	"mwoauthconsumerregistration-propose": "Proponi nuovo cliente",
 	"mwoauthconsumerregistration-list": "Miei clienti",
 	"mwoauthconsumerregistration-main": "Principale",
-	"mwoauthconsumerregistration-propose-text": "Gli sviluppatori dovrebbero usare il seguente modulo per proporre un nuovo cliente OAuth (vedi la [//www.mediawiki.org/wiki/Extension:OAuth documentazione dell'estensione] per ulteriori dettagli). Dopo l'invio di questo modulo, riceverai un token che l'applicazione utilizzerà per identificarsi in MediaWiki. Un amministratore di OAuth dovrà approvare l'applicazione prima che questa potrà essere autorizzata da altri utenti.\n\nAlcune raccomandazioni e osservazioni:\n* cerca di utilizzare meno assegnazioni possibili. Cerca di evitare di assegnare diritti che non sono realmente necessari ora\n* le versioni sono nella forma \"major.minor.release\" (gli ultimi due sono opzionali) ed aumentala nel caso siano necessarie ulteriori assegnazioni di diritti\n* fornisce una chiave RSA pubblica (in formato PEM) se possibile; altrimenti dovrà essere utilizzato un token segreto (meno sicuro)\n* è possibile utilizzare un ID progetto per limitare il cliente ad un singolo progetto su questo sito (usa \"*\" per tutti i progetti).",
+	"mwoauthconsumerregistration-propose-text": "Gli sviluppatori dovrebbero usare il seguente modulo per proporre un nuovo cliente OAuth (vedi la [https://www.mediawiki.org/wiki/Special:MyLanguage/Extension:OAuth documentazione dell'estensione] per ulteriori dettagli). Dopo l'invio di questo modulo, riceverai un token che l'applicazione utilizzerà per identificarsi in MediaWiki. Un amministratore di OAuth dovrà approvare l'applicazione prima che questa potrà essere autorizzata da altri utenti.\n\nAlcune raccomandazioni e osservazioni:\n* cerca di utilizzare meno assegnazioni possibili. Cerca di evitare di assegnare diritti che non sono realmente necessari ora\n* le versioni sono nella forma \"major.minor.release\" (gli ultimi due sono opzionali) ed aumentala nel caso siano necessarie ulteriori assegnazioni di diritti\n* fornisce una chiave RSA pubblica (in formato PEM) se possibile; altrimenti dovrà essere utilizzato un token segreto (meno sicuro)\n* è possibile utilizzare un ID progetto per limitare il cliente ad un singolo progetto su questo sito (usa \"*\" per tutti i progetti).",
 	"mwoauthconsumerregistration-update-text": "Utilizza il modulo qui sotto per aggiornare gli aspetti di un cliente OAuth che controlli.\n\nI valori qui sovrascriveranno tutti quelli precedenti. Non lasciarli in bianco se non hai intenzione di cancellare quei valori.",
-	"mwoauthconsumerregistration-maintext": "Questa pagina consente agli sviluppatori di proporre e aggiornare le applicazioni OAuth registrate in questo sito.\n\nDa qui è possibile:\n* [[Special:OAuthConsumerRegistration/propose|richiedere un token per un nuovo cliente]]\n* [[Special:OAuthConsumerRegistration/list|gestire i tuoi clienti esistenti]].\n\nPer ulteriori informazioni su OAuth, vedi la [//www.mediawiki.org/wiki/Extension:OAuth documentazione dell'estensione].",
+	"mwoauthconsumerregistration-maintext": "Questa pagina consente agli sviluppatori di proporre e aggiornare le applicazioni OAuth registrate in questo sito.\n\nDa qui è possibile:\n* [[Special:OAuthConsumerRegistration/propose|richiedere un token per un nuovo cliente]]\n* [[Special:OAuthConsumerRegistration/list|gestire i tuoi clienti esistenti]].\n\nPer ulteriori informazioni su OAuth, vedi la [https://www.mediawiki.org/wiki/Special:MyLanguage/Extension:OAuth documentazione dell'estensione].",
 	"mwoauthconsumerregistration-propose-legend": "Nuova applicazione cliente OAuth",
 	"mwoauthconsumerregistration-update-legend": "Aggiorna applicazione cliente OAuth",
 	"mwoauthconsumerregistration-propose-submit": "Proponi cliente",
@@ -157,7 +157,6 @@
 	"mwoauthlistconsumers-status-expired": "scaduto",
 	"oauthmanagemygrants": "Gestione applicazioni connesse",
 	"mwoauthmanagemygrants-text": "Questa pagina elenca tutte le applicazioni che possono utilizzare la tua utenza. Per tali applicazioni, l'ambito del loro accesso è limitata dalle autorizzazioni concesse all'applicazione quando è stata autorizzata ad agire per vostro conto. Se autorizzi separatamente un'applicazione all'accesso per vostro conto su diversi progetti \"fratelli\", poi vedrai configurazioni separate per ognuno dei progetti sotto.\n\nLe applicazioni connesse accedono alla tua utenza usando il protocollo OAuth. <span class=\"plainlinks\">([https://www.mediawiki.org/wiki/Special:MyLanguage/Help:OAuth Ulteriori informazioni sulle applicazioni connesse])</span>",
-	"mwoauthmanagemygrants-notloggedin": "Devi effettuare l'accesso per accedere a questa pagina.",
 	"mwoauthmanagemygrants-navigation": "Navigazione:",
 	"mwoauthmanagemygrants-showlist": "Elenco applicazioni connesse",
 	"mwoauthmanagemygrants-none": "Non ci sono applicazioni collegate alla tua utenza.",
@@ -180,6 +179,8 @@
 	"mwoauthmanagemygrants-success-update": "Le tue preferenze per questa applicazione sono state aggiornate.",
 	"mwoauthmanagemygrants-success-renounce": "L'accesso dell'applicazione alla tua utenza è stato revocato.",
 	"mwoauthmanagemygrants-basic-tooltip": "Perché non posso aggiornare questa assegnazione? Questa concessione offre le autorizzazioni di base per l'applicazione connessa che sono richieste per funzionare correttamente. Se non si desidera che questa applicazione connessa abbia questi diritti, si dovrebbe revocare l'accesso all'applicazione.",
+	"mwoauthmanagemygrants-editslink": "Le {{GENDER:$1|tue}} modifiche con questa applicazione",
+	"mwoauthmanagemygrants-actionslink": "Le {{GENDER:$1|tue}} azioni con questa applicazione",
 	"logentry-mwoauthconsumer-propose": "$1 {{GENDER:$2|ha proposto}} un cliente OAuth (chiave cliente $4)",
 	"logentry-mwoauthconsumer-update": "$1 {{GENDER:$2|ha aggiornato}} un cliente OAuth (chiave cliente $4)",
 	"logentry-mwoauthconsumer-approve": "$1 {{GENDER:$2|ha approvato}} un cliente OAuth di $3 (chiave cliente $4)",
@@ -262,5 +263,6 @@
 	"notification-oauth-app-reject-primary-link": "Visualizza applicazione",
 	"notification-oauth-app-disable-primary-link": "Visualizza applicazione",
 	"notification-oauth-app-reenable-primary-link": "Visualizza applicazione",
-	"notification-oauth-app-body": "Motivo: $1"
+	"notification-oauth-app-body": "Motivo: $1",
+	"mwoauth-oauth-version": "Versione protocollo OAuth"
 }

@@ -15,7 +15,7 @@
  * along with MultimediaViewer.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-( function ( mw, $, oo ) {
+( function () {
 	// Shortcut for prototype later
 	var DP;
 
@@ -66,7 +66,7 @@
 		this.$dialog.appendTo( this.$container );
 	}
 
-	oo.inheritClass( Dialog, mw.mmv.ui.Element );
+	OO.inheritClass( Dialog, mw.mmv.ui.Element );
 	DP = Dialog.prototype;
 
 	/**
@@ -77,7 +77,7 @@
 		this.$warning = $( '<div>' )
 			.addClass( 'mw-mmv-dialog-warning' )
 			.hide()
-			.click( function ( e ) {
+			.on( 'click', function ( e ) {
 				// prevent other click handlers such as the download CTA from intercepting clicks at the warning
 				e.stopPropagation();
 			} )
@@ -98,9 +98,7 @@
 			dialog.dependenciesLoaded = true;
 			dialog.toggleDialog( e );
 		}, function ( error ) {
-			if ( window.console && window.console.error ) {
-				window.console.error( 'mw.loader.using error when trying to load dialog dependencies', error );
-			}
+			mw.log.error( 'mw.loader.using error when trying to load dialog dependencies', error );
 		} );
 
 		return false;
@@ -255,4 +253,4 @@
 	};
 
 	mw.mmv.ui.Dialog = Dialog;
-}( mediaWiki, jQuery, OO ) );
+}() );

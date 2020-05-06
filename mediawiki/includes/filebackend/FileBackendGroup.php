@@ -79,15 +79,9 @@ class FileBackendGroup {
 			$repoName = $info['name'];
 			// Local vars that used to be FSRepo members...
 			$directory = $info['directory'];
-			$deletedDir = isset( $info['deletedDir'] )
-				? $info['deletedDir']
-				: false; // deletion disabled
-			$thumbDir = isset( $info['thumbDir'] )
-				? $info['thumbDir']
-				: "{$directory}/thumb";
-			$transcodedDir = isset( $info['transcodedDir'] )
-				? $info['transcodedDir']
-				: "{$directory}/transcoded";
+			$deletedDir = $info['deletedDir'] ?? false; // deletion disabled
+			$thumbDir = $info['thumbDir'] ?? "{$directory}/thumb";
+			$transcodedDir = $info['transcodedDir'] ?? "{$directory}/transcoded";
 			// Get the FS backend configuration
 			$autoBackends[] = [
 				'name' => $backendName,
@@ -100,7 +94,7 @@ class FileBackendGroup {
 					"{$repoName}-deleted" => $deletedDir,
 					"{$repoName}-temp" => "{$directory}/temp"
 				],
-				'fileMode' => isset( $info['fileMode'] ) ? $info['fileMode'] : 0644,
+				'fileMode' => $info['fileMode'] ?? 0644,
 				'directoryMode' => $wgDirectoryMode,
 			];
 		}
@@ -123,15 +117,35 @@ class FileBackendGroup {
 			}
 			$name = $config['name'];
 			if ( isset( $this->backends[$name] ) ) {
-				throw new LogicException( "Backend with name `{$name}` already registered." );
+				throw new LogicException( "Backend with name '$name' already registered." );
 			} elseif ( !isset( $config['class'] ) ) {
-				throw new InvalidArgumentException( "Backend with name `{$name}` has no class." );
+				throw new InvalidArgumentException( "Backend with name '$name' has no class." );
 			}
 			$class = $config['class'];
 
-			$config['readOnly'] = !empty( $config['readOnly'] )
-				? $config['readOnly']
-				: $readOnlyReason;
+			if ( isset( $config['domainId'] ) ) {
+				$domainId = $config['domainId'];
+			} elseif ( isset( $config['wikiId'] ) ) {
+				$domainId = $config['wikiId']; // b/c
+			} else {
+				// Only use the raw database/prefix for backwards compatibility
+				$ld = WikiMap::getCurrentWikiDbDomain();
+				$domainId = strlen( $ld->getTablePrefix() )
+					? "{$ld->getDatabase()}-{$ld->getTablePrefix()}"
+					: $ld->getDatabase();
+				// If the local wiki ID and local domain ID do not match, probably due to a
+				// non-default schema, issue a warning. A non-default schema indicates that
+				// it might be used to disambiguate different wikis.
+				$wikiId = WikiMap::getWikiIdFromDbDomain( $ld );
+				if ( $ld->getSchema() !== null && $domainId !== $wikiId ) {
+					wfWarn(
+						"\$wgFileBackend entry '$name' should have 'domainId' set.\n" .
+						"Legacy default 'domainId' is '$domainId' but wiki ID is '$wikiId'."
+					);
+				}
+			}
+			$config['domainId'] = $domainId;
+			$config['readOnly'] = $config['readOnly'] ?? $readOnlyReason;
 
 			unset( $config['class'] ); // backend won't need this
 			$this->backends[$name] = [
@@ -156,6 +170,7 @@ class FileBackendGroup {
 
 			$class = $config['class'];
 			if ( $class === FileBackendMultiWrite::class ) {
+				// @todo How can we test this? What's the intended use-case?
 				foreach ( $config['backends'] as $index => $beConfig ) {
 					if ( isset( $beConfig['template'] ) ) {
 						// Config is just a modified version of a registered backend's.
@@ -180,31 +195,40 @@ class FileBackendGroup {
 	 */
 	public function config( $name ) {
 		if ( !isset( $this->backends[$name] ) ) {
-			throw new InvalidArgumentException( "No backend defined with the name `$name`." );
+			throw new InvalidArgumentException( "No backend defined with the name '$name'." );
 		}
-		$class = $this->backends[$name]['class'];
 
 		$config = $this->backends[$name]['config'];
-		$config['class'] = $class;
-		$config += [ // set defaults
-			'wikiId' => wfWikiID(), // e.g. "my_wiki-en_"
-			'mimeCallback' => [ $this, 'guessMimeInternal' ],
-			'obResetFunc' => 'wfResetOutputBuffers',
-			'streamMimeFunc' => [ StreamFile::class, 'contentTypeFromPath' ],
-			'tmpDirectory' => wfTempDir(),
-			'statusWrapper' => [ Status::class, 'wrap' ],
-			'wanCache' => MediaWikiServices::getInstance()->getMainWANObjectCache(),
-			'srvCache' => ObjectCache::getLocalServerInstance( 'hash' ),
-			'logger' => LoggerFactory::getInstance( 'FileOperation' ),
-			'profiler' => Profiler::instance()
-		];
-		$config['lockManager'] =
-			LockManagerGroup::singleton( $config['wikiId'] )->get( $config['lockManager'] );
-		$config['fileJournal'] = isset( $config['fileJournal'] )
-			? FileJournal::factory( $config['fileJournal'], $name )
-			: FileJournal::factory( [ 'class' => NullFileJournal::class ], $name );
+		$services = MediaWikiServices::getInstance();
 
-		return $config;
+		return array_merge(
+			// Default backend parameters
+			[
+				'mimeCallback' => [ $this, 'guessMimeInternal' ],
+				'obResetFunc' => 'wfResetOutputBuffers',
+				'streamMimeFunc' => [ StreamFile::class, 'contentTypeFromPath' ],
+				'tmpFileFactory' => $services->getTempFSFileFactory(),
+				'statusWrapper' => [ Status::class, 'wrap' ],
+				'wanCache' => $services->getMainWANObjectCache(),
+				'srvCache' => ObjectCache::getLocalServerInstance( 'hash' ),
+				'logger' => LoggerFactory::getInstance( 'FileOperation' ),
+				'profiler' => function ( $section ) {
+					return Profiler::instance()->scopedProfileIn( $section );
+				}
+			],
+			// Configured backend parameters
+			$config,
+			// Resolved backend parameters
+			[
+				'class' => $this->backends[$name]['class'],
+				'lockManager' =>
+					LockManagerGroup::singleton( $config['domainId'] )
+						->get( $config['lockManager'] ),
+				'fileJournal' => isset( $config['fileJournal'] )
+					? FileJournal::factory( $config['fileJournal'], $name )
+					: FileJournal::factory( [ 'class' => NullFileJournal::class ], $name )
+			]
+		);
 	}
 
 	/**
@@ -238,7 +262,8 @@ class FileBackendGroup {
 		if ( !$type && $fsPath ) {
 			$type = $magic->guessMimeType( $fsPath, false );
 		} elseif ( !$type && strlen( $content ) ) {
-			$tmpFile = TempFSFile::factory( 'mime_', '', wfTempDir() );
+			$tmpFile = MediaWikiServices::getInstance()->getTempFSFileFactory()
+				->newTempFSFile( 'mime_', '' );
 			file_put_contents( $tmpFile->getPath(), $content );
 			$type = $magic->guessMimeType( $tmpFile->getPath(), false );
 		}

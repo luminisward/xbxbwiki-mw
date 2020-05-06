@@ -30,7 +30,7 @@ require_once __DIR__ . '/Maintenance.php';
  * @ingroup Maintenance
  */
 class CleanupInvalidDbKeys extends Maintenance {
-	/** @var array List of tables to clean up, and the field prefix for that table */
+	/** @var array[] List of tables to clean up, and the field prefix for that table */
 	protected static $tables = [
 		// Data tables
 		[ 'page', 'page' ],
@@ -87,7 +87,8 @@ TEXT
 
 		$this->outputStatus( 'Done!' );
 		if ( $this->hasOption( 'fix' ) ) {
-			$this->outputStatus( ' Cleaned up invalid DB keys on ' . wfWikiID() . "!\n" );
+			$dbDomain = WikiMap::getCurrentWikiDbDomain()->getId();
+			$this->outputStatus( " Cleaned up invalid DB keys on $dbDomain!\n" );
 		}
 	}
 
@@ -121,17 +122,10 @@ TEXT
 	 * @param array $tableParams A child array of self::$tables
 	 */
 	protected function cleanupTable( $tableParams ) {
-		$table = $tableParams[0];
-		$prefix = $tableParams[1];
-		$idField = isset( $tableParams['idField'] ) ?
-			$tableParams['idField'] :
-			"{$prefix}_id";
-		$nsField = isset( $tableParams['nsField'] ) ?
-			$tableParams['nsField'] :
-			"{$prefix}_namespace";
-		$titleField = isset( $tableParams['titleField'] ) ?
-			$tableParams['titleField'] :
-			"{$prefix}_title";
+		list( $table, $prefix ) = $tableParams;
+		$idField = $tableParams['idField'] ?? "{$prefix}_id";
+		$nsField = $tableParams['nsField'] ?? "{$prefix}_namespace";
+		$titleField = $tableParams['titleField'] ?? "{$prefix}_title";
 
 		$this->outputStatus( "Looking for invalid $titleField entries in $table...\n" );
 
@@ -292,7 +286,6 @@ TEXT
 		}
 
 		$this->outputStatus( "\n" );
-		return;
 	}
 
 	/**

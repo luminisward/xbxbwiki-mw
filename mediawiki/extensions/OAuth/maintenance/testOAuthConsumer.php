@@ -2,22 +2,27 @@
 
 namespace MediaWiki\Extensions\OAuth;
 
+use MediaWiki\Extensions\OAuth\Lib\OAuthConsumer;
+use MediaWiki\Extensions\OAuth\Lib\OAuthException;
+use MediaWiki\Extensions\OAuth\Lib\OAuthRequest;
+use MediaWiki\Extensions\OAuth\Lib\OAuthSignatureMethod_HMAC_SHA1;
+use MediaWiki\Extensions\OAuth\Lib\OAuthSignatureMethod_RSA_SHA1;
+
 /**
  * @ingroup Maintenance
  */
 if ( getenv( 'MW_INSTALL_PATH' ) ) {
 	$IP = getenv( 'MW_INSTALL_PATH' );
 } else {
-	$IP = __DIR__.'/../../..';
+	$IP = __DIR__ . '/../../..';
 }
 
-require __DIR__ . '/../lib/OAuth.php';
 require_once "$IP/maintenance/Maintenance.php";
 
 class TestOAuthConsumer extends \Maintenance {
 	public function __construct() {
 		parent::__construct();
-		$this->mDescription = "Test an OAuth consumer";
+		$this->addDescription( "Test an OAuth consumer" );
 		$this->addOption( 'consumerKey', 'Consumer key', true, true );
 		$this->addOption( 'consumerSecret', 'Consumer secret', false, true );
 		$this->addOption( 'RSAKeyFile',
@@ -48,11 +53,45 @@ class TestOAuthConsumer extends \Maintenance {
 		$c = new OAuthConsumer( $consumerKey, $consumerSecret );
 		$parsed = parse_url( $endpoint );
 		$params = [];
+		// @phan-suppress-next-line PhanTypePossiblyInvalidDimOffset
 		parse_str( $parsed['query'], $params );
 		$req_req = OAuthRequest::from_consumer_and_token( $c, null, "GET", $endpoint, $params );
 		if ( $rsaKeyFile ) {
 			try {
-				$sig_method = new TestOAuthSignatureMethod_RSA_SHA1( $rsaKeyFile );
+				$sig_method = new class ( $rsaKeyFile ) extends OAuthSignatureMethod_RSA_SHA1 {
+					private $privKey, $pubKey;
+
+					public function __construct( $privKeyFile ) {
+						$key = file_get_contents( $privKeyFile );
+						if ( !$key ) {
+							throw new OAuthException( "Could not read private key file $privKeyFile" );
+						}
+
+						$privKey = openssl_pkey_get_private( $key );
+						if ( !$privKey ) {
+							throw new OAuthException( "File $privKeyFile does not contain a private key" );
+						}
+
+						$details = openssl_pkey_get_details( $privKey );
+						if ( $details['type'] !== OPENSSL_KEYTYPE_RSA ) {
+							throw new OAuthException( "Key is not an RSA key" );
+						}
+						if ( !$details['key'] ) {
+							throw new OAuthException( "Could not get public key from private key" );
+						}
+
+						$this->privKey = $key;
+						$this->pubKey = $details['key'];
+					}
+
+					protected function fetch_public_cert( &$request ) {
+						return $this->pubKey;
+					}
+
+					protected function fetch_private_cert( &$request ) {
+						return $this->privKey;
+					}
+				};
 			} catch ( OAuthException $ex ) {
 				$this->error( $ex->getMessage(), 1 );
 			}
@@ -97,6 +136,7 @@ class TestOAuthConsumer extends \Maintenance {
 
 		$rc = new OAuthConsumer( $token->key, $token->secret );
 		$parsed = parse_url( $endpoint_acc );
+		// @phan-suppress-next-line PhanTypePossiblyInvalidDimOffset
 		parse_str( $parsed['query'], $params );
 		$params['oauth_verifier'] = trim( $line );
 
@@ -126,40 +166,5 @@ class TestOAuthConsumer extends \Maintenance {
 	}
 }
 
-class TestOAuthSignatureMethod_RSA_SHA1 extends OAuthSignatureMethod_RSA_SHA1 {
-	private $privKey, $pubKey;
-
-	function __construct( $privKeyFile ) {
-		$key = file_get_contents( $privKeyFile );
-		if ( !$key ) {
-			throw new OAuthException( "Could not read private key file $privKeyFile" );
-		}
-
-		$privKey = openssl_pkey_get_private( $key );
-		if ( !$privKey ) {
-			throw new OAuthException( "File $privKeyFile does not contain a private key" );
-		}
-
-		$details = openssl_pkey_get_details( $privKey );
-		if ( $details['type'] !== OPENSSL_KEYTYPE_RSA ) {
-			throw new OAuthException( "Key is not an RSA key" );
-		}
-		if ( !$details['key'] ) {
-			throw new OAuthException( "Could not get public key from private key" );
-		}
-
-		$this->privKey = $key;
-		$this->pubKey = $details['key'];
-	}
-
-	protected function fetch_public_cert( &$request ) {
-		return $this->pubKey;
-	}
-
-	protected function fetch_private_cert( &$request ) {
-		return $this->privKey;
-	}
-}
-
-$maintClass = "TestOAuthConsumer";
+$maintClass = TestOAuthConsumer::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

@@ -8,8 +8,8 @@ class DeferredUpdatesTest extends MediaWikiTestCase {
 	 * @covers DeferredUpdates::addUpdate
 	 * @covers DeferredUpdates::push
 	 * @covers DeferredUpdates::doUpdates
-	 * @covers DeferredUpdates::execute
-	 * @covers DeferredUpdates::runUpdate
+	 * @covers DeferredUpdates::handleUpdateQueue
+	 * @covers DeferredUpdates::attemptUpdate
 	 */
 	public function testAddAndRun() {
 		$update = $this->getMockBuilder( DeferrableUpdate::class )
@@ -92,7 +92,7 @@ class DeferredUpdatesTest extends MediaWikiTestCase {
 
 	/**
 	 * @covers DeferredUpdates::doUpdates
-	 * @covers DeferredUpdates::execute
+	 * @covers DeferredUpdates::handleUpdateQueue
 	 * @covers DeferredUpdates::addUpdate
 	 */
 	public function testDoUpdatesWeb() {
@@ -189,7 +189,7 @@ class DeferredUpdatesTest extends MediaWikiTestCase {
 
 	/**
 	 * @covers DeferredUpdates::doUpdates
-	 * @covers DeferredUpdates::execute
+	 * @covers DeferredUpdates::handleUpdateQueue
 	 * @covers DeferredUpdates::addUpdate
 	 */
 	public function testDoUpdatesCLI() {
@@ -263,7 +263,7 @@ class DeferredUpdatesTest extends MediaWikiTestCase {
 
 	/**
 	 * @covers DeferredUpdates::doUpdates
-	 * @covers DeferredUpdates::execute
+	 * @covers DeferredUpdates::handleUpdateQueue
 	 * @covers DeferredUpdates::addUpdate
 	 */
 	public function testPresendAddOnPostsendRun() {
@@ -295,7 +295,7 @@ class DeferredUpdatesTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @covers DeferredUpdates::runUpdate
+	 * @covers DeferredUpdates::attemptUpdate
 	 */
 	public function testRunUpdateTransactionScope() {
 		$this->setMwGlobals( 'wgCommandLineMode', false );
@@ -315,7 +315,7 @@ class DeferredUpdatesTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @covers DeferredUpdates::runUpdate
+	 * @covers DeferredUpdates::attemptUpdate
 	 * @covers TransactionRoundDefiningUpdate::getOrigin
 	 */
 	public function testRunOuterScopeUpdate() {
@@ -326,13 +326,74 @@ class DeferredUpdatesTest extends MediaWikiTestCase {
 
 		$ran = 0;
 		DeferredUpdates::addUpdate( new TransactionRoundDefiningUpdate(
-			function () use ( &$ran, $lbFactory ) {
-				$ran++;
-				$this->assertFalse( $lbFactory->hasTransactionRound(), 'No transaction' );
-			} )
+				function () use ( &$ran, $lbFactory ) {
+					$ran++;
+					$this->assertFalse( $lbFactory->hasTransactionRound(), 'No transaction' );
+				} )
 		);
 		DeferredUpdates::doUpdates();
 
 		$this->assertSame( 1, $ran, 'Update ran' );
+	}
+
+	/**
+	 * @covers DeferredUpdates::tryOpportunisticExecute
+	 */
+	public function testTryOpportunisticExecute() {
+		$calls = [];
+		$callback1 = function () use ( &$calls ) {
+			$calls[] = 1;
+		};
+		$callback2 = function () use ( &$calls ) {
+			$calls[] = 2;
+		};
+
+		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+		$lbFactory->beginMasterChanges( __METHOD__ );
+
+		DeferredUpdates::addCallableUpdate( $callback1 );
+		$this->assertEquals( [], $calls );
+
+		DeferredUpdates::tryOpportunisticExecute( 'run' );
+		$this->assertEquals( [], $calls );
+
+		$dbw = wfGetDB( DB_MASTER );
+		$dbw->onTransactionCommitOrIdle( function () use ( &$calls, $callback2 ) {
+			DeferredUpdates::addCallableUpdate( $callback2 );
+			$this->assertEquals( [], $calls );
+			$calls[] = 'oti';
+		} );
+		$this->assertEquals( 1, $dbw->trxLevel() );
+		$this->assertEquals( [], $calls );
+
+		$lbFactory->commitMasterChanges( __METHOD__ );
+
+		$this->assertEquals( [ 'oti' ], $calls );
+
+		DeferredUpdates::tryOpportunisticExecute( 'run' );
+		$this->assertEquals( [ 'oti', 1, 2 ], $calls );
+	}
+
+	/**
+	 * @covers DeferredUpdates::attemptUpdate
+	 */
+	public function testCallbackUpdateRounds() {
+		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+
+		$fname = __METHOD__;
+		$called = false;
+		DeferredUpdates::attemptUpdate(
+			new MWCallableUpdate(
+				function () use ( $lbFactory, $fname, &$called ) {
+					$lbFactory->flushReplicaSnapshots( $fname );
+					$lbFactory->commitMasterChanges( $fname );
+					$called = true;
+				},
+				$fname
+			),
+			$lbFactory
+		);
+
+		$this->assertTrue( $called, "Callback ran" );
 	}
 }

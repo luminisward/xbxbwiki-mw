@@ -18,6 +18,9 @@
  * @file
  */
 
+use Wikimedia\WrappedString;
+use Wikimedia\WrappedStringList;
+
 /**
  * New base template for a skin's template extended from QuickTemplate
  * this class features helper methods that provide common ways of interacting
@@ -29,22 +32,22 @@ abstract class BaseTemplate extends QuickTemplate {
 	 * Get a Message object with its context set
 	 *
 	 * @param string $name Message name
-	 * @param mixed $params,... Message params
+	 * @param mixed ...$params Message params
 	 * @return Message
 	 */
-	public function getMsg( $name /* ... */ ) {
-		return call_user_func_array( [ $this->getSkin(), 'msg' ], func_get_args() );
+	public function getMsg( $name, ...$params ) {
+		return $this->getSkin()->msg( $name, ...$params );
 	}
 
 	function msg( $str ) {
 		echo $this->getMsg( $str )->escaped();
 	}
 
-	function msgHtml( $str ) {
-		echo $this->getMsg( $str )->text();
-	}
-
+	/**
+	 * @deprecated since 1.33 Use ->msg() or ->getMsg() instead.
+	 */
 	function msgWiki( $str ) {
+		wfDeprecated( __METHOD__, '1.33' ); // Hard-deprecated in 1.34
 		echo $this->getMsg( $str )->parseAsBlock();
 	}
 
@@ -82,7 +85,7 @@ abstract class BaseTemplate extends QuickTemplate {
 				$toolbox['feeds']['links'][$key]['class'] = 'feedlink';
 			}
 		}
-		foreach ( [ 'contributions', 'log', 'blockip', 'emailuser',
+		foreach ( [ 'contributions', 'log', 'blockip', 'emailuser', 'mute',
 			'userrights', 'upload', 'specialpages' ] as $special
 		) {
 			if ( isset( $this->data['nav_urls'][$special] ) && $this->data['nav_urls'][$special] ) {
@@ -136,7 +139,15 @@ abstract class BaseTemplate extends QuickTemplate {
 			if ( isset( $plink['active'] ) ) {
 				$ptool['active'] = $plink['active'];
 			}
-			foreach ( [ 'href', 'class', 'text', 'dir', 'data', 'exists' ] as $k ) {
+			foreach ( [
+				'href',
+				'class',
+				'text',
+				'dir',
+				'data',
+				'exists',
+				'data-mw'
+			] as $k ) {
 				if ( isset( $plink[$k] ) ) {
 					$ptool['links'][0][$k] = $plink[$k];
 				}
@@ -249,28 +260,26 @@ abstract class BaseTemplate extends QuickTemplate {
 					$boxes[$boxName]['content'] = $content;
 				}
 			}
-		} else {
-			if ( $hookContents ) {
-				$boxes['TOOLBOXEND'] = [
-					'id' => 'p-toolboxend',
-					'header' => $boxes['TOOLBOX']['header'],
-					'generated' => false,
-					'content' => "<ul>{$hookContents}</ul>",
-				];
-				// HACK: Make sure that TOOLBOXEND is sorted next to TOOLBOX
-				$boxes2 = [];
-				foreach ( $boxes as $key => $box ) {
-					if ( $key === 'TOOLBOXEND' ) {
-						continue;
-					}
-					$boxes2[$key] = $box;
-					if ( $key === 'TOOLBOX' ) {
-						$boxes2['TOOLBOXEND'] = $boxes['TOOLBOXEND'];
-					}
+		} elseif ( $hookContents ) {
+			$boxes['TOOLBOXEND'] = [
+				'id' => 'p-toolboxend',
+				'header' => $boxes['TOOLBOX']['header'],
+				'generated' => false,
+				'content' => "<ul>{$hookContents}</ul>",
+			];
+			// HACK: Make sure that TOOLBOXEND is sorted next to TOOLBOX
+			$boxes2 = [];
+			foreach ( $boxes as $key => $box ) {
+				if ( $key === 'TOOLBOXEND' ) {
+					continue;
 				}
-				$boxes = $boxes2;
-				// END hack
+				$boxes2[$key] = $box;
+				if ( $key === 'TOOLBOX' ) {
+					$boxes2['TOOLBOXEND'] = $boxes['TOOLBOXEND'];
+				}
 			}
+			$boxes = $boxes2;
+			// END hack
 		}
 
 		return $boxes;
@@ -360,11 +369,7 @@ abstract class BaseTemplate extends QuickTemplate {
 	 * @return string
 	 */
 	function makeLink( $key, $item, $options = [] ) {
-		if ( isset( $item['text'] ) ) {
-			$text = $item['text'];
-		} else {
-			$text = wfMessage( isset( $item['msg'] ) ? $item['msg'] : $key )->text();
-		}
+		$text = $item['text'] ?? wfMessage( $item['msg'] ?? $key )->text();
 
 		$html = htmlspecialchars( $text );
 
@@ -375,9 +380,7 @@ abstract class BaseTemplate extends QuickTemplate {
 			}
 			while ( count( $wrapper ) > 0 ) {
 				$element = array_pop( $wrapper );
-				$html = Html::rawElement( $element['tag'], isset( $element['attributes'] )
-					? $element['attributes']
-					: null, $html );
+				$html = Html::rawElement( $element['tag'], $element['attributes'] ?? null, $html );
 			}
 		}
 
@@ -448,8 +451,10 @@ abstract class BaseTemplate extends QuickTemplate {
 	 * @param array $item Array of list item data containing some of a specific set of keys.
 	 * The "id", "class" and "itemtitle" keys will be used as attributes for the list item,
 	 * if "active" contains a value of true a "active" class will also be appended to class.
+	 * @phan-param array{id?:string,class?:string,itemtitle?:string,active?:bool} $item
 	 *
 	 * @param array $options
+	 * @phan-param array{tag?:string} $options
 	 *
 	 * If you want something other than a "<li>" you can pass a tag name such as
 	 * "tag" => "span" in the $options array to change the tag used.
@@ -471,6 +476,10 @@ abstract class BaseTemplate extends QuickTemplate {
 	 * @return string
 	 */
 	function makeListItem( $key, $item, $options = [] ) {
+		// In case this is still set from SkinTemplate, we don't want it to appear in
+		// the HTML output (normally removed in SkinTemplate::buildContentActionUrls())
+		unset( $item['redundant'] );
+
 		if ( isset( $item['links'] ) ) {
 			$links = [];
 			foreach ( $item['links'] as $linkKey => $link ) {
@@ -514,7 +523,7 @@ abstract class BaseTemplate extends QuickTemplate {
 		if ( isset( $item['itemtitle'] ) ) {
 			$attrs['title'] = $item['itemtitle'];
 		}
-		return Html::rawElement( isset( $options['tag'] ) ? $options['tag'] : 'li', $attrs, $html );
+		return Html::rawElement( $options['tag'] ?? 'li', $attrs, $html );
 	}
 
 	function makeSearchInput( $attrs = [] ) {
@@ -558,11 +567,9 @@ abstract class BaseTemplate extends QuickTemplate {
 				unset( $buttonAttrs['height'] );
 				$imgAttrs = [
 					'src' => $attrs['src'],
-					'alt' => isset( $attrs['alt'] )
-						? $attrs['alt']
-						: wfMessage( 'searchbutton' )->text(),
-					'width' => isset( $attrs['width'] ) ? $attrs['width'] : null,
-					'height' => isset( $attrs['height'] ) ? $attrs['height'] : null,
+					'alt' => $attrs['alt'] ?? wfMessage( 'searchbutton' )->text(),
+					'width' => $attrs['width'] ?? null,
+					'height' => $attrs['height'] ?? null,
 				];
 				return Html::rawElement( 'button', $buttonAttrs, Html::element( 'img', $imgAttrs ) );
 			default:
@@ -576,7 +583,7 @@ abstract class BaseTemplate extends QuickTemplate {
 	 * If you pass "flat" as an option then the returned array will be a flat array
 	 * of footer icons instead of a key/value array of footerlinks arrays broken
 	 * up into categories.
-	 * @param string $option
+	 * @param string|null $option
 	 * @return array|mixed
 	 */
 	function getFooterLinks( $option = null ) {
@@ -598,10 +605,7 @@ abstract class BaseTemplate extends QuickTemplate {
 
 		if ( $option == 'flat' ) {
 			// fold footerlinks into a single array using a bit of trickery
-			$validFooterLinks = call_user_func_array(
-				'array_merge',
-				array_values( $validFooterLinks )
-			);
+			$validFooterLinks = array_merge( ...array_values( $validFooterLinks ) );
 		}
 
 		return $validFooterLinks;
@@ -616,7 +620,7 @@ abstract class BaseTemplate extends QuickTemplate {
 	 * in the list of footer icons. This is mostly useful for skins which only
 	 * display the text from footericons instead of the images and don't want a
 	 * duplicate copyright statement because footerlinks already rendered one.
-	 * @param string $option
+	 * @param string|null $option
 	 * @return array
 	 */
 	function getFooterIcons( $option = null ) {
@@ -754,14 +758,15 @@ abstract class BaseTemplate extends QuickTemplate {
 	 * debug stuff. This should be called right before outputting the closing
 	 * body and html tags.
 	 *
-	 * @return string
+	 * @return string|WrappedStringList HTML
 	 * @since 1.29
 	 */
-	function getTrail() {
-		$html = MWDebug::getDebugHTML( $this->getSkin()->getContext() );
-		$html .= $this->get( 'bottomscripts' );
-		$html .= $this->get( 'reporttime' );
-
-		return $html;
+	public function getTrail() {
+		return WrappedString::join( "\n", [
+			// @phan-suppress-next-line PhanTypeMismatchArgument
+			MWDebug::getDebugHTML( $this->getSkin()->getContext() ),
+			$this->get( 'bottomscripts' ),
+			$this->get( 'reporttime' )
+		] );
 	}
 }

@@ -30,23 +30,20 @@ class GadgetHooks {
 	 * @param WikiPage $wikiPage
 	 * @param User $user
 	 * @param Content $content New page content
-	 * @return bool
 	 */
 	public static function onPageContentSaveComplete( WikiPage $wikiPage, $user, $content ) {
 		// update cache if MediaWiki:Gadgets-definition was edited
 		GadgetRepo::singleton()->handlePageUpdate( $wikiPage->getTitle() );
-		return true;
 	}
 
 	/**
 	 * UserGetDefaultOptions hook handler
 	 * @param array &$defaultOptions Array of default preference keys and values
-	 * @return bool
 	 */
-	public static function userGetDefaultOptions( &$defaultOptions ) {
+	public static function userGetDefaultOptions( array &$defaultOptions ) {
 		$gadgets = GadgetRepo::singleton()->getStructuredList();
 		if ( !$gadgets ) {
-			return true;
+			return;
 		}
 
 		/**
@@ -59,24 +56,22 @@ class GadgetHooks {
 				}
 			}
 		}
-
-		return true;
 	}
 
 	/**
 	 * GetPreferences hook handler.
 	 * @param User $user
 	 * @param array &$preferences Preference descriptions
-	 * @return bool
 	 */
-	public static function getPreferences( $user, &$preferences ) {
+	public static function getPreferences( User $user, array &$preferences ) {
 		$gadgets = GadgetRepo::singleton()->getStructuredList();
 		if ( !$gadgets ) {
-			return true;
+			return;
 		}
 
 		$options = [];
 		$default = [];
+		$skin = RequestContext::getMain()->getSkin();
 		foreach ( $gadgets as $section => $thisSection ) {
 			$available = [];
 
@@ -84,7 +79,11 @@ class GadgetHooks {
 			 * @var $gadget Gadget
 			 */
 			foreach ( $thisSection as $gadget ) {
-				if ( !$gadget->isHidden() && $gadget->isAllowed( $user ) ) {
+				if (
+					!$gadget->isHidden()
+					&& $gadget->isAllowed( $user )
+					&& $gadget->isSkinSupported( $skin )
+				) {
 					$gname = $gadget->getName();
 					# bug 30182: dir="auto" because it's often not translated
 					$desc = '<span dir="auto">' . $gadget->getDescription() . '</span>';
@@ -109,14 +108,9 @@ class GadgetHooks {
 		$preferences['gadgets-intro'] =
 			[
 				'type' => 'info',
-				'label' => '&#160;',
-				'default' => Xml::tags( 'tr', [],
-					Xml::tags( 'td', [ 'colspan' => 2 ],
-						wfMessage( 'gadgets-prefstext' )->parseAsBlock() ) ),
+				'default' => wfMessage( 'gadgets-prefstext' )->parseAsBlock(),
 				'section' => 'gadgets',
-				'raw' => 1,
-				'rawrow' => 1,
-				'noglobal' => true,
+				'raw' => true,
 			];
 
 		$preferences['gadgets'] =
@@ -129,16 +123,13 @@ class GadgetHooks {
 				'default' => $default,
 				'noglobal' => true,
 			];
-
-		return true;
 	}
 
 	/**
 	 * ResourceLoaderRegisterModules hook handler.
 	 * @param ResourceLoader &$resourceLoader
-	 * @return bool
 	 */
-	public static function registerModules( &$resourceLoader ) {
+	public static function registerModules( ResourceLoader &$resourceLoader ) {
 		$repo = GadgetRepo::singleton();
 		$ids = $repo->getGadgetIds();
 
@@ -148,20 +139,17 @@ class GadgetHooks {
 				'id' => $id,
 			] );
 		}
-
-		return true;
 	}
 
 	/**
 	 * BeforePageDisplay hook handler.
 	 * @param OutputPage $out
-	 * @return bool
 	 */
-	public static function beforePageDisplay( $out ) {
+	public static function beforePageDisplay( OutputPage $out ) {
 		$repo = GadgetRepo::singleton();
 		$ids = $repo->getGadgetIds();
 		if ( !$ids ) {
-			return true;
+			return;
 		}
 
 		$lb = new LinkBatch();
@@ -172,6 +160,7 @@ class GadgetHooks {
 		 * @var $gadget Gadget
 		 */
 		$user = $out->getUser();
+		$skin = $out->getSkin();
 		foreach ( $ids as $id ) {
 			try {
 				$gadget = $repo->getGadget( $id );
@@ -187,7 +176,10 @@ class GadgetHooks {
 					// @todo: Emit warning for invalid peer?
 				}
 			}
-			if ( $gadget->isEnabled( $user ) && $gadget->isAllowed( $user ) ) {
+			if ( $gadget->isEnabled( $user )
+				&& $gadget->isAllowed( $user )
+				&& $gadget->isSkinSupported( $skin )
+			) {
 				if ( $gadget->hasModule() ) {
 					if ( $gadget->getType() === 'styles' ) {
 						$out->addModuleStyles( Gadget::getModuleName( $gadget->getName() ) );
@@ -216,8 +208,6 @@ class GadgetHooks {
 			$strings[] = self::makeLegacyWarning( $id );
 		}
 		$out->addHTML( WrappedString::join( "\n", $strings ) );
-
-		return true;
 	}
 
 	private static function makeLegacyWarning( $id ) {
@@ -240,9 +230,12 @@ class GadgetHooks {
 	 * @param string $summary
 	 * @throws Exception
 	 * @return bool
-	 * @suppress PhanUndeclaredMethod
 	 */
-	public static function onEditFilterMergedContent( $context, $content, $status, $summary ) {
+	public static function onEditFilterMergedContent( IContextSource $context,
+		Content $content,
+		Status $status,
+		$summary
+	) {
 		$title = $context->getTitle();
 
 		if ( !$title->inNamespace( NS_GADGET_DEFINITION ) ) {
@@ -256,9 +249,9 @@ class GadgetHooks {
 			);
 		}
 
-		$status = $content->validate();
-		if ( !$status->isGood() ) {
-			$status->merge( $status );
+		$validateStatus = $content->validate();
+		if ( !$validateStatus->isGood() ) {
+			$status->merge( $validateStatus );
 			return false;
 		}
 
@@ -288,7 +281,7 @@ class GadgetHooks {
 	public static function onContentHandlerDefaultModelFor( Title $title, &$model ) {
 		if ( $title->inNamespace( NS_GADGET ) ) {
 			preg_match( '!\.(css|js)$!u', $title->getText(), $ext );
-			$ext = isset( $ext[1] ) ? $ext[1] : '';
+			$ext = $ext[1] ?? '';
 			switch ( $ext ) {
 				case 'js':
 					$model = 'javascript';
@@ -322,11 +315,9 @@ class GadgetHooks {
 	/**
 	 * Add the GadgetUsage special page to the list of QueryPages.
 	 * @param array &$queryPages
-	 * @return bool
 	 */
-	public static function onwgQueryPages( &$queryPages ) {
+	public static function onwgQueryPages( array &$queryPages ) {
 		$queryPages[] = [ 'SpecialGadgetUsage', 'GadgetUsage' ];
-		return true;
 	}
 
 	/**
@@ -336,7 +327,7 @@ class GadgetHooks {
 	 * @param string[] &$where Array of where clause conditions to add to.
 	 * @param IDatabase $db
 	 */
-	public static function onDeleteUnknownPreferences( &$where, IDatabase $db ) {
+	public static function onDeleteUnknownPreferences( array &$where, IDatabase $db ) {
 		$where[] = 'up_property NOT' . $db->buildLike( 'gadget-', $db->anyString() );
 	}
 }

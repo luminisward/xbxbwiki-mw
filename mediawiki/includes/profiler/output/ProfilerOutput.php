@@ -48,7 +48,19 @@ abstract class ProfilerOutput {
 	}
 
 	/**
-	 * Log MediaWiki-style profiling data
+	 * May the log() try to write to standard output?
+	 * @return bool
+	 * @since 1.33
+	 */
+	public function logsToOutput() {
+		return false;
+	}
+
+	/**
+	 * Log MediaWiki-style profiling data.
+	 *
+	 * For classes that enable logsToOutput(), this must not
+	 * be called unless Profiler::setAllowOutput is enabled.
 	 *
 	 * @param array $stats Result of Profiler::getFunctionStats()
 	 */

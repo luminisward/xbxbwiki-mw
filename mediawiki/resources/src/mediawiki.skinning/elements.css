@@ -6,6 +6,8 @@
  * This style sheet is used by the Monobook and Vector skins.
  */
 
+/* stylelint-disable selector-class-pattern */
+
 /* Links */
 a {
 	text-decoration: none;
@@ -53,10 +55,12 @@ a.mw-selflink {
 	font-weight: bold;
 	text-decoration: inherit;
 }
+
 a.mw-selflink:hover {
 	cursor: inherit;
 	text-decoration: inherit;
 }
+
 a.mw-selflink:active,
 a.mw-selflink:visited {
 	color: inherit;
@@ -106,7 +110,6 @@ img {
 
 hr {
 	height: 1px;
-	color: #a2a9b1;
 	background-color: #a2a9b1;
 	border: 0;
 	margin: 0.2em 0;
@@ -182,7 +185,6 @@ p img {
 }
 
 ul {
-	list-style-type: square;
 	margin: 0.3em 0 0 1.6em;
 	padding: 0;
 }

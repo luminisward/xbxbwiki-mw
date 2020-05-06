@@ -53,9 +53,8 @@
 class UserNotLoggedIn extends ErrorPageError {
 
 	/**
-	 * @note The value of the $reasonMsg parameter must be put into LoginForm::validErrorMessages or
-	 * set with the LoginFormValidErrorMessages Hook.
-	 * if you want the user to be automatically redirected to the login form.
+	 * @note The value of the $reasonMsg parameter must be set with the LoginFormValidErrorMessages
+	 * hook if you want the user to be automatically redirected to the login form.
 	 *
 	 * @param string $reasonMsg A message key containing the reason for the error.
 	 *        Optional, default: 'exception-nologin-text'
@@ -76,14 +75,15 @@ class UserNotLoggedIn extends ErrorPageError {
 	 * Redirect to Special:Userlogin if the specified message is compatible. Otherwise,
 	 * show an error page as usual.
 	 */
-	public function report() {
+	public function report( $action = self::SEND_OUTPUT ) {
 		// If an unsupported message is used, don't try redirecting to Special:Userlogin,
 		// since the message may not be compatible.
 		if ( !in_array( $this->msg, LoginHelper::getValidErrorMessages() ) ) {
-			parent::report();
+			parent::report( $action );
+			return;
 		}
 
-		// Message is valid. Redirec to Special:Userlogin
+		// Message is valid. Redirect to Special:Userlogin
 
 		$context = RequestContext::getMain();
 
@@ -99,6 +99,8 @@ class UserNotLoggedIn extends ErrorPageError {
 			'warning' => $this->msg,
 		] ) );
 
-		$output->output();
+		if ( $action === self::SEND_OUTPUT ) {
+			$output->output();
+		}
 	}
 }

@@ -3,7 +3,7 @@
 /**
  * Wikitext scripting infrastructure for MediaWiki: base classes.
  * Copyright (C) 2012 Victor Vasiliev <vasilvv@gmail.com> et al
- * http://www.mediawiki.org/
+ * https://www.mediawiki.org/
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -74,7 +74,7 @@ abstract class ScribuntoEngineBase {
 	 *    - print: The resulting print buffer
 	 *    - return: The resulting return value
 	 */
-	abstract function runConsole( array $params );
+	abstract public function runConsole( array $params );
 
 	/**
 	 * Get software information for Special:Version
@@ -128,8 +128,7 @@ abstract class ScribuntoEngineBase {
 	 * @return mixed
 	 */
 	public function getOption( $optionName ) {
-		return isset( $this->options[$optionName] )
-			? $this->options[$optionName] : null;
+		return $this->options[$optionName] ?? null;
 	}
 
 	/**
@@ -162,7 +161,7 @@ abstract class ScribuntoEngineBase {
 	 * @param Title $title The title of the module
 	 * @return ScribuntoModuleBase|null
 	 */
-	function fetchModuleFromParser( Title $title ) {
+	public function fetchModuleFromParser( Title $title ) {
 		$key = $title->getPrefixedDBkey();
 		if ( !array_key_exists( $key, $this->modules ) ) {
 			list( $text, $finalTitle ) = $this->parser->fetchTemplateAndTitle( $title );
@@ -189,7 +188,7 @@ abstract class ScribuntoEngineBase {
 	 * @param string|bool $chunkName
 	 * @return Status
 	 */
-	function validate( $text, $chunkName = false ) {
+	public function validate( $text, $chunkName = false ) {
 		$module = $this->newModule( $text, $chunkName );
 		return $module->validate();
 	}
@@ -214,7 +213,7 @@ abstract class ScribuntoEngineBase {
 	 * Get the language for GeSHi syntax highlighter.
 	 * @return string|false
 	 */
-	function getGeSHiLanguage() {
+	public function getGeSHiLanguage() {
 		return false;
 	}
 
@@ -222,7 +221,7 @@ abstract class ScribuntoEngineBase {
 	 * Get the language for Ace code editor.
 	 * @return string|false
 	 */
-	function getCodeEditorLanguage() {
+	public function getCodeEditorLanguage() {
 		return false;
 	}
 

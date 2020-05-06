@@ -41,6 +41,7 @@ class Scribunto {
 			throw new MWException( 'Invalid scripting engine is specified in $wgScribuntoDefaultEngine' );
 		}
 		$options = $extraOptions + $wgScribuntoEngineConf[$wgScribuntoDefaultEngine];
+		// @phan-suppress-next-line PhanTypeMismatchArgument false positive
 		return self::newEngine( $options );
 	}
 
@@ -152,7 +153,7 @@ class ScribuntoException extends MWException {
 	 * @param string $messageName
 	 * @param array $params
 	 */
-	function __construct( $messageName, $params = [] ) {
+	public function __construct( $messageName, $params = [] ) {
 		if ( isset( $params['args'] ) ) {
 			$this->messageArgs = $params['args'];
 		} else {
@@ -192,8 +193,7 @@ class ScribuntoException extends MWException {
 	}
 
 	public function toStatus() {
-		$args = array_merge( [ $this->messageName ], $this->messageArgs );
-		$status = call_user_func_array( [ 'Status', 'newFatal' ], $args );
+		$status = Status::newFatal( $this->messageName, ...$this->messageArgs );
 		$status->scribunto_error = $this;
 		return $status;
 	}

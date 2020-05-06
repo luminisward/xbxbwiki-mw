@@ -46,7 +46,7 @@ class FileOpBatch {
 	 *
 	 * The resulting StatusValue will be "OK" unless:
 	 *   - a) unexpected operation errors occurred (network partitions, disk full...)
-	 *   - b) significant operation errors occurred and 'force' was not set
+	 *   - b) predicted operation errors occurred and 'force' was not set
 	 *
 	 * @param FileOp[] $performOps List of FileOp operations
 	 * @param array $opts Batch operation options
@@ -66,7 +66,7 @@ class FileOpBatch {
 		$batchId = $journal->getTimestampedUUID();
 		$ignoreErrors = !empty( $opts['force'] );
 		$journaled = empty( $opts['nonJournaled'] );
-		$maxConcurrency = isset( $opts['concurrency'] ) ? $opts['concurrency'] : 1;
+		$maxConcurrency = $opts['concurrency'] ?? 1;
 
 		$entries = []; // file journal entry list
 		$predicates = FileOp::newPredicates(); // account for previous ops in prechecks

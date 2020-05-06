@@ -43,13 +43,13 @@ class XhprofData {
 
 	/**
 	 * Per-function inclusive data.
-	 * @var array $inclusive
+	 * @var array[] $inclusive
 	 */
 	protected $inclusive;
 
 	/**
 	 * Per-function inclusive and exclusive data.
-	 * @var array $complete
+	 * @var array[] $complete
 	 */
 	protected $complete;
 
@@ -153,7 +153,7 @@ class XhprofData {
 	 * - max: Maximum value
 	 * - variance: Variance (spread) of the values
 	 *
-	 * @return array
+	 * @return array[]
 	 * @see getRawData()
 	 * @see getCompleteMetrics()
 	 */
@@ -239,7 +239,7 @@ class XhprofData {
 	 * metrics have an additional 'exclusive' measurement which is the total
 	 * minus the totals of all child function calls.
 	 *
-	 * @return array
+	 * @return array[]
 	 * @see getRawData()
 	 * @see getInclusiveMetrics()
 	 */
@@ -370,11 +370,10 @@ class XhprofData {
 		return function ( $a, $b ) use ( $key, $sub ) {
 			if ( isset( $a[$key] ) && isset( $b[$key] ) ) {
 				// Descending sort: larger values will be first in result.
-				// Assumes all values are numeric.
 				// Values for 'main()' will not have sub keys
 				$valA = is_array( $a[$key] ) ? $a[$key][$sub] : $a[$key];
 				$valB = is_array( $b[$key] ) ? $b[$key][$sub] : $b[$key];
-				return $valB - $valA;
+				return $valB <=> $valA;
 			} else {
 				// Sort datum with the key before those without
 				return isset( $a[$key] ) ? -1 : 1;

@@ -1,8 +1,8 @@
 <?php
 
+use UtfNormal\Validator;
 use Wikimedia\ScopedCallback;
 
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
 abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	/**
 	 * Libraries to load. See also the 'ScribuntoExternalLibraries' hook.
@@ -80,7 +80,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	 * Create a new interpreter object
 	 * @return Scribunto_LuaInterpreter
 	 */
-	abstract function newInterpreter();
+	abstract protected function newInterpreter();
 
 	/**
 	 * @param string $text
@@ -241,7 +241,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 		$oldExpandCache = $this->expandCache;
 		$this->currentFrames = [
 			'current' => $frame,
-			'parent' => isset( $frame->parent ) ? $frame->parent : null,
+			'parent' => $frame->parent ?? null,
 		];
 		$this->expandCache = [];
 
@@ -374,7 +374,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 		# Prepending an "@" to the chunk name makes Lua think it is a filename
 		$module = $this->getInterpreter()->loadString( $code, '@' . basename( $fileName ) );
 		$ret = $this->getInterpreter()->callFunction( $module );
-		return isset( $ret[0] ) ? $ret[0] : null;
+		return $ret[0] ?? null;
 	}
 
 	public function getGeSHiLanguage() {
@@ -441,8 +441,8 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 		$ret = $this->getInterpreter()->callFunction( $func, $contentInit, $contentExe );
 
 		return [
-			'return' => isset( $ret[0] ) ? $ret[0] : null,
-			'print' => isset( $ret[1] ) ? $ret[1] : '',
+			'return' => $ret[0] ?? null,
+			'print' => $ret[1] ?? '',
 		];
 	}
 
@@ -518,10 +518,11 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	 * library and return its function table. It's not necessary to cache the
 	 * function table in the object instance, since there is caching in a
 	 * wrapper on the Lua side.
+	 * @internal
 	 * @param string $name
 	 * @return array
 	 */
-	function loadPHPLibrary( $name ) {
+	public function loadPHPLibrary( $name ) {
 		$args = func_get_args();
 		$this->checkString( 'loadPHPLibrary', $args, 0 );
 
@@ -538,10 +539,11 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	 * module and return its chunk. It's not necessary to cache the resulting
 	 * chunk in the object instance, since there is caching in a wrapper on the
 	 * Lua side.
+	 * @internal
 	 * @param string $name
 	 * @return array
 	 */
-	function loadPackage( $name ) {
+	public function loadPackage( $name ) {
 		$args = func_get_args();
 		$this->checkString( 'loadPackage', $args, 0 );
 
@@ -565,7 +567,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 
 		$module = $this->fetchModuleFromParser( $title );
 		if ( $module ) {
-			/** @suppress PhanUndeclaredMethod */
+			// @phan-suppress-next-line PhanUndeclaredMethod
 			return [ $module->getInitChunk() ];
 		} else {
 			return [];
@@ -593,23 +595,25 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	/**
 	 * Handler for frameExists()
 	 *
+	 * @internal
 	 * @param string $frameId
 	 * @return array
 	 */
-	function frameExists( $frameId ) {
+	public function frameExists( $frameId ) {
 		return [ $frameId === 'empty' || isset( $this->currentFrames[$frameId] ) ];
 	}
 
 	/**
 	 * Handler for newChildFrame()
 	 *
+	 * @internal
 	 * @param string $frameId
 	 * @param string $title
 	 * @param array $args
 	 * @return array
 	 * @throws Scribunto_LuaError
 	 */
-	function newChildFrame( $frameId, $title, array $args ) {
+	public function newChildFrame( $frameId, $title, array $args ) {
 		if ( count( $this->currentFrames ) > 100 ) {
 			throw new Scribunto_LuaError( 'newChild: too many frames' );
 		}
@@ -633,20 +637,22 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	/**
 	 * Handler for getTitle()
 	 *
+	 * @internal
 	 * @param string $frameId
 	 *
 	 * @return array
 	 */
-	function getFrameTitle( $frameId ) {
+	public function getFrameTitle( $frameId ) {
 		$frame = $this->getFrameById( $frameId );
 		return [ $frame->getTitle()->getPrefixedText() ];
 	}
 
 	/**
 	 * Handler for setTTL()
+	 * @internal
 	 * @param int $ttl
 	 */
-	function setTTL( $ttl ) {
+	public function setTTL( $ttl ) {
 		$args = func_get_args();
 		$this->checkNumber( 'setTTL', $args, 0 );
 
@@ -656,11 +662,12 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 
 	/**
 	 * Handler for getExpandedArgument()
+	 * @internal
 	 * @param string $frameId
 	 * @param string $name
 	 * @return array
 	 */
-	function getExpandedArgument( $frameId, $name ) {
+	public function getExpandedArgument( $frameId, $name ) {
 		$args = func_get_args();
 		$this->checkString( 'getExpandedArgument', $args, 0 );
 
@@ -676,10 +683,11 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 
 	/**
 	 * Handler for getAllExpandedArguments()
+	 * @internal
 	 * @param string $frameId
 	 * @return array
 	 */
-	function getAllExpandedArguments( $frameId ) {
+	public function getAllExpandedArguments( $frameId ) {
 		$frame = $this->getFrameById( $frameId );
 		$this->getInterpreter()->pauseUsageTimer();
 		return [ $frame->getArguments() ];
@@ -687,13 +695,14 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 
 	/**
 	 * Handler for expandTemplate()
+	 * @internal
 	 * @param string $frameId
 	 * @param string $titleText
 	 * @param array $args
 	 * @return array
 	 * @throws Scribunto_LuaError
 	 */
-	function expandTemplate( $frameId, $titleText, $args ) {
+	public function expandTemplate( $frameId, $titleText, $args ) {
 		$frame = $this->getFrameById( $frameId );
 		$title = Title::newFromText( $titleText, NS_TEMPLATE );
 		if ( !$title ) {
@@ -728,6 +737,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 
 	/**
 	 * Handler for callParserFunction()
+	 * @internal
 	 * @param string $frameId
 	 * @param string $function
 	 * @param array $args
@@ -735,7 +745,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	 * @throws Scribunto_LuaError
 	 * @return array
 	 */
-	function callParserFunction( $frameId, $function, $args ) {
+	public function callParserFunction( $frameId, $function, $args ) {
 		$frame = $this->getFrameById( $frameId );
 
 		# Make zero-based, without screwing up named args
@@ -801,6 +811,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 			$text = $this->parser->insertStripItem( $text );
 		} elseif ( $result['nowiki'] ) {
 			# Escape nowiki-style return values
+			// @phan-suppress-next-line SecurityCheck-DoubleEscaped
 			$text = wfEscapeWikiText( $text );
 		}
 
@@ -813,12 +824,13 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 
 	/**
 	 * Handler for preprocess()
+	 * @internal
 	 * @param string $frameId
 	 * @param string $text
 	 * @return array
 	 * @throws Scribunto_LuaError
 	 */
-	function preprocess( $frameId, $text ) {
+	public function preprocess( $frameId, $text ) {
 		$args = func_get_args();
 		$this->checkString( 'preprocess', $args, 0 );
 
@@ -845,6 +857,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	/**
 	 * Increment the expensive function count, and throw if limit exceeded
 	 *
+	 * @internal
 	 * @throws Scribunto_LuaError
 	 * @return null
 	 */
@@ -858,6 +871,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	/**
 	 * Adds a warning to be displayed upon preview
 	 *
+	 * @internal
 	 * @param string $text wikitext
 	 */
 	public function addWarning( $text ) {
@@ -867,6 +881,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	/**
 	 * Return whether the parser is currently substing
 	 *
+	 * @internal
 	 * @return array
 	 */
 	public function isSubsting() {
@@ -874,7 +889,7 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 		return [ $this->getParser()->OutputType() === Parser::OT_WIKI ];
 	}
 
-	function doCachedExpansion( $frame, $input, $cacheKey ) {
+	private function doCachedExpansion( $frame, $input, $cacheKey ) {
 		$hash = md5( serialize( $cacheKey ) );
 		if ( isset( $this->expandCache[$hash] ) ) {
 			return $this->expandCache[$hash];
@@ -900,7 +915,6 @@ abstract class Scribunto_LuaEngine extends ScribuntoEngineBase {
 	}
 }
 
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
 class Scribunto_LuaModule extends ScribuntoModuleBase {
 	/**
 	 * @var mixed
@@ -975,13 +989,12 @@ class Scribunto_LuaModule extends ScribuntoModuleBase {
 	}
 }
 
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
 class Scribunto_LuaError extends ScribuntoException {
 	public $luaMessage, $lineMap = [];
 
-	function __construct( $message, array $options = [] ) {
+	public function __construct( $message, array $options = [] ) {
 		$this->luaMessage = $message;
-		$options = $options + [ 'args' => [ $message ] ];
+		$options = $options + [ 'args' => [ Validator::cleanUp( $message ) ] ];
 		if ( isset( $options['module'] ) && isset( $options['line'] ) ) {
 			$msg = 'scribunto-lua-error-location';
 		} else {
@@ -991,11 +1004,11 @@ class Scribunto_LuaError extends ScribuntoException {
 		parent::__construct( $msg, $options );
 	}
 
-	function getLuaMessage() {
+	public function getLuaMessage() {
 		return $this->luaMessage;
 	}
 
-	function setLineMap( $map ) {
+	public function setLineMap( $map ) {
 		$this->lineMap = $map;
 	}
 
@@ -1004,7 +1017,7 @@ class Scribunto_LuaError extends ScribuntoException {
 	 * $options['msgOptions']['content'] to use content language.
 	 * @return bool|string
 	 */
-	function getScriptTraceHtml( $options = [] ) {
+	public function getScriptTraceHtml( $options = [] ) {
 		if ( !isset( $this->params['trace'] ) ) {
 			return false;
 		}
@@ -1033,27 +1046,27 @@ class Scribunto_LuaError extends ScribuntoException {
 			}
 
 			if ( strval( $info['namewhat'] ) !== '' ) {
-				$function = wfMessage( 'scribunto-lua-in-function', wfEscapeWikiText( $info['name'] ) );
+				$functionMsg = wfMessage( 'scribunto-lua-in-function', wfEscapeWikiText( $info['name'] ) );
 				in_array( 'content', $msgOptions ) ?
-					$function = $function->inContentLanguage()->plain() :
-					$function = $function->plain();
+					$function = $functionMsg->inContentLanguage()->plain() :
+					$function = $functionMsg->plain();
 			} elseif ( $info['what'] == 'main' ) {
-				$function = wfMessage( 'scribunto-lua-in-main' );
+				$functionMsg = wfMessage( 'scribunto-lua-in-main' );
 				in_array( 'content', $msgOptions ) ?
-					$function = $function->inContentLanguage()->plain() :
-					$function = $function->plain();
+					$function = $functionMsg->inContentLanguage()->plain() :
+					$function = $functionMsg->plain();
 			} else {
 				// C function, tail call, or a Lua function where Lua can't
 				// guess the name
 				$function = '?';
 			}
 
-			$backtraceLine = wfMessage( 'scribunto-lua-backtrace-line' )
+			$backtraceLineMsg = wfMessage( 'scribunto-lua-backtrace-line' )
 				->rawParams( "<strong>$src</strong>" )
 				->params( $function );
 			in_array( 'content', $msgOptions ) ?
-				$backtraceLine = $backtraceLine->inContentLanguage()->parse() :
-				$backtraceLine = $backtraceLine->parse();
+				$backtraceLine = $backtraceLineMsg->inContentLanguage()->parse() :
+				$backtraceLine = $backtraceLineMsg->parse();
 
 			$s .= "<li>$backtraceLine</li>";
 		}

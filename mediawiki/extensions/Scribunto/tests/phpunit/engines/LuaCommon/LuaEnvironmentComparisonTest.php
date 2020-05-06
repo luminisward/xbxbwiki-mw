@@ -4,9 +4,12 @@
  * @group Lua
  * @group LuaSandbox
  * @group LuaStandalone
+ * @coversNothing
  */
-// @codingStandardsIgnoreLine Squiz.Classes.ValidClassName.NotCamelCaps
-class Scribunto_LuaEnvironmentComparisonTest extends MediaWikiTestCase {
+class Scribunto_LuaEnvironmentComparisonTest extends PHPUnit\Framework\TestCase {
+	use MediaWikiCoversValidator;
+	use PHPUnit4And6Compat;
+
 	public $sandboxOpts = [
 		'memoryLimit' => 50000000,
 		'cpuLimit' => 30,

@@ -1,5 +1,8 @@
 <?php
 
+use MediaWiki\Permissions\PermissionManager;
+use MediaWiki\User\UserIdentityValue;
+use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Rdbms\LoadBalancer;
 use Wikimedia\TestingAccessWrapper;
 
@@ -7,8 +10,6 @@ use Wikimedia\TestingAccessWrapper;
  * @covers WatchedItemQueryService
  */
 class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
-
-	use MediaWikiCoversValidator;
 
 	/**
 	 * @return PHPUnit_Framework_MockObject_MockObject|CommentStore
@@ -66,23 +67,24 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 
 	/**
 	 * @param PHPUnit_Framework_MockObject_MockObject|Database $mockDb
+	 * @param PHPUnit_Framework_MockObject_MockObject|PermissionManager $mockPM
 	 * @return WatchedItemQueryService
 	 */
-	private function newService( $mockDb ) {
+	private function newService( $mockDb, $mockPM = null ) {
 		return new WatchedItemQueryService(
 			$this->getMockLoadBalancer( $mockDb ),
 			$this->getMockCommentStore(),
-			$this->getMockActorMigration()
+			$this->getMockActorMigration(),
+			$this->getMockWatchedItemStore(),
+			$mockPM ?: $this->getMockPermissionManager()
 		);
 	}
 
 	/**
-	 * @return PHPUnit_Framework_MockObject_MockObject|Database
+	 * @return PHPUnit_Framework_MockObject_MockObject|IDatabase
 	 */
 	private function getMockDb() {
-		$mock = $this->getMockBuilder( Database::class )
-			->disableOriginalConstructor()
-			->getMock();
+		$mock = $this->createMock( IDatabase::class );
 
 		$mock->expects( $this->any() )
 			->method( 'makeList' )
@@ -125,7 +127,7 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @param PHPUnit_Framework_MockObject_MockObject|Database $mockDb
+	 * @param PHPUnit_Framework_MockObject_MockObject|IDatabase $mockDb
 	 * @return PHPUnit_Framework_MockObject_MockObject|LoadBalancer
 	 */
 	private function getMockLoadBalancer( $mockDb ) {
@@ -140,35 +142,65 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @param int $id
-	 * @return PHPUnit_Framework_MockObject_MockObject|User
+	 * @return PHPUnit_Framework_MockObject_MockObject|WatchedItemStore
 	 */
-	private function getMockNonAnonUserWithId( $id ) {
-		$mock = $this->getMockBuilder( User::class )->getMock();
+	private function getMockWatchedItemStore() {
+		$mock = $this->getMockBuilder( WatchedItemStore::class )
+			->disableOriginalConstructor()
+			->getMock();
 		$mock->expects( $this->any() )
-			->method( 'isAnon' )
-			->will( $this->returnValue( false ) );
-		$mock->expects( $this->any() )
-			->method( 'getId' )
-			->will( $this->returnValue( $id ) );
+			->method( 'getLatestNotificationTimestamp' )
+			->will( $this->returnCallback( function ( $timestamp ) {
+				return $timestamp;
+			} ) );
+		return $mock;
+	}
+
+	/**
+	 * @param string $notAllowedAction
+	 * @return PHPUnit_Framework_MockObject_MockObject|PermissionManager
+	 */
+	private function getMockPermissionManager( $notAllowedAction = null ) {
+		$mock = $this->getMockBuilder( PermissionManager::class )
+			->disableOriginalConstructor()
+			->getMock();
+		$mock->method( 'userHasRight' )
+			->will( $this->returnCallback( function ( $user, $action ) use ( $notAllowedAction ) {
+				return $action !== $notAllowedAction;
+			} ) );
+		$mock->method( 'userHasAnyRight' )
+			->will( $this->returnCallback( function ( $user, ...$actions ) use ( $notAllowedAction ) {
+				return !in_array( $notAllowedAction, $actions );
+			} ) );
 		return $mock;
 	}
 
 	/**
 	 * @param int $id
+	 * @param string[] $extraMethods Extra methods that are expected might be called
 	 * @return PHPUnit_Framework_MockObject_MockObject|User
 	 */
-	private function getMockUnrestrictedNonAnonUserWithId( $id ) {
-		$mock = $this->getMockNonAnonUserWithId( $id );
-		$mock->expects( $this->any() )
-			->method( 'isAllowed' )
-			->will( $this->returnValue( true ) );
-		$mock->expects( $this->any() )
-			->method( 'isAllowedAny' )
-			->will( $this->returnValue( true ) );
-		$mock->expects( $this->any() )
-			->method( 'useRCPatrol' )
-			->will( $this->returnValue( true ) );
+	private function getMockNonAnonUserWithId( $id, array $extraMethods = [] ) {
+		$mock = $this->getMockBuilder( User::class )->getMock();
+		$mock->method( 'isRegistered' )->willReturn( true );
+		$mock->method( 'getId' )->willReturn( $id );
+		$methods = array_merge( [
+			'isRegistered',
+			'getId',
+		], $extraMethods );
+		$mock->expects( $this->never() )->method( $this->anythingBut( ...$methods ) );
+		return $mock;
+	}
+
+	/**
+	 * @param int $id
+	 * @param string[] $extraMethods Extra methods that are expected might be called
+	 * @return PHPUnit_Framework_MockObject_MockObject|User
+	 */
+	private function getMockUnrestrictedNonAnonUserWithId( $id, array $extraMethods = [] ) {
+		$mock = $this->getMockNonAnonUserWithId( $id,
+			array_merge( [ 'useRCPatrol' ], $extraMethods ) );
+		$mock->method( 'useRCPatrol' )->willReturn( true );
 		return $mock;
 	}
 
@@ -177,20 +209,11 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 	 * @param string $notAllowedAction
 	 * @return PHPUnit_Framework_MockObject_MockObject|User
 	 */
-	private function getMockNonAnonUserWithIdAndRestrictedPermissions( $id, $notAllowedAction ) {
-		$mock = $this->getMockNonAnonUserWithId( $id );
-
-		$mock->expects( $this->any() )
-			->method( 'isAllowed' )
-			->will( $this->returnCallback( function ( $action ) use ( $notAllowedAction ) {
-				return $action !== $notAllowedAction;
-			} ) );
-		$mock->expects( $this->any() )
-			->method( 'isAllowedAny' )
-			->will( $this->returnCallback( function () use ( $notAllowedAction ) {
-				$actions = func_get_args();
-				return !in_array( $notAllowedAction, $actions );
-			} ) );
+	private function getMockNonAnonUserWithIdAndRestrictedPermissions( $id ) {
+		$mock = $this->getMockNonAnonUserWithId( $id,
+			[ 'useRCPatrol', 'useNPPatrol' ] );
+		$mock->method( 'useRCPatrol' )->willReturn( false );
+		$mock->method( 'useNPPatrol' )->willReturn( false );
 
 		return $mock;
 	}
@@ -200,15 +223,8 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 	 * @return PHPUnit_Framework_MockObject_MockObject|User
 	 */
 	private function getMockNonAnonUserWithIdAndNoPatrolRights( $id ) {
-		$mock = $this->getMockNonAnonUserWithId( $id );
-
-		$mock->expects( $this->any() )
-			->method( 'isAllowed' )
-			->will( $this->returnValue( true ) );
-		$mock->expects( $this->any() )
-			->method( 'isAllowedAny' )
-			->will( $this->returnValue( true ) );
-
+		$mock = $this->getMockNonAnonUserWithId( $id,
+			[ 'useRCPatrol', 'useNPPatrol' ] );
 		$mock->expects( $this->any() )
 			->method( 'useRCPatrol' )
 			->will( $this->returnValue( false ) );
@@ -216,14 +232,6 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 			->method( 'useNPPatrol' )
 			->will( $this->returnValue( false ) );
 
-		return $mock;
-	}
-
-	private function getMockAnonUser() {
-		$mock = $this->getMockBuilder( User::class )->getMock();
-		$mock->expects( $this->any() )
-			->method( 'isAnon' )
-			->will( $this->returnValue( true ) );
 		return $mock;
 	}
 
@@ -263,7 +271,7 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 				],
 				[
 					'watchlist' => [
-						'INNER JOIN',
+						'JOIN',
 						[
 							'wl_namespace=rc_namespace',
 							'wl_title=rc_title'
@@ -386,7 +394,7 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 				],
 				[
 					'watchlist' => [
-						'INNER JOIN',
+						'JOIN',
 						[
 							'wl_namespace=rc_namespace',
 							'wl_title=rc_title'
@@ -888,7 +896,7 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 		$expectedJoinConds = array_merge(
 			[
 				'watchlist' => [
-					'INNER JOIN',
+					'JOIN',
 					[
 						'wl_namespace=rc_namespace',
 						'wl_title=rc_title'
@@ -1121,15 +1129,16 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 				$this->isType( 'string' ),
 				$this->isType( 'array' ),
 				array_merge( [
-					'watchlist' => [ 'INNER JOIN', [ 'wl_namespace=rc_namespace', 'wl_title=rc_title' ] ],
+					'watchlist' => [ 'JOIN', [ 'wl_namespace=rc_namespace', 'wl_title=rc_title' ] ],
 					'page' => [ 'LEFT JOIN', 'rc_cur_id=page_id' ],
 				], $expectedExtraJoins )
 			)
 			->will( $this->returnValue( [] ) );
 
-		$user = $this->getMockNonAnonUserWithIdAndRestrictedPermissions( 1, $notAllowedAction );
+		$permissionManager = $this->getMockPermissionManager( $notAllowedAction );
+		$user = $this->getMockNonAnonUserWithIdAndRestrictedPermissions( 1 );
 
-		$queryService = $this->newService( $mockDb );
+		$queryService = $this->newService( $mockDb, $permissionManager );
 		$items = $queryService->getWatchedItemsWithRecentChangeInfo( $user, $options );
 
 		$this->assertEmpty( $items );
@@ -1159,7 +1168,7 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 				[],
 				[
 					'watchlist' => [
-						'INNER JOIN',
+						'JOIN',
 						[
 							'wl_namespace=rc_namespace',
 							'wl_title=rc_title'
@@ -1282,7 +1291,7 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 				[],
 				[
 					'watchlist' => [
-						'INNER JOIN',
+						'JOIN',
 						[
 							'wl_namespace=rc_namespace',
 							'wl_title=rc_title'
@@ -1328,7 +1337,7 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 				[],
 				[
 					'watchlist' => [
-						'INNER JOIN',
+						'JOIN',
 						[
 							'wl_namespace=rc_namespace',
 							'wl_title=rc_title'
@@ -1368,7 +1377,7 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 
 		$queryService = $this->newService( $mockDb );
 		$user = $this->getMockUnrestrictedNonAnonUserWithId( 1 );
-		$otherUser = $this->getMockUnrestrictedNonAnonUserWithId( 2 );
+		$otherUser = $this->getMockUnrestrictedNonAnonUserWithId( 2, [ 'getOption' ] );
 		$otherUser->expects( $this->once() )
 			->method( 'getOption' )
 			->with( 'watchlisttoken' )
@@ -1399,7 +1408,7 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 
 		$queryService = $this->newService( $mockDb );
 		$user = $this->getMockUnrestrictedNonAnonUserWithId( 1 );
-		$otherUser = $this->getMockUnrestrictedNonAnonUserWithId( 2 );
+		$otherUser = $this->getMockUnrestrictedNonAnonUserWithId( 2, [ 'getOption' ] );
 		$otherUser->expects( $this->once() )
 			->method( 'getOption' )
 			->with( 'watchlisttoken' )
@@ -1699,7 +1708,8 @@ class WatchedItemQueryServiceUnitTest extends MediaWikiTestCase {
 
 		$queryService = $this->newService( $mockDb );
 
-		$items = $queryService->getWatchedItemsForUser( $this->getMockAnonUser() );
+		$items = $queryService->getWatchedItemsForUser(
+			new UserIdentityValue( 0, 'AnonUser', 0 ) );
 		$this->assertEmpty( $items );
 	}
 

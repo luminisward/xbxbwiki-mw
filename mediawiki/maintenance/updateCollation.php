@@ -26,6 +26,7 @@
 
 require_once __DIR__ . '/Maintenance.php';
 
+use MediaWiki\MediaWikiServices;
 use Wikimedia\Rdbms\IDatabase;
 
 /**
@@ -43,12 +44,11 @@ class UpdateCollation extends Maintenance {
 	public function __construct() {
 		parent::__construct();
 
-		global $wgCategoryCollation;
 		$this->addDescription( <<<TEXT
 This script will find all rows in the categorylinks table whose collation is
-out-of-date (cl_collation != '$wgCategoryCollation') and repopulate cl_sortkey
-using the page title and cl_sortkey_prefix.  If all collations are
-up-to-date, it will do nothing.
+out-of-date (cl_collation is not the same as \$wgCategoryCollation) and
+repopulate cl_sortkey using the page title and cl_sortkey_prefix. If all
+collations are up-to-date, it will do nothing.
 TEXT
 		);
 
@@ -69,8 +69,6 @@ TEXT
 	}
 
 	public function execute() {
-		global $wgCategoryCollation;
-
 		$dbw = $this->getDB( DB_MASTER );
 		$dbr = $this->getDB( DB_REPLICA );
 		$force = $this->getOption( 'force' );
@@ -80,7 +78,7 @@ TEXT
 			$collationName = $this->getOption( 'target-collation' );
 			$collation = Collation::factory( $collationName );
 		} else {
-			$collationName = $wgCategoryCollation;
+			$collationName = $this->getConfig()->get( 'CategoryCollation' );
 			$collation = Collation::singleton();
 		}
 
@@ -103,9 +101,8 @@ TEXT
 			'STRAIGHT_JOIN' // per T58041
 		];
 
-		if ( $force ) {
-			$collationConds = [];
-		} else {
+		$collationConds = [];
+		if ( !$force ) {
 			if ( $this->hasOption( 'previous-collation' ) ) {
 				$collationConds['cl_collation'] = $this->getOption( 'previous-collation' );
 			} else {
@@ -142,7 +139,6 @@ TEXT
 			wfWaitForSlaves();
 		}
 		$count = 0;
-		$batchCount = 0;
 		$batchConds = [];
 		do {
 			$this->output( "Selecting next " . self::BATCH_SIZE . " rows..." );
@@ -187,13 +183,8 @@ TEXT
 				}
 				# cl_type will be wrong for lots of pages if cl_collation is 0,
 				# so let's update it while we're here.
-				if ( $title->getNamespace() == NS_CATEGORY ) {
-					$type = 'subcat';
-				} elseif ( $title->getNamespace() == NS_FILE ) {
-					$type = 'file';
-				} else {
-					$type = 'page';
-				}
+				$type = MediaWikiServices::getInstance()->getNamespaceInfo()->
+					getCategoryLinkType( $title->getNamespace() );
 				$newSortKey = $collation->getSortKey(
 					$title->getCategorySortkey( $prefix ) );
 				if ( $verboseStats ) {
@@ -310,11 +301,7 @@ TEXT
 			if ( $raw !== '' ) {
 				$raw .= ', ';
 			}
-			if ( !isset( $this->sizeHistogram[$i] ) ) {
-				$val = 0;
-			} else {
-				$val = $this->sizeHistogram[$i];
-			}
+			$val = $this->sizeHistogram[$i] ?? 0;
 			for ( $coarseIndex = 0; $coarseIndex < $numBins - 1; $coarseIndex++ ) {
 				if ( $coarseBoundaries[$coarseIndex] > $i ) {
 					$coarseHistogram[$coarseIndex] += $val;
@@ -333,11 +320,7 @@ TEXT
 		$scale = 60 / $maxBinVal;
 		$prevBoundary = 0;
 		for ( $coarseIndex = 0; $coarseIndex < $numBins; $coarseIndex++ ) {
-			if ( !isset( $coarseHistogram[$coarseIndex] ) ) {
-				$val = 0;
-			} else {
-				$val = $coarseHistogram[$coarseIndex];
-			}
+			$val = $coarseHistogram[$coarseIndex] ?? 0;
 			$boundary = $coarseBoundaries[$coarseIndex];
 			$this->output( sprintf( "%-10s %-10d |%s\n",
 				$prevBoundary . '-' . ( $boundary - 1 ) . ': ',

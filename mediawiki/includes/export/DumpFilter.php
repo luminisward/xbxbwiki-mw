@@ -67,7 +67,7 @@ class DumpFilter {
 	 * @param string $string
 	 */
 	function writeOpenPage( $page, $string ) {
-		$this->sendingThisPage = $this->pass( $page, $string );
+		$this->sendingThisPage = $this->pass( $page );
 		if ( $this->sendingThisPage ) {
 			$this->sink->writeOpenPage( $page, $string );
 		}
@@ -102,14 +102,16 @@ class DumpFilter {
 	}
 
 	/**
-	 * @param string $newname
+	 * @see DumpOutput::closeRenameAndReopen()
+	 * @param string|string[] $newname
 	 */
 	function closeRenameAndReopen( $newname ) {
 		$this->sink->closeRenameAndReopen( $newname );
 	}
 
 	/**
-	 * @param string $newname
+	 * @see DumpOutput::closeAndRename()
+	 * @param string|string[] $newname
 	 * @param bool $open
 	 */
 	function closeAndRename( $newname, $open = false ) {
@@ -128,7 +130,7 @@ class DumpFilter {
 	 * @param object $page
 	 * @return bool
 	 */
-	function pass( $page ) {
+	protected function pass( $page ) {
 		return true;
 	}
 }

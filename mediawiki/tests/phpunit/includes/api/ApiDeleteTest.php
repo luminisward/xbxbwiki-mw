@@ -12,6 +12,15 @@
  * @covers ApiDelete
  */
 class ApiDeleteTest extends ApiTestCase {
+
+	protected function setUp() {
+		parent::setUp();
+		$this->tablesUsed = array_merge(
+			$this->tablesUsed,
+			[ 'change_tag', 'change_tag_def', 'logging' ]
+		);
+	}
+
 	public function testDelete() {
 		$name = 'Help:' . ucfirst( __FUNCTION__ );
 
@@ -30,6 +39,35 @@ class ApiDeleteTest extends ApiTestCase {
 		$this->assertArrayHasKey( 'logid', $apiResult['delete'] );
 
 		$this->assertFalse( Title::newFromText( $name )->exists() );
+	}
+
+	public function testBatchedDelete() {
+		$this->setMwGlobals( 'wgDeleteRevisionsBatchSize', 1 );
+
+		$name = 'Help:' . ucfirst( __FUNCTION__ );
+		for ( $i = 1; $i <= 3; $i++ ) {
+			$this->editPage( $name, "Revision $i" );
+		}
+
+		$apiResult = $this->doApiRequestWithToken( [
+			'action' => 'delete',
+			'title' => $name,
+		] )[0];
+
+		$this->assertArrayHasKey( 'delete', $apiResult );
+		$this->assertArrayHasKey( 'title', $apiResult['delete'] );
+		$this->assertSame( $name, $apiResult['delete']['title'] );
+		$this->assertArrayHasKey( 'scheduled', $apiResult['delete'] );
+		$this->assertTrue( $apiResult['delete']['scheduled'] );
+		$this->assertArrayNotHasKey( 'logid', $apiResult['delete'] );
+
+		// Run the jobs
+		JobQueueGroup::destroySingletons();
+		$jobs = new RunJobs;
+		$jobs->loadParamsAndArgs( null, [ 'quiet' => true ], null );
+		$jobs->execute();
+
+		$this->assertFalse( Title::newFromText( $name )->exists( Title::READ_LATEST ) );
 	}
 
 	public function testDeleteNonexistent() {
@@ -81,15 +119,18 @@ class ApiDeleteTest extends ApiTestCase {
 
 		$dbw = wfGetDB( DB_MASTER );
 		$this->assertSame( 'custom tag', $dbw->selectField(
-			[ 'change_tag', 'logging' ],
-			'ct_tag',
+			[ 'change_tag', 'logging', 'change_tag_def' ],
+			'ctd_name',
 			[
 				'log_namespace' => NS_HELP,
 				'log_title' => ucfirst( __FUNCTION__ ),
 			],
 			__METHOD__,
 			[],
-			[ 'change_tag' => [ 'INNER JOIN', 'ct_log_id = log_id' ] ]
+			[
+				'change_tag' => [ 'JOIN', 'ct_log_id = log_id' ],
+				'change_tag_def' => [ 'JOIN', 'ctd_id = ct_tag_id' ]
+			]
 		) );
 	}
 

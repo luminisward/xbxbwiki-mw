@@ -20,6 +20,8 @@
  * @file
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * A query module to list all langlinks (links to corresponding foreign language pages).
  *
@@ -68,7 +70,7 @@ class ApiQueryLangLinks extends ApiQueryBase {
 			$cont = explode( '|', $params['continue'] );
 			$this->dieContinueUsageIf( count( $cont ) != 2 );
 			$op = $params['dir'] == 'descending' ? '<' : '>';
-			$llfrom = intval( $cont[0] );
+			$llfrom = (int)$cont[0];
 			$lllang = $this->getDB()->addQuotes( $cont[1] );
 			$this->addWhere(
 				"ll_from $op $llfrom OR " .
@@ -140,7 +142,6 @@ class ApiQueryLangLinks extends ApiQueryBase {
 	}
 
 	public function getAllowedParams() {
-		global $wgContLang;
 		return [
 			'prop' => [
 				ApiBase::PARAM_ISMULTI => true,
@@ -160,7 +161,7 @@ class ApiQueryLangLinks extends ApiQueryBase {
 					'descending'
 				]
 			],
-			'inlanguagecode' => $wgContLang->getCode(),
+			'inlanguagecode' => MediaWikiServices::getInstance()->getContentLanguage()->getCode(),
 			'limit' => [
 				ApiBase::PARAM_DFLT => 10,
 				ApiBase::PARAM_TYPE => 'limit',

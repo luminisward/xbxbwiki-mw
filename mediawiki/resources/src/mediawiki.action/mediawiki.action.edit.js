@@ -1,7 +1,7 @@
 /*!
  * Scripts for action=edit at domready
  */
-( function ( mw, $ ) {
+( function () {
 	'use strict';
 
 	/**
@@ -43,9 +43,9 @@
 			if ( scrollTop.value ) {
 				editBox.scrollTop = scrollTop.value;
 			}
-			$editForm.submit( function () {
+			$editForm.on( 'submit', function () {
 				scrollTop.value = editBox.scrollTop;
 			} );
 		}
 	} );
-}( mediaWiki, jQuery ) );
+}() );

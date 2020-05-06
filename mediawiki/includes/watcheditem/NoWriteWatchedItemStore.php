@@ -18,7 +18,9 @@
  * @file
  * @ingroup Watchlist
  */
+
 use MediaWiki\Linker\LinkTarget;
+use MediaWiki\User\UserIdentity;
 use Wikimedia\Rdbms\DBReadOnlyError;
 
 /**
@@ -32,6 +34,8 @@ class NoWriteWatchedItemStore implements WatchedItemStoreInterface {
 	 */
 	private $actualStore;
 
+	const DB_READONLY_ERROR = 'The watchlist is currently readonly.';
+
 	/**
 	 * Initialy set WatchedItemStore that will be used in cases where writing is not needed.
 	 * @param WatchedItemStoreInterface $actualStore
@@ -40,7 +44,7 @@ class NoWriteWatchedItemStore implements WatchedItemStoreInterface {
 		$this->actualStore = $actualStore;
 	}
 
-	public function countWatchedItems( User $user ) {
+	public function countWatchedItems( UserIdentity $user ) {
 		return $this->actualStore->countWatchedItems( $user );
 	}
 
@@ -53,7 +57,10 @@ class NoWriteWatchedItemStore implements WatchedItemStoreInterface {
 	}
 
 	public function countWatchersMultiple( array $targets, array $options = [] ) {
-		return $this->actualStore->countVisitingWatchersMultiple( $targets, $options );
+		return $this->actualStore->countVisitingWatchersMultiple(
+			$targets,
+			$options['minimumWatchers'] ?? null
+		);
 	}
 
 	public function countVisitingWatchersMultiple(
@@ -66,80 +73,92 @@ class NoWriteWatchedItemStore implements WatchedItemStoreInterface {
 		);
 	}
 
-	public function getWatchedItem( User $user, LinkTarget $target ) {
+	public function getWatchedItem( UserIdentity $user, LinkTarget $target ) {
 		return $this->actualStore->getWatchedItem( $user, $target );
 	}
 
-	public function loadWatchedItem( User $user, LinkTarget $target ) {
+	public function loadWatchedItem( UserIdentity $user, LinkTarget $target ) {
 		return $this->actualStore->loadWatchedItem( $user, $target );
 	}
 
-	public function getWatchedItemsForUser( User $user, array $options = [] ) {
+	public function getWatchedItemsForUser( UserIdentity $user, array $options = [] ) {
 		return $this->actualStore->getWatchedItemsForUser( $user, $options );
 	}
 
-	public function isWatched( User $user, LinkTarget $target ) {
+	public function isWatched( UserIdentity $user, LinkTarget $target ) {
 		return $this->actualStore->isWatched( $user, $target );
 	}
 
-	public function getNotificationTimestampsBatch( User $user, array $targets ) {
+	public function getNotificationTimestampsBatch( UserIdentity $user, array $targets ) {
 		return $this->actualStore->getNotificationTimestampsBatch( $user, $targets );
 	}
 
-	public function countUnreadNotifications( User $user, $unreadLimit = null ) {
+	public function countUnreadNotifications( UserIdentity $user, $unreadLimit = null ) {
 		return $this->actualStore->countUnreadNotifications( $user, $unreadLimit );
 	}
 
 	public function duplicateAllAssociatedEntries( LinkTarget $oldTarget, LinkTarget $newTarget ) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
 	}
 
 	public function duplicateEntry( LinkTarget $oldTarget, LinkTarget $newTarget ) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
 	}
 
-	public function addWatch( User $user, LinkTarget $target ) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+	public function addWatch( UserIdentity $user, LinkTarget $target ) {
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
 	}
 
-	public function addWatchBatchForUser( User $user, array $targets ) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+	public function addWatchBatchForUser( UserIdentity $user, array $targets ) {
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
 	}
 
-	public function removeWatch( User $user, LinkTarget $target ) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+	public function removeWatch( UserIdentity $user, LinkTarget $target ) {
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
 	}
 
 	public function setNotificationTimestampsForUser(
-		User $user,
+		UserIdentity $user,
 		$timestamp,
 		array $targets = []
 	) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
 	}
 
-	public function updateNotificationTimestamp( User $editor, LinkTarget $target, $timestamp ) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+	public function updateNotificationTimestamp(
+		UserIdentity $editor, LinkTarget $target, $timestamp
+	) {
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
 	}
 
-	public function resetAllNotificationTimestampsForUser( User $user ) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+	public function resetAllNotificationTimestampsForUser( UserIdentity $user ) {
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
 	}
 
 	public function resetNotificationTimestamp(
-		User $user,
-		Title $title,
+		UserIdentity $user,
+		LinkTarget $title,
 		$force = '',
 		$oldid = 0
 	) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
 	}
 
-	public function clearUserWatchedItems( User $user ) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+	public function clearUserWatchedItems( UserIdentity $user ) {
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
 	}
 
-	public function clearUserWatchedItemsUsingJobQueue( User $user ) {
-		throw new DBReadOnlyError( null, 'The watchlist is currently readonly.' );
+	public function clearUserWatchedItemsUsingJobQueue( UserIdentity $user ) {
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
+	}
+
+	public function removeWatchBatchForUser( UserIdentity $user, array $titles ) {
+		throw new DBReadOnlyError( null, self::DB_READONLY_ERROR );
+	}
+
+	public function getLatestNotificationTimestamp(
+		$timestamp, UserIdentity $user, LinkTarget $target
+	) {
+		return wfTimestampOrNull( TS_MW, $timestamp );
 	}
 }

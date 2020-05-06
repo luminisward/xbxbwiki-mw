@@ -61,7 +61,7 @@ on port 11211, using up to 64MB of memory)
 In your LocalSettings.php file, set:
 
 	$wgMainCacheType = CACHE_MEMCACHED;
-	$wgMemCachedServers = array( "127.0.0.1:11211" );
+	$wgMemCachedServers = [ "127.0.0.1:11211" ];
 
 The wiki should then use memcached to cache various data. To use
 multiple servers (physically separate boxes or multiple caches
@@ -70,28 +70,25 @@ to the array. To increase the weight of a server (say, because
 it has twice the memory of the others and you want to spread
 usage evenly), make its entry a subarray:
 
-  $wgMemCachedServers = array(
+  $wgMemCachedServers = [
     "127.0.0.1:11211", # one gig on this box
-    array("192.168.0.1:11211", 2 ) # two gigs on the other box
-  );
+    [ "192.168.0.1:11211", 2 ] # two gigs on the other box
+  ];
 
 == PHP client for memcached ==
 
 MediaWiki uses a fork of Ryan T. Dean's pure-PHP memcached client.
 It also supports the PECL PHP extension for memcached.
 
-MediaWiki uses three object for object caching:
-* $wgMemc, controlled by $wgMainCacheType
-* $parserMemc, controlled by $wgParserCacheType
-* $messageMemc, controlled by $wgMessageCacheType
-If you set CACHE_NONE to one of the three control variable, (default
-value for $wgMainCacheType), MediaWiki still create a MemCacheClient,
-but requests to it are no-ops and we always fall through to the
-database. If the cache daemon can't be contacted, it should also
-disable itself fairly smoothly.
+MediaWiki uses the ObjectCache class to retrieve instances of
+BagOStuff by purpose, controlled by the following variables:
+* $wgMainCacheType
+* $wgParserCacheType
+* $wgMessageCacheType
 
-By default, $wgMemc is used but when it is $parserMemc or $messageMemc
-this is mentioned below.
+If you set one of these to CACHE_NONE, MediaWiki still creates a
+BagOStuff object, but calls it to it are no-ops. If the cache daemon
+can't be contacted, it should also disable itself fairly smoothly.
 
 == Keys used ==
 
@@ -134,13 +131,7 @@ Localisation:
 	cleared by: Language::loadLocalisation()
 
 Message Cache:
-	stored in: $messageMemc
-	key: $wgDBname:messages, $wgDBname:messages-hash, $wgDBname:messages-status
-	ex: wikidb:messages, wikidb:messages-hash, wikidb:messages-status
-	stores: an array where the keys are DB keys and the values are messages
-	set in: wfMessage(), Article::editUpdates() and Title::moveTo()
-	expiry: $wgMsgCacheExpiry
-	cleared by: nothing
+	See MessageCache.php.
 
 Newtalk:
 	key: $wgDBname:newtalk:ip:$ip
@@ -151,7 +142,8 @@ Newtalk:
 	expiry: 30 minutes
 
 Parser Cache:
-	stored in: $parserMemc
+	access: ParserCache
+	backend: $wgParserCacheType
 	key: $wgDBname:pcache:idhash:$pageid-$renderkey!$hash
 		$pageid: id of the page
 		$renderkey: 1 if action=render, 0 otherwise
@@ -205,7 +197,7 @@ Sessions:
 	cleared by: session_destroy()
 
 Sidebar:
-	stored in: $parserMemc
+	access: WANObjectCache
 	controlled by: $wgEnableSidebarCache
 	key: $wgDBname:sidebar
 	ex: wikidb:sidebar
@@ -221,7 +213,7 @@ Special:Allpages:
 	cleared by: nothing
 
 Special:Recentchanges (feed):
-	stored in: $messageMemc
+	backend: $wgMessageCacheType
 	key: $wgDBname:rcfeed:$format:$limit:$hideminor:$target and
 		rcfeed:$format:timestamp
 	ex: wikidb:rcfeed:rss:50:: and rcfeed:rss:timestamp

@@ -19,6 +19,8 @@
  *
  * @file
  */
+
+use Wikimedia\AtEase\AtEase;
 use Wikimedia\Timestamp\ConvertibleTimestamp;
 
 /**
@@ -68,12 +70,8 @@ class HTTPFileStreamer {
 	 */
 	public function __construct( $path, array $params = [] ) {
 		$this->path = $path;
-		$this->obResetFunc = isset( $params['obResetFunc'] )
-			? $params['obResetFunc']
-			: [ __CLASS__, 'resetOutputBuffers' ];
-		$this->streamMimeFunc = isset( $params['streamMimeFunc'] )
-			? $params['streamMimeFunc']
-			: [ __CLASS__, 'contentTypeFromPath' ];
+		$this->obResetFunc = $params['obResetFunc'] ?? [ __CLASS__, 'resetOutputBuffers' ];
+		$this->streamMimeFunc = $params['streamMimeFunc'] ?? [ __CLASS__, 'contentTypeFromPath' ];
 	}
 
 	/**
@@ -85,7 +83,6 @@ class HTTPFileStreamer {
 	 * @param bool $sendErrors Send error messages if errors occur (like 404)
 	 * @param array $optHeaders HTTP request header map (e.g. "range") (use lowercase keys)
 	 * @param int $flags Bitfield of STREAM_* constants
-	 * @throws MWException
 	 * @return bool Success
 	 */
 	public function stream(
@@ -105,9 +102,9 @@ class HTTPFileStreamer {
 				is_int( $header ) ? HttpStatus::header( $header ) : header( $header );
 			};
 
-		Wikimedia\suppressWarnings();
+		AtEase::suppressWarnings();
 		$info = stat( $this->path );
-		Wikimedia\restoreWarnings();
+		AtEase::restoreWarnings();
 
 		if ( !is_array( $info ) ) {
 			if ( $sendErrors ) {

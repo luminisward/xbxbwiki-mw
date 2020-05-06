@@ -47,6 +47,12 @@ class ImageMap {
 		$lines = explode( "\n", $input );
 
 		$first = true;
+		$scale = 1;
+		$imageNode = null;
+		$domDoc = null;
+		$thumbWidth = 0;
+		$thumbHeight = 0;
+		$imageTitle = null;
 		$lineNum = 0;
 		$mapHTML = '';
 		$links = [];
@@ -93,9 +99,9 @@ class ImageMap {
 				$imageHTML = Sanitizer::normalizeCharReferences( $imageHTML );
 
 				$domDoc = new DOMDocument();
-				wfSuppressWarnings();
+				Wikimedia\suppressWarnings();
 				$ok = $domDoc->loadXML( $imageHTML );
-				wfRestoreWarnings();
+				Wikimedia\restoreWarnings();
 				if ( !$ok ) {
 					return self::error( 'imagemap_invalid_image' );
 				}
@@ -201,6 +207,9 @@ class ImageMap {
 					$coords = [];
 					$coord = strtok( " \t" );
 					while ( $coord !== false ) {
+						if ( !is_numeric( $coord ) || $coord > 1e9 ) {
+							return self::error( 'imagemap_invalid_coord', $lineNum );
+						}
 						$coords[] = $coord;
 						$coord = strtok( " \t" );
 					}
@@ -217,7 +226,7 @@ class ImageMap {
 
 			// Scale the coords using the size of the source image
 			foreach ( $coords as $i => $c ) {
-				$coords[$i] = intval( round( $c * $scale ) );
+				$coords[$i] = (int)round( $c * $scale );
 			}
 
 			// Construct the area tag
@@ -259,7 +268,7 @@ class ImageMap {
 			}
 		}
 
-		if ( $first ) {
+		if ( $first || !$imageNode ) {
 			return self::error( 'imagemap_no_image' );
 		}
 
@@ -270,9 +279,11 @@ class ImageMap {
 
 		if ( $realmap ) {
 			// Construct the map
-			// Add random number to avoid breaking cached HTML fragments that are
-			// later joined together on the one page (bug 16471)
-			$mapName = "ImageMap_" . ++self::$id . '_' . mt_rand( 0, 0x7fffffff );
+			// Add a hash of the map HTML to avoid breaking cached HTML fragments that are
+			// later joined together on the one page (T18471).
+			// The only way these hashes can clash is if the map is identical, in which
+			// case it wouldn't matter that the "wrong" map was used.
+			$mapName = 'ImageMap_' . substr( md5( $mapHTML ), 0, 16 );
 			$mapHTML = "<map name=\"$mapName\">\n$mapHTML</map>\n";
 
 			// Alter the image tag
@@ -342,7 +353,7 @@ class ImageMap {
 				'alt',
 				wfMessage( 'imagemap_description' )->inContentLanguage()->text()
 			);
-			$url = $config->get( 'ExtensionAssetsPath' ) . '/ImageMap/desc-20.png';
+			$url = $config->get( 'ExtensionAssetsPath' ) . '/ImageMap/resources/desc-20.png';
 			$descImg->setAttribute(
 				'src',
 				OutputPage::transformResourcePath( $config, $url )
@@ -380,7 +391,7 @@ class ImageMap {
 	 * @param int|string $lineNum
 	 * @return array|string String with error (HTML), or array of coordinates
 	 */
-	static function tokenizeCoords( $count, $lineNum ) {
+	private static function tokenizeCoords( $count, $lineNum ) {
 		$coords = [];
 		for ( $i = 0; $i < $count; $i++ ) {
 			$coord = strtok( " \t" );
@@ -400,7 +411,7 @@ class ImageMap {
 	 * @param string|int|bool $line
 	 * @return string HTML
 	 */
-	static function error( $name, $line = false ) {
+	private static function error( $name, $line = false ) {
 		return '<p class="error">' . wfMessage( $name, $line )->parse() . '</p>';
 	}
 }

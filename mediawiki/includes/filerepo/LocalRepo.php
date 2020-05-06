@@ -22,7 +22,8 @@
  * @ingroup FileRepo
  */
 
-use Wikimedia\Rdbms\ResultWrapper;
+use MediaWiki\MediaWikiServices;
+use Wikimedia\Rdbms\IResultWrapper;
 use Wikimedia\Rdbms\Database;
 use Wikimedia\Rdbms\IDatabase;
 
@@ -31,6 +32,7 @@ use Wikimedia\Rdbms\IDatabase;
  * in the wiki's own database. This is the most commonly used repository class.
  *
  * @ingroup FileRepo
+ * @method LocalFile|null newFile( $title, $time = false )
  */
 class LocalRepo extends FileRepo {
 	/** @var callable */
@@ -179,7 +181,11 @@ class LocalRepo extends FileRepo {
 	 * @return string
 	 */
 	public static function getHashFromKey( $key ) {
-		return strtok( $key, '.' );
+		$sha1 = strtok( $key, '.' );
+		if ( is_string( $sha1 ) && strlen( $sha1 ) === 32 && $sha1[0] === '0' ) {
+			$sha1 = substr( $sha1, 1 );
+		}
+		return $sha1;
 	}
 
 	/**
@@ -200,7 +206,7 @@ class LocalRepo extends FileRepo {
 		}
 
 		$method = __METHOD__;
-		$redirDbKey = ObjectCache::getMainWANInstance()->getWithSetCallback(
+		$redirDbKey = $this->wanCache->getWithSetCallback(
 			$memcKey,
 			$expiry,
 			function ( $oldValue, &$ttl, array &$setOpts ) use ( $method, $title ) {
@@ -208,20 +214,16 @@ class LocalRepo extends FileRepo {
 
 				$setOpts += Database::getCacheSetOptions( $dbr );
 
-				if ( $title instanceof Title ) {
-					$row = $dbr->selectRow(
-						[ 'page', 'redirect' ],
-						[ 'rd_namespace', 'rd_title' ],
-						[
-							'page_namespace' => $title->getNamespace(),
-							'page_title' => $title->getDBkey(),
-							'rd_from = page_id'
-						],
-						$method
-					);
-				} else {
-					$row = false;
-				}
+				$row = $dbr->selectRow(
+					[ 'page', 'redirect' ],
+					[ 'rd_namespace', 'rd_title' ],
+					[
+						'page_namespace' => $title->getNamespace(),
+						'page_title' => $title->getDBkey(),
+						'rd_from = page_id'
+					],
+					$method
+				);
 
 				return ( $row && $row->rd_namespace == NS_FILE )
 					? Title::makeTitle( $row->rd_namespace, $row->rd_title )->getDBkey()
@@ -274,10 +276,10 @@ class LocalRepo extends FileRepo {
 			);
 		};
 
-		$applyMatchingFiles = function ( ResultWrapper $res, &$searchSet, &$finalFiles )
+		$applyMatchingFiles = function ( IResultWrapper $res, &$searchSet, &$finalFiles )
 			use ( $fileMatchesSearch, $flags )
 		{
-			global $wgContLang;
+			$contLang = MediaWikiServices::getInstance()->getContentLanguage();
 			$info = $this->getInfo();
 			foreach ( $res as $row ) {
 				$file = $this->newFileFromRow( $row );
@@ -286,7 +288,7 @@ class LocalRepo extends FileRepo {
 				$dbKeysLook = [ strtr( $file->getName(), ' ', '_' ) ];
 				if ( !empty( $info['initialCapital'] ) ) {
 					// Search keys for "hi.png" and "Hi.png" should use the "Hi.png file"
-					$dbKeysLook[] = $wgContLang->lcfirst( $file->getName() );
+					$dbKeysLook[] = $contLang->lcfirst( $file->getName() );
 				}
 				foreach ( $dbKeysLook as $dbKey ) {
 					if ( isset( $searchSet[$dbKey] )
@@ -404,7 +406,7 @@ class LocalRepo extends FileRepo {
 	 * @return array[] An Array of arrays or iterators of file objects and the hash as key
 	 */
 	function findBySha1s( array $hashes ) {
-		if ( !count( $hashes ) ) {
+		if ( $hashes === [] ) {
 			return []; // empty parameter
 		}
 
@@ -499,14 +501,14 @@ class LocalRepo extends FileRepo {
 	/**
 	 * Get a key on the primary cache for this repository.
 	 * Returns false if the repository's cache is not accessible at this site.
-	 * The parameters are the parts of the key, as for wfMemcKey().
+	 * The parameters are the parts of the key.
 	 *
 	 * @return string
 	 */
 	function getSharedCacheKey( /*...*/ ) {
 		$args = func_get_args();
 
-		return call_user_func_array( 'wfMemcKey', $args );
+		return $this->wanCache->makeKey( ...$args );
 	}
 
 	/**
@@ -520,7 +522,7 @@ class LocalRepo extends FileRepo {
 		if ( $key ) {
 			$this->getMasterDB()->onTransactionPreCommitOrIdle(
 				function () use ( $key ) {
-					ObjectCache::getMainWANInstance()->delete( $key );
+					$this->wanCache->delete( $key );
 				},
 				__METHOD__
 			);
@@ -589,7 +591,7 @@ class LocalRepo extends FileRepo {
 			wfDebug( __METHOD__ . ": skipped because storage uses sha1 paths\n" );
 			return Status::newGood();
 		} else {
-			return call_user_func_array( 'parent::' . $function, $args );
+			return parent::$function( ...$args );
 		}
 	}
 }

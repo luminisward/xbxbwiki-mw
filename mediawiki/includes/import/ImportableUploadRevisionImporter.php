@@ -1,5 +1,6 @@
 <?php
 
+use MediaWiki\MediaWikiServices;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -18,6 +19,11 @@ class ImportableUploadRevisionImporter implements UploadRevisionImporter {
 	private $enableUploads;
 
 	/**
+	 * @var bool
+	 */
+	private $shouldCreateNullRevision = true;
+
+	/**
 	 * @param bool $enableUploads
 	 * @param LoggerInterface $logger
 	 */
@@ -27,6 +33,16 @@ class ImportableUploadRevisionImporter implements UploadRevisionImporter {
 	) {
 		$this->enableUploads = $enableUploads;
 		$this->logger = $logger;
+	}
+
+	/**
+	 * Setting this to false will deactivate the creation of a null revision as part of the upload
+	 * process logging in LocalFile::recordUpload2, see T193621
+	 *
+	 * @param bool $shouldCreateNullRevision
+	 */
+	public function setNullRevisionCreation( $shouldCreateNullRevision ) {
+		$this->shouldCreateNullRevision = $shouldCreateNullRevision;
 	}
 
 	/**
@@ -46,7 +62,8 @@ class ImportableUploadRevisionImporter implements UploadRevisionImporter {
 			$file = OldLocalFile::newFromArchiveName( $importableRevision->getTitle(),
 				RepoGroup::singleton()->getLocalRepo(), $archiveName );
 		} else {
-			$file = wfLocalFile( $importableRevision->getTitle() );
+			$file = MediaWikiServices::getInstance()->getRepoGroup()->getLocalRepo()
+				->newFile( $importableRevision->getTitle() );
 			$file->load( File::READ_LATEST );
 			$this->logger->debug( __METHOD__ . 'Importing new file as ' . $file->getName() . "\n" );
 			if ( $file->exists() && $file->getTimestamp() > $importableRevision->getTimestamp() ) {
@@ -89,9 +106,13 @@ class ImportableUploadRevisionImporter implements UploadRevisionImporter {
 			?: User::newFromName( $importableRevision->getUser(), false );
 
 		# Do the actual upload
-		if ( $archiveName ) {
-			$status = $file->uploadOld( $source, $archiveName,
-				$importableRevision->getTimestamp(), $importableRevision->getComment(), $user );
+		if ( $file instanceof OldLocalFile ) {
+			$status = $file->uploadOld(
+				$source,
+				$importableRevision->getTimestamp(),
+				$importableRevision->getComment(),
+				$user
+			);
 		} else {
 			$flags = 0;
 			$status = $file->upload(
@@ -101,7 +122,9 @@ class ImportableUploadRevisionImporter implements UploadRevisionImporter {
 				$flags,
 				false,
 				$importableRevision->getTimestamp(),
-				$user
+				$user,
+				[],
+				$this->shouldCreateNullRevision
 			);
 		}
 
@@ -116,9 +139,9 @@ class ImportableUploadRevisionImporter implements UploadRevisionImporter {
 
 	/**
 	 * @deprecated DO NOT CALL ME.
-	 * This method was introduced when factoring UploadImporter out of WikiRevision.
-	 * It only has 1 use by the deprecated downloadSource method in WikiRevision.
-	 * Do not use this in new code.
+	 * This method was introduced when factoring (Importable)UploadRevisionImporter out of
+	 * WikiRevision. It only has 1 use by the deprecated downloadSource method in WikiRevision.
+	 * Do not use this in new code, it will be made private soon.
 	 *
 	 * @param ImportableUploadRevision $wikiRevision
 	 *
@@ -138,7 +161,8 @@ class ImportableUploadRevisionImporter implements UploadRevisionImporter {
 
 		// @todo FIXME!
 		$src = $wikiRevision->getSrc();
-		$data = Http::get( $src, [], __METHOD__ );
+		$data = MediaWikiServices::getInstance()->getHttpRequestFactory()->
+			get( $src, [], __METHOD__ );
 		if ( !$data ) {
 			$this->logger->debug( "IMPORT: couldn't fetch source $src\n" );
 			fclose( $f );

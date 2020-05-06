@@ -1,5 +1,6 @@
 <?php
 
+use Psr\Log\NullLogger;
 use Wikimedia\Rdbms\TransactionProfiler;
 use Wikimedia\Rdbms\DatabaseDomain;
 use Wikimedia\Rdbms\Database;
@@ -43,21 +44,33 @@ class DatabaseTestHelper extends Database {
 	protected $unionSupportsOrderAndLimit = true;
 
 	public function __construct( $testName, array $opts = [] ) {
+		parent::__construct( $opts + [
+			'host' => null,
+			'user' => null,
+			'password' => null,
+			'dbname' => null,
+			'schema' => null,
+			'tablePrefix' => '',
+			'flags' => 0,
+			'cliMode' => $opts['cliMode'] ?? true,
+			'agent' => '',
+			'srvCache' => new HashBagOStuff(),
+			'profiler' => null,
+			'trxProfiler' => new TransactionProfiler(),
+			'connLogger' => new NullLogger(),
+			'queryLogger' => new NullLogger(),
+			'errorLogger' => function ( Exception $e ) {
+				wfWarn( get_class( $e ) . ": {$e->getMessage()}" );
+			},
+			'deprecationLogger' => function ( $msg ) {
+				wfWarn( $msg );
+			}
+		] );
+
 		$this->testName = $testName;
 
-		$this->profiler = new ProfilerStub( [] );
-		$this->trxProfiler = new TransactionProfiler();
-		$this->cliMode = isset( $opts['cliMode'] ) ? $opts['cliMode'] : true;
-		$this->connLogger = new \Psr\Log\NullLogger();
-		$this->queryLogger = new \Psr\Log\NullLogger();
-		$this->errorLogger = function ( Exception $e ) {
-			wfWarn( get_class( $e ) . ": {$e->getMessage()}" );
-		};
-		$this->deprecationLogger = function ( $msg ) {
-			wfWarn( $msg );
-		};
 		$this->currentDomain = DatabaseDomain::newUnspecified();
-		$this->open( 'localhost', 'testuser', 'password', 'testdb' );
+		$this->open( 'localhost', 'testuser', 'password', 'testdb', null, '' );
 	}
 
 	/**
@@ -108,7 +121,11 @@ class DatabaseTestHelper extends Database {
 
 		// Handle some internal calls from the Database class
 		$check = $fname;
-		if ( preg_match( '/^Wikimedia\\\\Rdbms\\\\Database::query \((.+)\)$/', $fname, $m ) ) {
+		if ( preg_match(
+			'/^Wikimedia\\\\Rdbms\\\\Database::(?:query|beginIfImplied) \((.+)\)$/',
+			$fname,
+			$m
+		) ) {
 			$check = $m[1];
 		}
 
@@ -129,10 +146,10 @@ class DatabaseTestHelper extends Database {
 		return $s;
 	}
 
-	public function query( $sql, $fname = '', $tempIgnore = false ) {
+	public function query( $sql, $fname = '', $flags = 0 ) {
 		$this->checkFunctionName( $fname );
 
-		return parent::query( $sql, $fname, $tempIgnore );
+		return parent::query( $sql, $fname, $flags );
 	}
 
 	public function tableExists( $table, $fname = __METHOD__ ) {
@@ -148,14 +165,14 @@ class DatabaseTestHelper extends Database {
 
 	// Redeclare parent method to make it public
 	public function nativeReplace( $table, $rows, $fname ) {
-		return parent::nativeReplace( $table, $rows, $fname );
+		parent::nativeReplace( $table, $rows, $fname );
 	}
 
 	function getType() {
 		return 'test';
 	}
 
-	function open( $server, $user, $password, $dbName ) {
+	function open( $server, $user, $password, $dbName, $schema, $tablePrefix ) {
 		$this->conn = (object)[ 'test' ];
 
 		return true;
@@ -198,9 +215,7 @@ class DatabaseTestHelper extends Database {
 	}
 
 	protected function wasKnownStatementRollbackError() {
-		return isset( $this->lastError['wasKnownStatementRollbackError'] )
-			? $this->lastError['wasKnownStatementRollbackError']
-			: false;
+		return $this->lastError['wasKnownStatementRollbackError'] ?? false;
 	}
 
 	function fieldInfo( $table, $field ) {
@@ -225,10 +240,6 @@ class DatabaseTestHelper extends Database {
 
 	function getServerInfo() {
 		return 'test';
-	}
-
-	function isOpen() {
-		return $this->conn ? true : false;
 	}
 
 	function ping( &$rtt = null ) {

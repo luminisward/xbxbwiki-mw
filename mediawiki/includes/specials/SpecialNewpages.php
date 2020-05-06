@@ -21,6 +21,8 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * A special page that list newly created pages
  *
@@ -39,8 +41,10 @@ class SpecialNewpages extends IncludableSpecialPage {
 		parent::__construct( 'Newpages' );
 	}
 
+	/**
+	 * @param string|null $par
+	 */
 	protected function setup( $par ) {
-		// Options
 		$opts = new FormOptions();
 		$this->opts = $opts; // bind
 		$opts->add( 'hideliu', false );
@@ -54,6 +58,7 @@ class SpecialNewpages extends IncludableSpecialPage {
 		$opts->add( 'feed', '' );
 		$opts->add( 'tagfilter', '' );
 		$opts->add( 'invert', false );
+		$opts->add( 'associated', false );
 		$opts->add( 'size-mode', 'max' );
 		$opts->add( 'size', 0 );
 
@@ -63,32 +68,33 @@ class SpecialNewpages extends IncludableSpecialPage {
 			$opts->add( $key, $params['default'] );
 		}
 
-		// Set values
 		$opts->fetchValuesFromRequest( $this->getRequest() );
 		if ( $par ) {
 			$this->parseParams( $par );
 		}
 
-		// Validate
 		$opts->validateIntBounds( 'limit', 0, 5000 );
 	}
 
+	/**
+	 * @param string $par
+	 */
 	protected function parseParams( $par ) {
 		$bits = preg_split( '/\s*,\s*/', trim( $par ) );
 		foreach ( $bits as $bit ) {
-			if ( 'shownav' == $bit ) {
+			if ( $bit === 'shownav' ) {
 				$this->showNavigation = true;
 			}
-			if ( 'hideliu' === $bit ) {
+			if ( $bit === 'hideliu' ) {
 				$this->opts->setValue( 'hideliu', true );
 			}
-			if ( 'hidepatrolled' == $bit ) {
+			if ( $bit === 'hidepatrolled' ) {
 				$this->opts->setValue( 'hidepatrolled', true );
 			}
-			if ( 'hidebots' == $bit ) {
+			if ( $bit === 'hidebots' ) {
 				$this->opts->setValue( 'hidebots', true );
 			}
-			if ( 'showredirs' == $bit ) {
+			if ( $bit === 'showredirs' ) {
 				$this->opts->setValue( 'hideredirs', false );
 			}
 			if ( is_numeric( $bit ) ) {
@@ -118,7 +124,7 @@ class SpecialNewpages extends IncludableSpecialPage {
 	/**
 	 * Show a form for filtering namespace and username
 	 *
-	 * @param string $par
+	 * @param string|null $par
 	 */
 	public function execute( $par ) {
 		$out = $this->getOutput();
@@ -157,6 +163,8 @@ class SpecialNewpages extends IncludableSpecialPage {
 				$navigation = $pager->getNavigationBar();
 			}
 			$out->addHTML( $navigation . $pager->getBody() . $navigation );
+			// Add styles for change tags
+			$out->addModuleStyles( 'mediawiki.interface.helpers.styles' );
 		} else {
 			$out->addWikiMsg( 'specialpage-empty' );
 		}
@@ -178,7 +186,9 @@ class SpecialNewpages extends IncludableSpecialPage {
 		}
 
 		// Disable some if needed
-		if ( !User::groupHasPermission( '*', 'createpage' ) ) {
+		if ( !MediaWikiServices::getInstance()->getPermissionManager()
+				->groupHasPermission( '*', 'createpage' )
+		) {
 			unset( $filters['hideliu'] );
 		}
 		if ( !$this->getUser()->useNPPatrol() ) {
@@ -188,6 +198,16 @@ class SpecialNewpages extends IncludableSpecialPage {
 		$links = [];
 		$changed = $this->opts->getChangedValues();
 		unset( $changed['offset'] ); // Reset offset if query type changes
+
+		// wfArrayToCgi(), called from LinkRenderer/Title, will not output null and false values
+		// to the URL, which would omit some options (T158504). Fix it by explicitly setting them
+		// to 0 or 1.
+		// Also do this only for boolean options, not eg. namespace or tagfilter
+		foreach ( $changed as $key => $value ) {
+			if ( array_key_exists( $key, $filters ) ) {
+				$changed[$key] = $changed[$key] ? '1' : '0';
+			}
+		}
 
 		$self = $this->getPageTitle();
 		$linkRenderer = $this->getLinkRenderer();
@@ -207,7 +227,6 @@ class SpecialNewpages extends IncludableSpecialPage {
 
 	protected function form() {
 		$out = $this->getOutput();
-		$out->addModules( 'mediawiki.userSuggest' );
 
 		// Consume values
 		$this->opts->consumeValue( 'offset' ); // don't carry offset, DWIW
@@ -215,6 +234,7 @@ class SpecialNewpages extends IncludableSpecialPage {
 		$username = $this->opts->consumeValue( 'username' );
 		$tagFilterVal = $this->opts->consumeValue( 'tagfilter' );
 		$nsinvert = $this->opts->consumeValue( 'invert' );
+		$nsassociated = $this->opts->consumeValue( 'associated' );
 
 		$size = $this->opts->consumeValue( 'size' );
 		$max = $this->opts->consumeValue( 'size-mode' ) === 'max';
@@ -223,14 +243,7 @@ class SpecialNewpages extends IncludableSpecialPage {
 		$ut = Title::makeTitleSafe( NS_USER, $username );
 		$userText = $ut ? $ut->getText() : '';
 
-		// Store query values in hidden fields so that form submission doesn't lose them
-		$hidden = [];
-		foreach ( $this->opts->getUnconsumedValues() as $key => $value ) {
-			$hidden[] = Html::hidden( $key, $value );
-		}
-		$hidden = implode( "\n", $hidden );
-
-		$form = [
+		$formDescriptor = [
 			'namespace' => [
 				'type' => 'namespaceselect',
 				'name' => 'namespace',
@@ -244,6 +257,13 @@ class SpecialNewpages extends IncludableSpecialPage {
 				'default' => $nsinvert,
 				'tooltip' => 'invert',
 			],
+			'nsassociated' => [
+				'type' => 'check',
+				'name' => 'associated',
+				'label-message' => 'namespace_association',
+				'default' => $nsassociated,
+				'tooltip' => 'namespace_association',
+			],
 			'tagFilter' => [
 				'type' => 'tagfilter',
 				'name' => 'tagfilter',
@@ -251,13 +271,12 @@ class SpecialNewpages extends IncludableSpecialPage {
 				'default' => $tagFilterVal,
 			],
 			'username' => [
-				'type' => 'text',
+				'type' => 'user',
 				'name' => 'username',
 				'label-message' => 'newpages-username',
 				'default' => $userText,
 				'id' => 'mw-np-username',
 				'size' => 30,
-				'cssclass' => 'mw-autocomplete-user', // used by mediawiki.userSuggest
 			],
 			'size' => [
 				'type' => 'sizefilter',
@@ -266,26 +285,32 @@ class SpecialNewpages extends IncludableSpecialPage {
 			],
 		];
 
-		$htmlForm = new HTMLForm( $form, $this->getContext() );
+		$htmlForm = HTMLForm::factory( 'ooui', $formDescriptor, $this->getContext() );
 
-		$htmlForm->setSubmitText( $this->msg( 'newpages-submit' )->text() );
-		$htmlForm->setSubmitProgressive();
-		// The form should be visible on each request (inclusive requests with submitted forms), so
-		// return always false here.
-		$htmlForm->setSubmitCallback(
-			function () {
-				return false;
-			}
-		);
-		$htmlForm->setMethod( 'get' );
-		$htmlForm->setWrapperLegend( true );
-		$htmlForm->setWrapperLegendMsg( 'newpages' );
-		$htmlForm->addFooterText( Html::rawElement(
-			'div',
-			null,
-			$this->filterLinks()
-		) );
-		$htmlForm->show();
+		// Store query values in hidden fields so that form submission doesn't lose them
+		foreach ( $this->opts->getUnconsumedValues() as $key => $value ) {
+			$htmlForm->addHiddenField( $key, $value );
+		}
+
+		$htmlForm
+			->setMethod( 'get' )
+			->setFormIdentifier( 'newpagesform' )
+			// The form should be visible on each request (inclusive requests with submitted forms), so
+			// return always false here.
+			->setSubmitCallback(
+				function () {
+					return false;
+				}
+			)
+			->setSubmitText( $this->msg( 'newpages-submit' )->text() )
+			->setWrapperLegend( $this->msg( 'newpages' )->text() )
+			->addFooterText( Html::rawElement(
+				'div',
+				null,
+				$this->filterLinks()
+			) )
+			->show();
+		$out->addModuleStyles( 'mediawiki.special' );
 	}
 
 	/**
@@ -401,7 +426,10 @@ class SpecialNewpages extends IncludableSpecialPage {
 
 		// Let extensions add data
 		Hooks::run( 'NewPagesLineEnding', [ $this, &$ret, $result, &$classes, &$attribs ] );
-		$attribs = wfArrayFilterByKey( $attribs, [ Sanitizer::class, 'isReservedDataAttribute' ] );
+		$attribs = array_filter( $attribs,
+			[ Sanitizer::class, 'isReservedDataAttribute' ],
+			ARRAY_FILTER_USE_KEY
+		);
 
 		if ( count( $classes ) ) {
 			$attribs['class'] = implode( ' ', $classes );
@@ -486,7 +514,7 @@ class SpecialNewpages extends IncludableSpecialPage {
 	}
 
 	protected function feedItemAuthor( $row ) {
-		return isset( $row->rc_user_text ) ? $row->rc_user_text : '';
+		return $row->rc_user_text ?? '';
 	}
 
 	protected function feedItemDesc( $row ) {

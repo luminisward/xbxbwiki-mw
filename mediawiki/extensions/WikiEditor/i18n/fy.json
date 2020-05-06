@@ -3,18 +3,21 @@
 		"authors": [
 			"Kening Aldgilles",
 			"Robin0van0der0vliet",
-			"Robin van der Vliet"
+			"Robin van der Vliet",
+			"PiefPafPier"
 		]
 	},
 	"wikieditor-toolbar": "Bewurkingsbalke",
+	"wikieditor-toolbar-preference": "De bewurkingsarkbalke ynskeakelje",
+	"wikieditor-toolbar-preference-help": "Dit wurdt bytiden de 'wikitekstbewurker 2010' neamd.",
 	"wikieditor-toolbar-tool-bold": "Fet",
 	"wikieditor-toolbar-tool-italic": "Kursyf",
 	"wikieditor-toolbar-tool-link-title": "Keppeling ynfoegje",
 	"wikieditor-toolbar-tool-link-insert": "Keppeling ynfoegje",
 	"wikieditor-toolbar-tool-link-cancel": "Annulearje",
 	"wikieditor-toolbar-tool-file-example": "Foarbyld.jpg",
-	"wikieditor-toolbar-tool-file-title": "Triem ynfoegje",
-	"wikieditor-toolbar-file-target": "Triemnamme:",
+	"wikieditor-toolbar-tool-file-title": "Bestân ynfoegje",
+	"wikieditor-toolbar-file-target": "Bestânsnamme:",
 	"wikieditor-toolbar-file-size": "Grutte:",
 	"wikieditor-toolbar-file-default": "(standert)",
 	"wikieditor-toolbar-file-format-none": "gjin",
@@ -34,6 +37,7 @@
 	"wikieditor-toolbar-tool-heading-example": "Koptekst",
 	"wikieditor-toolbar-tool-ulist": "List sûnder nûmers",
 	"wikieditor-toolbar-tool-olist": "List mei nûmers",
+	"wikieditor-toolbar-tool-redirect-example": "Namme doelside",
 	"wikieditor-toolbar-tool-small": "Lyts",
 	"wikieditor-toolbar-group-insert": "Ynfoegje",
 	"wikieditor-toolbar-tool-table-title": "Tabel ynfoegje",

@@ -61,6 +61,7 @@ if ( !defined( 'MW_CONFIG_CALLBACK' ) && !defined( 'MW_CONFIG_FILE' ) ) {
 
 // Custom setup for Maintenance entry point
 if ( !defined( 'MW_SETUP_CALLBACK' ) ) {
+
 	function wfMaintenanceSetup() {
 		// phpcs:ignore MediaWiki.NamingConventions.ValidGlobalName.wgPrefix
 		global $maintenance, $wgLocalisationCacheConf, $wgCacheDirectory;
@@ -75,6 +76,7 @@ if ( !defined( 'MW_SETUP_CALLBACK' ) ) {
 
 		$maintenance->finalSetup();
 	}
+
 	define( 'MW_SETUP_CALLBACK', 'wfMaintenanceSetup' );
 }
 
@@ -90,13 +92,36 @@ $maintenance->checkRequiredExtensions();
 // This avoids having long running scripts just OOM and lose all the updates.
 $maintenance->setAgentAndTriggers();
 
+$maintenance->validateParamsAndArgs();
+
 // Do the work
-$maintenance->execute();
+try {
+	$success = $maintenance->execute();
+} catch ( Exception $ex ) {
+	$success = false;
+	$exReportMessage = '';
+	while ( $ex ) {
+		$cls = get_class( $ex );
+		$exReportMessage .= "$cls from line {$ex->getLine()} of {$ex->getFile()}: {$ex->getMessage()}\n";
+		$exReportMessage .= $ex->getTraceAsString() . "\n";
+		$ex = $ex->getPrevious();
+	}
+	// Print the exception to stderr if possible, don't mix it in
+	// with stdout output.
+	if ( defined( 'STDERR' ) ) {
+		fwrite( STDERR, $exReportMessage );
+	} else {
+		echo $exReportMessage;
+	}
+}
 
 // Potentially debug globals
 $maintenance->globals();
 
-if ( $maintenance->getDbType() !== Maintenance::DB_NONE ) {
+if ( $maintenance->getDbType() !== Maintenance::DB_NONE &&
+	// Service might be disabled, e.g. when running install.php
+	!MediaWikiServices::getInstance()->isServiceDisabled( 'DBLoadBalancerFactory' )
+) {
 	// Perform deferred updates.
 	$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
 	$lbFactory->commitMasterChanges( $maintClass );
@@ -110,4 +135,9 @@ if ( isset( $lbFactory ) ) {
 	// Commit and close up!
 	$lbFactory->commitMasterChanges( 'doMaintenance' );
 	$lbFactory->shutdown( $lbFactory::SHUTDOWN_NO_CHRONPROT );
+}
+
+// Exit with an error status if execute() returned false
+if ( $success === false ) {
+	exit( 1 );
 }

@@ -82,7 +82,7 @@ abstract class DBLockManager extends QuorumLockManager {
 			$this->lockExpiry = $config['lockExpiry'];
 		} else {
 			$met = ini_get( 'max_execution_time' );
-			$this->lockExpiry = $met ? $met : 60; // use some sane amount if 0
+			$this->lockExpiry = $met ?: 60; // use some sane amount if 0
 		}
 		$this->safeDelay = ( $this->lockExpiry <= 0 )
 			? 60 // pick a safe-ish number to match DB timeout default
@@ -90,13 +90,11 @@ abstract class DBLockManager extends QuorumLockManager {
 
 		// Tracks peers that couldn't be queried recently to avoid lengthy
 		// connection timeouts. This is useless if each bucket has one peer.
-		$this->statusCache = isset( $config['srvCache'] )
-			? $config['srvCache']
-			: new HashBagOStuff();
+		$this->statusCache = $config['srvCache'] ?? new HashBagOStuff();
 	}
 
 	/**
-	 * @TODO change this code to work in one batch
+	 * @todo change this code to work in one batch
 	 * @param string $lockSrv
 	 * @param array $pathsByType
 	 * @return StatusValue
@@ -152,12 +150,12 @@ abstract class DBLockManager extends QuorumLockManager {
 			} elseif ( is_array( $this->dbServers[$lockDb] ) ) {
 				// Parameters to construct a new database connection
 				$config = $this->dbServers[$lockDb];
+				$config['flags'] = ( $config['flags'] ?? 0 );
+				$config['flags'] &= ~( IDatabase::DBO_TRX | IDatabase::DBO_DEFAULT );
 				$db = Database::factory( $config['type'], $config );
 			} else {
 				throw new UnexpectedValueException( "No server called '$lockDb'." );
 			}
-
-			$db->clearFlag( DBO_TRX );
 			# If the connection drops, try to avoid letting the DB rollback
 			# and release the locks before the file operations are finished.
 			# This won't handle the case of DB server restarts however.

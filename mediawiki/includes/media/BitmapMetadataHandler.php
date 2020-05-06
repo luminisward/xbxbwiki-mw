@@ -22,6 +22,7 @@
  */
 
 use MediaWiki\Logger\LoggerFactory;
+use Wikimedia\XMPReader\Reader as XMPReader;
 
 /**
  * Class to deal with reconciling and extracting metadata from bitmap images.
@@ -122,7 +123,7 @@ class BitmapMetadataHandler {
 	 */
 	function getMetadataArray() {
 		// this seems a bit ugly... This is all so its merged in right order
-		// based on the MWG recomendation.
+		// based on the MWG recommendation.
 		$temp = [];
 		krsort( $this->metaPriority );
 		foreach ( $this->metaPriority as $pri ) {
@@ -131,13 +132,13 @@ class BitmapMetadataHandler {
 					// Do some special casing for multilingual values.
 					// Don't discard translations if also as a simple value.
 					foreach ( $this->metadata[$type] as $itemName => $item ) {
-						if ( is_array( $item ) && isset( $item['_type'] ) && $item['_type'] === 'lang' ) {
-							if ( isset( $temp[$itemName] ) && !is_array( $temp[$itemName] ) ) {
-								$default = $temp[$itemName];
-								$temp[$itemName] = $item;
-								$temp[$itemName]['x-default'] = $default;
-								unset( $this->metadata[$type][$itemName] );
-							}
+						if ( is_array( $item ) && isset( $item['_type'] ) && $item['_type'] === 'lang' &&
+							isset( $temp[$itemName] ) && !is_array( $temp[$itemName] )
+						) {
+							$default = $temp[$itemName];
+							$temp[$itemName] = $item;
+							$temp[$itemName]['x-default'] = $default;
+							unset( $this->metadata[$type][$itemName] );
 						}
 					}
 
@@ -184,7 +185,7 @@ class BitmapMetadataHandler {
 			}
 		}
 
-		$meta->getExif( $filename, isset( $seg['byteOrder'] ) ? $seg['byteOrder'] : 'BE' );
+		$meta->getExif( $filename, $seg['byteOrder'] ?? 'BE' );
 
 		return $meta->getMetadataArray();
 	}

@@ -82,4 +82,25 @@ class UserIdentityValue implements UserIdentity {
 		return $this->actor;
 	}
 
+	/**
+	 * @since 1.32
+	 *
+	 * @param UserIdentity $user
+	 * @return bool
+	 */
+	public function equals( UserIdentity $user ) {
+		// XXX it's not clear whether central ID providers are supposed to obey this
+		return $this->getName() === $user->getName();
+	}
+
+	/**
+	 * @since 1.34
+	 *
+	 * @return bool True if user is registered on this wiki, i.e., has a user ID. False if user is
+	 *   anonymous or has no local account (which can happen when importing). This is equivalent to
+	 *   getId() != 0 and is provided for code readability.
+	 */
+	public function isRegistered() {
+		return $this->getId() != 0;
+	}
 }

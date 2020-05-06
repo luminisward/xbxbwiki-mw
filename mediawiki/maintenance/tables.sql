@@ -228,7 +228,7 @@ CREATE INDEX /*i*/un_user_ip ON /*_*/user_newtalk (user_ip);
 -- User preferences and perhaps other fun stuff. :)
 -- Replaces the old user.user_options blob, with a couple nice properties:
 --
--- 1) We only store non-default settings, so changes to the defauls
+-- 1) We only store non-default settings, so changes to the defaults
 --    are now reflected for everybody, not just new accounts.
 -- 2) We can more easily do bulk lookups, statistics, or modifications of
 --    saved options since it's a sane table structure.
@@ -593,11 +593,8 @@ CREATE TABLE /*_*/archive (
   ar_title varchar(255) binary NOT NULL default '',
 
   -- Basic revision stuff...
-  ar_comment varbinary(767) NOT NULL default '', -- Deprecated in favor of ar_comment_id
-  ar_comment_id bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that ar_comment should be used)
-  ar_user int unsigned NOT NULL default 0, -- Deprecated in favor of ar_actor
-  ar_user_text varchar(255) binary NOT NULL DEFAULT '', -- Deprecated in favor of ar_actor
-  ar_actor bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that ar_user/ar_user_text should be used)
+  ar_comment_id bigint unsigned NOT NULL,
+  ar_actor bigint unsigned NOT NULL,
   ar_timestamp binary(14) NOT NULL default '',
   ar_minor_edit tinyint NOT NULL default 0,
 
@@ -662,12 +659,11 @@ CREATE TABLE /*_*/archive (
 CREATE INDEX /*i*/name_title_timestamp ON /*_*/archive (ar_namespace,ar_title,ar_timestamp);
 
 -- Index for Special:DeletedContributions
-CREATE INDEX /*i*/ar_usertext_timestamp ON /*_*/archive (ar_user_text,ar_timestamp);
 CREATE INDEX /*i*/ar_actor_timestamp ON /*_*/archive (ar_actor,ar_timestamp);
 
 -- Index for linking archive rows with tables that normally link with revision
 -- rows, such as change_tag.
-CREATE INDEX /*i*/ar_revid ON /*_*/archive (ar_rev_id);
+CREATE UNIQUE INDEX /*i*/ar_revid_uniq ON /*_*/archive (ar_rev_id);
 
 --
 -- Slots represent an n:m relation between revisions and content objects.
@@ -687,6 +683,8 @@ CREATE TABLE /*_*/slots (
 
   -- The revision ID of the revision that originated the slot's content.
   -- To find revisions that changed slots, look for slot_origin = slot_revision_id.
+  -- TODO: Is that actually true? Rollback seems to violate it by setting
+  --  slot_origin to an older rev_id. Undeletions could result in the same situation.
   slot_origin bigint unsigned NOT NULL,
 
   PRIMARY KEY ( slot_revision_id, slot_role_id )
@@ -928,12 +926,14 @@ CREATE TABLE /*_*/externallinks (
   -- which allows for fast searching for all pages under example.com with the
   -- clause:
   --      WHERE el_index LIKE 'http://com.example.%'
+  --
+  -- Note if you enable or disable PHP's intl extension, you'll need to run
+  -- maintenance/refreshExternallinksIndex.php to refresh this field.
   el_index blob NOT NULL,
 
   -- This is el_index truncated to 60 bytes to allow for sortable queries that
   -- aren't supported by a partial index.
-  -- @todo Drop the default once this is deployed everywhere and code is populating it.
-  el_index_60 varbinary(60) NOT NULL default ''
+  el_index_60 varbinary(60) NOT NULL
 ) /*$wgDBTableOptions*/;
 
 -- Forward index, for page edit, save
@@ -1031,21 +1031,11 @@ CREATE TABLE /*_*/ipblocks (
   -- Blocked user ID or 0 for IP blocks.
   ipb_user int unsigned NOT NULL default 0,
 
-  -- User ID who made the block.
-  ipb_by int unsigned NOT NULL default 0, -- Deprecated in favor of ipb_by_actor
-
-  -- User name of blocker
-  ipb_by_text varchar(255) binary NOT NULL default '', -- Deprecated in favor of ipb_by_actor
-
   -- Actor who made the block.
-  ipb_by_actor bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that ipb_by/ipb_by_text should be used)
-
-  -- Text comment made by blocker. Deprecated in favor of ipb_reason_id
-  ipb_reason varbinary(767) NOT NULL default '',
+  ipb_by_actor bigint unsigned NOT NULL,
 
   -- Key to comment_id. Text comment made by blocker.
-  -- ("DEFAULT 0" is temporary, signaling that ipb_reason should be used)
-  ipb_reason_id bigint unsigned NOT NULL DEFAULT 0,
+  ipb_reason_id bigint unsigned NOT NULL,
 
   -- Creation (or refresh) date in standard YMDHMS form.
   -- IP blocks expire automatically.
@@ -1090,7 +1080,11 @@ CREATE TABLE /*_*/ipblocks (
   -- Autoblocks set this to the original block
   -- so that the original block being deleted also
   -- deletes the autoblocks
-  ipb_parent_block_id int default NULL
+  ipb_parent_block_id int default NULL,
+
+  -- Block user from editing any page on the site (other than their own user
+  -- talk page).
+  ipb_sitewide bool NOT NULL default 1
 
 ) /*$wgDBTableOptions*/;
 
@@ -1113,6 +1107,26 @@ CREATE INDEX /*i*/ipb_expiry ON /*_*/ipblocks (ipb_expiry);
 -- Index for removing autoblocks when a parent block is removed
 CREATE INDEX /*i*/ipb_parent_block_id ON /*_*/ipblocks (ipb_parent_block_id);
 
+--
+-- Partial Block Restrictions
+--
+CREATE TABLE /*_*/ipblocks_restrictions (
+
+  -- The ipb_id from ipblocks
+  ir_ipb_id int NOT NULL,
+
+  -- The restriction type id.
+  ir_type tinyint(1) NOT NULL,
+
+  -- The restriction id that corrposponds to the type. Typically a Page ID or a
+  -- Namespace ID.
+  ir_value int NOT NULL,
+
+  PRIMARY KEY (ir_ipb_id, ir_type, ir_value)
+) /*$wgDBTableOptions*/;
+
+-- Index to query restrictions by the page or namespace.
+CREATE INDEX /*i*/ir_type_value ON /*_*/ipblocks_restrictions (ir_type, ir_value);
 
 --
 -- Uploaded images and other files.
@@ -1150,21 +1164,12 @@ CREATE TABLE /*_*/image (
   -- see https://www.iana.org/assignments/media-types/
   img_minor_mime varbinary(100) NOT NULL default "unknown",
 
-  -- Description field as entered by the uploader.
+  -- Foreign key to comment table, which contains the description field as entered by the uploader.
   -- This is displayed in image upload history and logs.
-  -- Deprecated in favor of img_description_id.
-  img_description varbinary(767) NOT NULL default '',
-
-  img_description_id bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that img_description should be used)
-
-  -- user_id and user_name of uploader.
-  -- Deprecated in favor of img_actor.
-  img_user int unsigned NOT NULL default 0,
-  img_user_text varchar(255) binary NOT NULL DEFAULT '',
+  img_description_id bigint unsigned NOT NULL,
 
   -- actor_id of the uploader.
-  -- ("DEFAULT 0" is temporary, signaling that img_user/img_user_text should be used)
-  img_actor bigint unsigned NOT NULL DEFAULT 0,
+  img_actor bigint unsigned NOT NULL,
 
   -- Time of the upload.
   img_timestamp varbinary(14) NOT NULL default '',
@@ -1174,8 +1179,6 @@ CREATE TABLE /*_*/image (
 ) /*$wgDBTableOptions*/;
 
 -- Used by Special:Newimages and ApiQueryAllImages
-CREATE INDEX /*i*/img_user_timestamp ON /*_*/image (img_user,img_timestamp);
-CREATE INDEX /*i*/img_usertext_timestamp ON /*_*/image (img_user_text,img_timestamp);
 CREATE INDEX /*i*/img_actor_timestamp ON /*_*/image (img_actor,img_timestamp);
 -- Used by Special:ListFiles for sort-by-size
 CREATE INDEX /*i*/img_size ON /*_*/image (img_size);
@@ -1185,23 +1188,6 @@ CREATE INDEX /*i*/img_timestamp ON /*_*/image (img_timestamp);
 CREATE INDEX /*i*/img_sha1 ON /*_*/image (img_sha1(10));
 -- Used to get media of one type
 CREATE INDEX /*i*/img_media_mime ON /*_*/image (img_media_type,img_major_mime,img_minor_mime);
-
---
--- Temporary table to avoid blocking on an alter of image.
---
--- On large wikis like Wikimedia Commons, altering the image table is a
--- months-long process. This table is being created to avoid such an alter, and
--- will be merged back into image in the future.
---
-CREATE TABLE /*_*/image_comment_temp (
-  -- Key to img_name (ugh)
-  imgcomment_name varchar(255) binary NOT NULL,
-  -- Key to comment_id
-  imgcomment_description_id bigint unsigned NOT NULL,
-  PRIMARY KEY (imgcomment_name, imgcomment_description_id)
-) /*$wgDBTableOptions*/;
--- Ensure uniqueness
-CREATE UNIQUE INDEX /*i*/imgcomment_name ON /*_*/image_comment_temp (imgcomment_name);
 
 
 --
@@ -1222,11 +1208,8 @@ CREATE TABLE /*_*/oldimage (
   oi_width int NOT NULL default 0,
   oi_height int NOT NULL default 0,
   oi_bits int NOT NULL default 0,
-  oi_description varbinary(767) NOT NULL default '', -- Deprecated.
-  oi_description_id bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that oi_description should be used)
-  oi_user int unsigned NOT NULL default 0, -- Deprecated in favor of oi_actor
-  oi_user_text varchar(255) binary NOT NULL DEFAULT '', -- Deprecated in favor of oi_actor
-  oi_actor bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that oi_user/oi_user_text should be used)
+  oi_description_id bigint unsigned NOT NULL,
+  oi_actor bigint unsigned NOT NULL,
   oi_timestamp binary(14) NOT NULL default '',
 
   oi_metadata mediumblob NOT NULL,
@@ -1237,7 +1220,6 @@ CREATE TABLE /*_*/oldimage (
   oi_sha1 varbinary(32) NOT NULL default ''
 ) /*$wgDBTableOptions*/;
 
-CREATE INDEX /*i*/oi_usertext_timestamp ON /*_*/oldimage (oi_user_text,oi_timestamp);
 CREATE INDEX /*i*/oi_actor_timestamp ON /*_*/oldimage (oi_actor,oi_timestamp);
 CREATE INDEX /*i*/oi_name_timestamp ON /*_*/oldimage (oi_name,oi_timestamp);
 -- oi_archive_name truncated to 14 to avoid key length overflow
@@ -1273,8 +1255,7 @@ CREATE TABLE /*_*/filearchive (
   -- Deletion information, if this file is deleted.
   fa_deleted_user int,
   fa_deleted_timestamp binary(14) default '',
-  fa_deleted_reason varbinary(767) default '', -- Deprecated
-  fa_deleted_reason_id bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that fa_deleted_reason should be used)
+  fa_deleted_reason_id bigint unsigned NOT NULL,
 
   -- Duped fields from image
   fa_size int unsigned default 0,
@@ -1285,11 +1266,8 @@ CREATE TABLE /*_*/filearchive (
   fa_media_type ENUM("UNKNOWN", "BITMAP", "DRAWING", "AUDIO", "VIDEO", "MULTIMEDIA", "OFFICE", "TEXT", "EXECUTABLE", "ARCHIVE", "3D") default NULL,
   fa_major_mime ENUM("unknown", "application", "audio", "image", "text", "video", "message", "model", "multipart", "chemical") default "unknown",
   fa_minor_mime varbinary(100) default "unknown",
-  fa_description varbinary(767) default '', -- Deprecated
-  fa_description_id bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that fa_description should be used)
-  fa_user int unsigned default 0, -- Deprecated in favor of fa_actor
-  fa_user_text varchar(255) binary DEFAULT '', -- Deprecated in favor of fa_actor
-  fa_actor bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that fa_user/fa_user_text should be used)
+  fa_description_id bigint unsigned NOT NULL,
+  fa_actor bigint unsigned NOT NULL,
   fa_timestamp binary(14) default '',
 
   -- Visibility of deleted revisions, bitfield
@@ -1306,7 +1284,6 @@ CREATE INDEX /*i*/fa_storage_group ON /*_*/filearchive (fa_storage_group, fa_sto
 -- sort by deletion time
 CREATE INDEX /*i*/fa_deleted_timestamp ON /*_*/filearchive (fa_deleted_timestamp);
 -- sort by uploader
-CREATE INDEX /*i*/fa_user_timestamp ON /*_*/filearchive (fa_user_text,fa_timestamp);
 CREATE INDEX /*i*/fa_actor_timestamp ON /*_*/filearchive (fa_actor,fa_timestamp);
 -- find file by sha1, 10 bytes will be enough for hashes to be indexed
 CREATE INDEX /*i*/fa_sha1 ON /*_*/filearchive (fa_sha1(10));
@@ -1378,17 +1355,14 @@ CREATE TABLE /*_*/recentchanges (
   rc_timestamp varbinary(14) NOT NULL default '',
 
   -- As in revision
-  rc_user int unsigned NOT NULL default 0, -- Deprecated in favor of rc_actor
-  rc_user_text varchar(255) binary NOT NULL DEFAULT '', -- Deprecated in favor of rc_actor
-  rc_actor bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that rc_user/rc_user_text should be used)
+  rc_actor bigint unsigned NOT NULL,
 
   -- When pages are renamed, their RC entries do _not_ change.
   rc_namespace int NOT NULL default 0,
   rc_title varchar(255) binary NOT NULL default '',
 
   -- as in revision...
-  rc_comment varbinary(767) NOT NULL default '', -- Deprecated.
-  rc_comment_id bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that rc_comment should be used)
+  rc_comment_id bigint unsigned NOT NULL,
   rc_minor tinyint unsigned NOT NULL default 0,
 
   -- Edits by user accounts with the 'bot' rights key are
@@ -1462,16 +1436,16 @@ CREATE INDEX /*i*/new_name_timestamp ON /*_*/recentchanges (rc_new,rc_namespace,
 CREATE INDEX /*i*/rc_ip ON /*_*/recentchanges (rc_ip);
 
 -- Probably intended for Special:NewPages namespace filter
-CREATE INDEX /*i*/rc_ns_usertext ON /*_*/recentchanges (rc_namespace, rc_user_text);
 CREATE INDEX /*i*/rc_ns_actor ON /*_*/recentchanges (rc_namespace, rc_actor);
 
 -- SiteStats active user count, Special:ActiveUsers, Special:NewPages user filter
-CREATE INDEX /*i*/rc_user_text ON /*_*/recentchanges (rc_user_text, rc_timestamp);
 CREATE INDEX /*i*/rc_actor ON /*_*/recentchanges (rc_actor, rc_timestamp);
 
 -- ApiQueryRecentChanges (T140108)
 CREATE INDEX /*i*/rc_name_type_patrolled_timestamp ON /*_*/recentchanges (rc_namespace, rc_type, rc_patrolled, rc_timestamp);
 
+-- Article.php and friends (T139012)
+CREATE INDEX /*i*/rc_this_oldid ON /*_*/recentchanges (rc_this_oldid);
 
 CREATE TABLE /*_*/watchlist (
   wl_id int unsigned NOT NULL PRIMARY KEY AUTO_INCREMENT,
@@ -1530,7 +1504,7 @@ CREATE FULLTEXT INDEX /*i*/si_text ON /*_*/searchindex (si_text);
 --
 CREATE TABLE /*_*/interwiki (
   -- The interwiki prefix, (e.g. "Meatball", or the language prefix "de")
-  iw_prefix varchar(32) NOT NULL,
+  iw_prefix varchar(32) NOT NULL PRIMARY KEY,
 
   -- The URL of the wiki, with "$1" as a placeholder for an article name.
   -- Any spaces in the name will be transformed to underscores before
@@ -1540,7 +1514,7 @@ CREATE TABLE /*_*/interwiki (
   -- The URL of the file api.php
   iw_api blob NOT NULL,
 
-  -- The name of the database (for a connection to be established with wfGetLB( 'wikiid' ))
+  -- The name of the database (for a connection to be established with LBFactory::getMainLB( 'wikiid' ))
   iw_wikiid varchar(64) NOT NULL,
 
   -- A boolean value indicating whether the wiki is in this project
@@ -1550,8 +1524,6 @@ CREATE TABLE /*_*/interwiki (
   -- Boolean value indicating whether interwiki transclusions are allowed.
   iw_trans tinyint NOT NULL default 0
 ) /*$wgDBTableOptions*/;
-
-CREATE UNIQUE INDEX /*i*/iw_prefix ON /*_*/interwiki (iw_prefix);
 
 
 --
@@ -1583,16 +1555,6 @@ CREATE TABLE /*_*/objectcache (
 CREATE INDEX /*i*/exptime ON /*_*/objectcache (exptime);
 
 
---
--- Cache of interwiki transclusion
---
-CREATE TABLE /*_*/transcache (
-  tc_url varbinary(255) NOT NULL PRIMARY KEY,
-  tc_contents text,
-  tc_time binary(14) NOT NULL
-) /*$wgDBTableOptions*/;
-
-
 CREATE TABLE /*_*/logging (
   -- Log ID, for referring to this specific log entry, probably for deletion and such.
   log_id int unsigned NOT NULL PRIMARY KEY AUTO_INCREMENT,
@@ -1606,14 +1568,8 @@ CREATE TABLE /*_*/logging (
   -- Timestamp. Duh.
   log_timestamp binary(14) NOT NULL default '19700101000000',
 
-  -- The user who performed this action; key to user_id
-  log_user int unsigned NOT NULL default 0, -- Deprecated in favor of log_actor
-
-  -- Name of the user who performed this action
-  log_user_text varchar(255) binary NOT NULL default '', -- Deprecated in favor of log_actor
-
   -- The actor who performed this action
-  log_actor bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that log_user/log_user_text should be used)
+  log_actor bigint unsigned NOT NULL,
 
   -- Key to the page affected. Where a user is the target,
   -- this will point to the user page.
@@ -1621,13 +1577,8 @@ CREATE TABLE /*_*/logging (
   log_title varchar(255) binary NOT NULL default '',
   log_page int unsigned NULL,
 
-  -- Freeform text. Interpreted as edit history comments.
-  -- Deprecated in favor of log_comment_id.
-  log_comment varbinary(767) NOT NULL default '',
-
   -- Key to comment_id. Comment summarizing the change.
-  -- ("DEFAULT 0" is temporary, signaling that log_comment should be used)
-  log_comment_id bigint unsigned NOT NULL DEFAULT 0,
+  log_comment_id bigint unsigned NOT NULL,
 
   -- miscellaneous parameters:
   -- LF separated list (old system) or serialized PHP array (new system)
@@ -1641,7 +1592,6 @@ CREATE TABLE /*_*/logging (
 CREATE INDEX /*i*/type_time ON /*_*/logging (log_type, log_timestamp);
 
 -- Special:Log performer filter
-CREATE INDEX /*i*/user_time ON /*_*/logging (log_user, log_timestamp);
 CREATE INDEX /*i*/actor_time ON /*_*/logging (log_actor, log_timestamp);
 
 -- Special:Log title filter, log extract
@@ -1651,7 +1601,6 @@ CREATE INDEX /*i*/page_time ON /*_*/logging (log_namespace, log_title, log_times
 CREATE INDEX /*i*/times ON /*_*/logging (log_timestamp);
 
 -- Special:Log filter by performer and type
-CREATE INDEX /*i*/log_user_type_time ON /*_*/logging (log_user, log_type, log_timestamp);
 CREATE INDEX /*i*/log_actor_type_time ON /*_*/logging (log_actor, log_type, log_timestamp);
 
 -- Apparently just used for a few maintenance pages (findMissingFiles.php, Flow).
@@ -1659,13 +1608,7 @@ CREATE INDEX /*i*/log_actor_type_time ON /*_*/logging (log_actor, log_type, log_
 CREATE INDEX /*i*/log_page_id_time ON /*_*/logging (log_page,log_timestamp);
 
 -- Special:Log action filter
-CREATE INDEX /*i*/type_action ON /*_*/logging (log_type, log_action, log_timestamp);
-
--- Special:Log filter by type and anonymous performer
-CREATE INDEX /*i*/log_user_text_type_time ON /*_*/logging (log_user_text, log_type, log_timestamp);
-
--- Special:Log filter by anonymous performer
-CREATE INDEX /*i*/log_user_text_time ON /*_*/logging (log_user_text, log_timestamp);
+CREATE INDEX /*i*/log_type_action ON /*_*/logging (log_type, log_action, log_timestamp);
 
 
 CREATE TABLE /*_*/log_search (
@@ -1699,7 +1642,7 @@ CREATE TABLE /*_*/job (
 
   -- Any other parameters to the command
   -- Stored as a PHP serialized array, or an empty string if there are no parameters
-  job_params blob NOT NULL,
+  job_params mediumblob NOT NULL,
 
   -- Random, non-unique, number used for job acquisition (for lock concurrency)
   job_random integer unsigned NOT NULL default 0,
@@ -1804,14 +1747,14 @@ CREATE TABLE /*_*/protected_titles (
   pt_namespace int NOT NULL,
   pt_title varchar(255) binary NOT NULL,
   pt_user int unsigned NOT NULL,
-  pt_reason varbinary(767) default '', -- Deprecated.
-  pt_reason_id bigint unsigned NOT NULL DEFAULT 0, -- ("DEFAULT 0" is temporary, signaling that pt_reason should be used)
+  pt_reason_id bigint unsigned NOT NULL,
   pt_timestamp binary(14) NOT NULL,
   pt_expiry varbinary(14) NOT NULL default '',
-  pt_create_perm varbinary(60) NOT NULL
+  pt_create_perm varbinary(60) NOT NULL,
+
+  PRIMARY KEY (pt_namespace,pt_title)
 ) /*$wgDBTableOptions*/;
 
-CREATE UNIQUE INDEX /*i*/pt_namespace_title ON /*_*/protected_titles (pt_namespace,pt_title);
 CREATE INDEX /*i*/pt_timestamp ON /*_*/protected_titles (pt_timestamp);
 
 
@@ -1820,10 +1763,11 @@ CREATE TABLE /*_*/page_props (
   pp_page int NOT NULL,
   pp_propname varbinary(60) NOT NULL,
   pp_value blob NOT NULL,
-  pp_sortkey float DEFAULT NULL
+  pp_sortkey float DEFAULT NULL,
+
+  PRIMARY KEY (pp_page,pp_propname)
 ) /*$wgDBTableOptions*/;
 
-CREATE UNIQUE INDEX /*i*/pp_page_propname ON /*_*/page_props (pp_page,pp_propname);
 CREATE UNIQUE INDEX /*i*/pp_propname_page ON /*_*/page_props (pp_propname,pp_page);
 CREATE UNIQUE INDEX /*i*/pp_propname_sortkey_page ON /*_*/page_props (pp_propname,pp_sortkey,pp_page);
 
@@ -1843,41 +1787,19 @@ CREATE TABLE /*_*/change_tag (
   ct_log_id int unsigned NULL,
   -- REVID for the change
   ct_rev_id int unsigned NULL,
-  -- Tag applied
-  ct_tag varchar(255) NOT NULL,
   -- Parameters for the tag; used by some extensions
-  ct_params blob NULL
+  ct_params blob NULL,
+  -- Foreign key to change_tag_def row
+  ct_tag_id int unsigned NOT NULL
 ) /*$wgDBTableOptions*/;
 
-CREATE UNIQUE INDEX /*i*/change_tag_rc_tag ON /*_*/change_tag (ct_rc_id,ct_tag);
-CREATE UNIQUE INDEX /*i*/change_tag_log_tag ON /*_*/change_tag (ct_log_id,ct_tag);
-CREATE UNIQUE INDEX /*i*/change_tag_rev_tag ON /*_*/change_tag (ct_rev_id,ct_tag);
+
+CREATE UNIQUE INDEX /*i*/change_tag_rc_tag_id ON /*_*/change_tag (ct_rc_id,ct_tag_id);
+CREATE UNIQUE INDEX /*i*/change_tag_log_tag_id ON /*_*/change_tag (ct_log_id,ct_tag_id);
+CREATE UNIQUE INDEX /*i*/change_tag_rev_tag_id ON /*_*/change_tag (ct_rev_id,ct_tag_id);
 -- Covering index, so we can pull all the info only out of the index.
-CREATE INDEX /*i*/change_tag_tag_id ON /*_*/change_tag (ct_tag,ct_rc_id,ct_rev_id,ct_log_id);
+CREATE INDEX /*i*/change_tag_tag_id_id ON /*_*/change_tag (ct_tag_id,ct_rc_id,ct_rev_id,ct_log_id);
 
-
--- Rollup table to pull a LIST of tags simply without ugly GROUP_CONCAT
--- that only works on MySQL 4.1+
-CREATE TABLE /*_*/tag_summary (
-  ts_id int unsigned NOT NULL PRIMARY KEY AUTO_INCREMENT,
-  -- RCID for the change
-  ts_rc_id int NULL,
-  -- LOGID for the change
-  ts_log_id int unsigned NULL,
-  -- REVID for the change
-  ts_rev_id int unsigned NULL,
-  -- Comma-separated list of tags
-  ts_tags blob NOT NULL
-) /*$wgDBTableOptions*/;
-
-CREATE UNIQUE INDEX /*i*/tag_summary_rc_id ON /*_*/tag_summary (ts_rc_id);
-CREATE UNIQUE INDEX /*i*/tag_summary_log_id ON /*_*/tag_summary (ts_log_id);
-CREATE UNIQUE INDEX /*i*/tag_summary_rev_id ON /*_*/tag_summary (ts_rev_id);
-
-
-CREATE TABLE /*_*/valid_tag (
-  vt_tag varchar(255) NOT NULL PRIMARY KEY
-) /*$wgDBTableOptions*/;
 
 -- Table for storing localisation data
 CREATE TABLE /*_*/l10n_cache (
@@ -1961,11 +1883,28 @@ CREATE TABLE /*_*/site_identifiers (
   si_type                    varbinary(32)       NOT NULL,
 
   -- local key value, ie 'en' or 'wiktionary'
-  si_key                     varbinary(32)       NOT NULL
+  si_key                     varbinary(32)       NOT NULL,
+
+  PRIMARY KEY (si_type, si_key)
 ) /*$wgDBTableOptions*/;
 
-CREATE UNIQUE INDEX /*i*/site_ids_type ON /*_*/site_identifiers (si_type, si_key);
 CREATE INDEX /*i*/site_ids_site ON /*_*/site_identifiers (si_site);
 CREATE INDEX /*i*/site_ids_key ON /*_*/site_identifiers (si_key);
+
+-- Table defining tag names for IDs. Also stores hit counts to avoid expensive queries on change_tag
+CREATE TABLE /*_*/change_tag_def (
+    -- Numerical ID of the tag (ct_tag_id refers to this)
+    ctd_id int unsigned NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    -- Symbolic name of the tag (what would previously be put in ct_tag)
+    ctd_name varbinary(255) NOT NULL,
+    -- Whether this tag was defined manually by a privileged user using Special:Tags
+    ctd_user_defined tinyint(1) NOT NULL,
+    -- Number of times this tag was used
+    ctd_count bigint unsigned NOT NULL default 0
+) /*$wgDBTableOptions*/;
+
+CREATE UNIQUE INDEX /*i*/ctd_name ON /*_*/change_tag_def (ctd_name);
+CREATE INDEX /*i*/ctd_count ON /*_*/change_tag_def (ctd_count);
+CREATE INDEX /*i*/ctd_user_defined ON /*_*/change_tag_def (ctd_user_defined);
 
 -- vim: sw=2 sts=2 et

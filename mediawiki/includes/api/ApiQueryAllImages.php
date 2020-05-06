@@ -129,15 +129,15 @@ class ApiQueryAllImages extends ApiQueryGeneratorBase {
 			if ( !is_null( $params['continue'] ) ) {
 				$cont = explode( '|', $params['continue'] );
 				$this->dieContinueUsageIf( count( $cont ) != 1 );
-				$op = ( $ascendingOrder ? '>' : '<' );
+				$op = $ascendingOrder ? '>' : '<';
 				$continueFrom = $db->addQuotes( $cont[0] );
 				$this->addWhere( "img_name $op= $continueFrom" );
 			}
 
 			// Image filters
-			$from = ( $params['from'] === null ? null : $this->titlePartToKey( $params['from'], NS_FILE ) );
-			$to = ( $params['to'] === null ? null : $this->titlePartToKey( $params['to'], NS_FILE ) );
-			$this->addWhereRange( 'img_name', ( $ascendingOrder ? 'newer' : 'older' ), $from, $to );
+			$from = $params['from'] === null ? null : $this->titlePartToKey( $params['from'], NS_FILE );
+			$to = $params['to'] === null ? null : $this->titlePartToKey( $params['to'], NS_FILE );
+			$this->addWhereRange( 'img_name', $ascendingOrder ? 'newer' : 'older', $from, $to );
 
 			if ( isset( $params['prefix'] ) ) {
 				$this->addWhere( 'img_name' . $db->buildLike(
@@ -205,23 +205,23 @@ class ApiQueryAllImages extends ApiQueryGeneratorBase {
 				$this->addJoinConds( [ 'user_groups' => [
 					'LEFT JOIN',
 					[
-						'ug_group' => User::getGroupsWithPermission( 'bot' ),
+						'ug_group' => $this->getPermissionManager()->getGroupsWithPermission( 'bot' ),
 						'ug_user = ' . $actorQuery['fields']['img_user'],
 						'ug_expiry IS NULL OR ug_expiry >= ' . $db->addQuotes( $db->timestamp() )
 					]
 				] ] );
-				$groupCond = ( $params['filterbots'] == 'nobots' ? 'NULL' : 'NOT NULL' );
+				$groupCond = $params['filterbots'] == 'nobots' ? 'NULL' : 'NOT NULL';
 				$this->addWhere( "ug_group IS $groupCond" );
 			}
 		}
 
 		// Filters not depending on sort
 		if ( isset( $params['minsize'] ) ) {
-			$this->addWhere( 'img_size>=' . intval( $params['minsize'] ) );
+			$this->addWhere( 'img_size>=' . (int)$params['minsize'] );
 		}
 
 		if ( isset( $params['maxsize'] ) ) {
-			$this->addWhere( 'img_size<=' . intval( $params['maxsize'] ) );
+			$this->addWhere( 'img_size<=' . (int)$params['maxsize'] );
 		}
 
 		$sha1 = false;
@@ -406,7 +406,7 @@ class ApiQueryAllImages extends ApiQueryGeneratorBase {
 	protected function getExamplesMessages() {
 		return [
 			'action=query&list=allimages&aifrom=B'
-				=> 'apihelp-query+allimages-example-B',
+				=> 'apihelp-query+allimages-example-b',
 			'action=query&list=allimages&aiprop=user|timestamp|url&' .
 				'aisort=timestamp&aidir=older'
 				=> 'apihelp-query+allimages-example-recent',

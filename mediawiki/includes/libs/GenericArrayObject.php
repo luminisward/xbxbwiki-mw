@@ -29,7 +29,7 @@
  *
  * @file
  *
- * @license GNU GPL v2+
+ * @license GPL-2.0-or-later
  * @author Jeroen De Dauw < jeroendedauw@gmail.com >
  */
 abstract class GenericArrayObject extends ArrayObject {
@@ -211,6 +211,7 @@ abstract class GenericArrayObject extends ArrayObject {
 	 * @param string $serialization
 	 *
 	 * @return array
+	 * @suppress PhanParamSignatureMismatchInternal The stub appears to be wrong
 	 */
 	public function unserialize( $serialization ) {
 		$serializationData = unserialize( $serialization );

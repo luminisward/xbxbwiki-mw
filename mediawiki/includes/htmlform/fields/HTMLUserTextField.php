@@ -6,8 +6,6 @@ use MediaWiki\Widget\UserInputWidget;
  * Implements a text input field for user names.
  * Automatically auto-completes if using the OOUI display format.
  *
- * FIXME: Does not work for forms that support GET requests.
- *
  * Optional parameters:
  * 'exists' - Whether to validate that the user already exists
  * 'ipallowed' - Whether an IP adress is interpreted as "valid"
@@ -34,6 +32,11 @@ class HTMLUserTextField extends HTMLTextField {
 	}
 
 	public function validate( $value, $alldata ) {
+		// Default value (from getDefault()) is null, User::newFromName() expects a string
+		if ( $value === null ) {
+			$value = '';
+		}
+
 		// check, if a user exists with the given username
 		$user = User::newFromName( $value, false );
 		$rangeError = null;
@@ -43,7 +46,7 @@ class HTMLUserTextField extends HTMLTextField {
 		} elseif (
 			// check, if the user exists, if requested
 			( $this->mParams['exists'] && $user->getId() === 0 ) &&
-			// check, if the username is a valid IP address, otherweise save the error message
+			// check, if the username is a valid IP address, otherwise save the error message
 			!( $this->mParams['ipallowed'] && IP::isValid( $value ) ) &&
 			// check, if the username is a valid IP range, otherwise save the error message
 			!( $this->mParams['iprange'] && ( $rangeError = $this->isValidIPRange( $value ) ) === true )
@@ -60,7 +63,7 @@ class HTMLUserTextField extends HTMLTextField {
 	protected function isValidIPRange( $value ) {
 		$cidrIPRanges = $this->mParams['iprangelimits'];
 
-		if ( !IP::isValidBlock( $value ) ) {
+		if ( !IP::isValidRange( $value ) ) {
 			return false;
 		}
 

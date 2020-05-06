@@ -22,6 +22,7 @@ namespace MediaWiki\Logger;
 
 use MediaWiki\Logger\Monolog\BufferHandler;
 use Monolog\Logger;
+use Monolog\Handler\StreamHandler;
 use Wikimedia\ObjectFactory;
 
 /**
@@ -147,6 +148,17 @@ class MonologSpi implements Spi {
 				$this->config[$key] = $value;
 			}
 		}
+		if ( !isset( $this->config['loggers']['@default'] ) ) {
+			$this->config['loggers']['@default'] = [
+				'handlers' => [ '@default' ],
+			];
+			if ( !isset( $this->config['handlers']['@default'] ) ) {
+				$this->config['handlers']['@default'] = [
+					'class' => StreamHandler::class,
+					'args' => [ 'php://stderr', Logger::ERROR ],
+				];
+			}
+		}
 		$this->reset();
 	}
 
@@ -179,9 +191,7 @@ class MonologSpi implements Spi {
 		if ( !isset( $this->singletons['loggers'][$channel] ) ) {
 			// Fallback to using the '@default' configuration if an explict
 			// configuration for the requested channel isn't found.
-			$spec = isset( $this->config['loggers'][$channel] ) ?
-				$this->config['loggers'][$channel] :
-				$this->config['loggers']['@default'];
+			$spec = $this->config['loggers'][$channel] ?? $this->config['loggers']['@default'];
 
 			$monolog = $this->createLogger( $channel, $spec );
 			$this->singletons['loggers'][$channel] = $monolog;
@@ -201,7 +211,7 @@ class MonologSpi implements Spi {
 
 		if ( isset( $spec['calls'] ) ) {
 			foreach ( $spec['calls'] as $method => $margs ) {
-				call_user_func_array( [ $obj, $method ], $margs );
+				$obj->$method( ...$margs );
 			}
 		}
 

@@ -2,10 +2,12 @@
  * Copy of CC standard stylesheet, plus tweaks for iframe usage
  */
 
+/* stylelint-disable selector-class-pattern */
+
 body {
 	margin: 0;
 	background: #eee;
-	font-family: 'Verdana';
+	font-family: 'Verdana', sans-serif;
 	color: #333;
 }
 

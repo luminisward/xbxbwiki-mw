@@ -145,19 +145,21 @@ class OOUIHTMLForm extends HTMLForm {
 			[ 'class' => 'mw-htmlform-submit-buttons' ], "\n$buttons" ) . "\n";
 	}
 
-	protected function wrapFieldSetSection( $legend, $section, $attributes ) {
+	/**
+	 * @inheritDoc
+	 * @return OOUI\PanelLayout
+	 */
+	protected function wrapFieldSetSection( $legend, $section, $attributes, $isRoot ) {
 		// to get a user visible effect, wrap the fieldset into a framed panel layout
 		$layout = new OOUI\PanelLayout( [
 			'expanded' => false,
 			'padded' => true,
 			'framed' => true,
-			'infusable' => false,
 		] );
 
 		$layout->appendContent(
 			new OOUI\FieldsetLayout( [
 				'label' => $legend,
-				'infusable' => false,
 				'items' => [
 					new OOUI\Widget( [
 						'content' => new OOUI\HtmlSnippet( $section )
@@ -279,20 +281,23 @@ class OOUIHTMLForm extends HTMLForm {
 
 	public function wrapForm( $html ) {
 		if ( is_string( $this->mWrapperLegend ) ) {
-			$content = new OOUI\FieldsetLayout( [
+			$phpClass = $this->mCollapsible ? CollapsibleFieldsetLayout::class : OOUI\FieldsetLayout::class;
+			$content = new $phpClass( [
 				'label' => $this->mWrapperLegend,
+				'collapsed' => $this->mCollapsed,
 				'items' => [
 					new OOUI\Widget( [
 						'content' => new OOUI\HtmlSnippet( $html )
 					] ),
 				],
-			] );
+			] + OOUI\Element::configFromHtmlAttributes( $this->mWrapperAttributes ) );
 		} else {
 			$content = new OOUI\HtmlSnippet( $html );
 		}
 
+		$classes = [ 'mw-htmlform', 'mw-htmlform-ooui' ];
 		$form = new OOUI\FormLayout( $this->getFormAttributes() + [
-			'classes' => [ 'mw-htmlform', 'mw-htmlform-ooui' ],
+			'classes' => $classes,
 			'content' => $content,
 		] );
 

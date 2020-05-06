@@ -22,6 +22,7 @@
  *
  * @file
  */
+use MediaWiki\MediaWikiServices;
 
 /**
  * This class is a collection of static functions that serve two purposes:
@@ -153,8 +154,7 @@ class Html {
 	 * Returns an HTML link element in a string styled as a button
 	 * (when $wgUseMediaWikiUIEverywhere is enabled).
 	 *
-	 * @param string $contents The raw HTML contents of the element: *not*
-	 *   escaped!
+	 * @param string $text The text of the element. Will be escaped (not raw HTML)
 	 * @param array $attrs Associative array of attributes, e.g., [
 	 *   'href' => 'https://www.mediawiki.org/' ]. See expandAttributes() for
 	 *   further documentation.
@@ -162,10 +162,10 @@ class Html {
 	 * @see https://tools.wmflabs.org/styleguide/desktop/index.html for guidance on available modifiers
 	 * @return string Raw HTML
 	 */
-	public static function linkButton( $contents, array $attrs, array $modifiers = [] ) {
+	public static function linkButton( $text, array $attrs, array $modifiers = [] ) {
 		return self::element( 'a',
 			self::buttonAttributes( $attrs, $modifiers ),
-			$contents
+			$text
 		);
 	}
 
@@ -212,7 +212,7 @@ class Html {
 			// Silly XML.
 			return substr( $start, 0, -1 ) . '/>';
 		} else {
-			return "$start$contents" . self::closeElement( $element );
+			return $start . $contents . self::closeElement( $element );
 		}
 	}
 
@@ -253,6 +253,12 @@ class Html {
 		// This is not required in HTML5, but let's do it anyway, for
 		// consistency and better compression.
 		$element = strtolower( $element );
+
+		// Some people were abusing this by passing things like
+		// 'h1 id="foo" to $element, which we don't want.
+		if ( strpos( $element, ' ' ) !== false ) {
+			wfWarn( __METHOD__ . " given element name with space '$element'" );
+		}
 
 		// Remove invalid input types
 		if ( $element == 'input' ) {
@@ -391,8 +397,8 @@ class Html {
 			unset( $attribs['type'] );
 		}
 		if ( $element === 'input' ) {
-			$type = isset( $attribs['type'] ) ? $attribs['type'] : null;
-			$value = isset( $attribs['value'] ) ? $attribs['value'] : null;
+			$type = $attribs['type'] ?? null;
+			$value = $attribs['value'] ?? null;
 			if ( $type === 'checkbox' || $type === 'radio' ) {
 				// The default value for checkboxes and radio buttons is 'on'
 				// not ''. By stripping value="" we break radio boxes that
@@ -511,7 +517,7 @@ class Html {
 					$newValue = [];
 					foreach ( $value as $k => $v ) {
 						if ( is_string( $v ) ) {
-							// String values should be normal `array( 'foo' )`
+							// String values should be normal `[ 'foo' ]`
 							// Just append them
 							if ( !isset( $value[$v] ) ) {
 								// As a special case don't set 'foo' if a
@@ -551,19 +557,29 @@ class Html {
 	}
 
 	/**
-	 * Output a "<script>" tag with the given contents.
+	 * Output an HTML script tag with the given contents.
 	 *
-	 * @todo do some useful escaping as well, like if $contents contains
-	 * literal "</script>" or (for XML) literal "]]>".
+	 * It is unsupported for the contents to contain the sequence `<script` or `</script`
+	 * (case-insensitive). This ensures the script can be terminated easily and consistently.
+	 * It is the responsibility of the caller to avoid such character sequence by escaping
+	 * or avoiding it. If found at run-time, the contents are replaced with a comment, and
+	 * a warning is logged server-side.
 	 *
 	 * @param string $contents JavaScript
+	 * @param string|null $nonce Nonce for CSP header, from OutputPage::getCSPNonce()
 	 * @return string Raw HTML
 	 */
-	public static function inlineScript( $contents ) {
+	public static function inlineScript( $contents, $nonce = null ) {
 		$attrs = [];
+		if ( $nonce !== null ) {
+			$attrs['nonce'] = $nonce;
+		} elseif ( ContentSecurityPolicy::isNonceRequired( RequestContext::getMain()->getConfig() ) ) {
+			wfWarn( "no nonce set on script. CSP will break it" );
+		}
 
-		if ( preg_match( '/[<&]/', $contents ) ) {
-			$contents = "/*<![CDATA[*/$contents/*]]>*/";
+		if ( preg_match( '/<\/?script/i', $contents ) ) {
+			wfLogWarning( __METHOD__ . ': Illegal character sequence found in inline script.' );
+			$contents = '/* ERROR: Invalid script */';
 		}
 
 		return self::rawElement( 'script', $attrs, $contents );
@@ -574,10 +590,16 @@ class Html {
 	 * "<script src=foo.js></script>".
 	 *
 	 * @param string $url
+	 * @param string|null $nonce Nonce for CSP header, from OutputPage::getCSPNonce()
 	 * @return string Raw HTML
 	 */
-	public static function linkedScript( $url ) {
+	public static function linkedScript( $url, $nonce = null ) {
 		$attrs = [ 'src' => $url ];
+		if ( $nonce !== null ) {
+			$attrs['nonce'] = $nonce;
+		} elseif ( ContentSecurityPolicy::isNonceRequired( RequestContext::getMain()->getConfig() ) ) {
+			wfWarn( "no nonce set on script. CSP will break it" );
+		}
 
 		return self::element( 'script', $attrs );
 	}
@@ -682,12 +704,12 @@ class Html {
 	 * Return the HTML for a message box.
 	 * @since 1.31
 	 * @param string $html of contents of box
-	 * @param string $className corresponding to box
+	 * @param string|array $className corresponding to box
 	 * @param string $heading (optional)
 	 * @return string of HTML representing a box.
 	 */
 	private static function messageBox( $html, $className, $heading = '' ) {
-		if ( $heading ) {
+		if ( $heading !== '' ) {
 			$html = self::element( 'h2', [], $heading ) . $html;
 		}
 		return self::rawElement( 'div', [ 'class' => $className ], $html );
@@ -696,32 +718,38 @@ class Html {
 	/**
 	 * Return a warning box.
 	 * @since 1.31
+	 * @since 1.34 $className optional parameter added
 	 * @param string $html of contents of box
+	 * @param string $className (optional) corresponding to box
 	 * @return string of HTML representing a warning box.
 	 */
-	public static function warningBox( $html ) {
-		return self::messageBox( $html, 'warningbox' );
+	public static function warningBox( $html, $className = '' ) {
+		return self::messageBox( $html, [ 'warningbox', $className ] );
 	}
 
 	/**
 	 * Return an error box.
 	 * @since 1.31
+	 * @since 1.34 $className optional parameter added
 	 * @param string $html of contents of error box
 	 * @param string $heading (optional)
+	 * @param string $className (optional) corresponding to box
 	 * @return string of HTML representing an error box.
 	 */
-	public static function errorBox( $html, $heading = '' ) {
-		return self::messageBox( $html, 'errorbox', $heading );
+	public static function errorBox( $html, $heading = '', $className = '' ) {
+		return self::messageBox( $html, [ 'errorbox', $className ], $heading );
 	}
 
 	/**
 	 * Return a success box.
 	 * @since 1.31
+	 * @since 1.34 $className optional parameter added
 	 * @param string $html of contents of box
+	 * @param string $className (optional) corresponding to box
 	 * @return string of HTML representing a success box.
 	 */
-	public static function successBox( $html ) {
-		return self::messageBox( $html, 'successbox' );
+	public static function successBox( $html, $className = '' ) {
+		return self::messageBox( $html, [ 'successbox', $className ] );
 	}
 
 	/**
@@ -808,23 +836,25 @@ class Html {
 	 * @return array
 	 */
 	public static function namespaceSelectorOptions( array $params = [] ) {
-		global $wgContLang;
-
-		$options = [];
-
 		if ( !isset( $params['exclude'] ) || !is_array( $params['exclude'] ) ) {
 			$params['exclude'] = [];
 		}
 
+		if ( $params['in-user-lang'] ?? false ) {
+			global $wgLang;
+			$lang = $wgLang;
+		} else {
+			$lang = MediaWikiServices::getInstance()->getContentLanguage();
+		}
+
+		$optionsOut = [];
 		if ( isset( $params['all'] ) ) {
 			// add an option that would let the user select all namespaces.
 			// Value is provided by user, the name shown is localized for the user.
-			$options[$params['all']] = wfMessage( 'namespacesall' )->text();
+			$optionsOut[$params['all']] = wfMessage( 'namespacesall' )->text();
 		}
-		// Add all namespaces as options (in the content language)
-		$options += $wgContLang->getFormattedNamespaces();
-
-		$optionsOut = [];
+		// Add all namespaces as options
+		$options = $lang->getFormattedNamespaces();
 		// Filter out namespaces below 0 and massage labels
 		foreach ( $options as $nsId => $nsName ) {
 			if ( $nsId < NS_MAIN || in_array( $nsId, $params['exclude'] ) ) {
@@ -835,7 +865,7 @@ class Html {
 				// main we don't use "" but the user message describing it (e.g. "(Main)" or "(Article)")
 				$nsName = wfMessage( 'blanknamespace' )->text();
 			} elseif ( is_int( $nsId ) ) {
-				$nsName = $wgContLang->convertNamespace( $nsId );
+				$nsName = $lang->convertNamespace( $nsId );
 			}
 			$optionsOut[$nsId] = $nsName;
 		}
@@ -909,9 +939,9 @@ class Html {
 		if ( isset( $params['label'] ) ) {
 			$ret .= self::element(
 				'label', [
-					'for' => isset( $selectAttribs['id'] ) ? $selectAttribs['id'] : null,
+					'for' => $selectAttribs['id'] ?? null,
 				], $params['label']
-			) . '&#160;';
+			) . "\u{00A0}";
 		}
 
 		// Wrap options in a <select>
@@ -942,7 +972,7 @@ class Html {
 		if ( $isXHTML ) { // XHTML5
 			// XML MIME-typed markup should have an xml header.
 			// However a DOCTYPE is not needed.
-			$ret .= "<?xml version=\"1.0\" encoding=\"UTF-8\" ?" . ">\n";
+			$ret .= "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n";
 
 			// Add the standard xmlns
 			$attribs['xmlns'] = 'http://www.w3.org/1999/xhtml';
@@ -952,7 +982,6 @@ class Html {
 				$attribs["xmlns:$tag"] = $ns;
 			}
 		} else { // HTML5
-			// DOCTYPE
 			$ret .= "<!DOCTYPE html>\n";
 		}
 
@@ -980,16 +1009,16 @@ class Html {
 	}
 
 	/**
-	 * Get HTML for an info box with an icon.
+	 * Get HTML for an information message box with an icon.
 	 *
-	 * @param string $text Wikitext, get this with wfMessage()->plain()
+	 * @internal For use by the WebInstaller class only.
+	 * @param string $rawHtml HTML
 	 * @param string $icon Path to icon file (used as 'src' attribute)
 	 * @param string $alt Alternate text for the icon
 	 * @param string $class Additional class name to add to the wrapper div
-	 *
-	 * @return string
+	 * @return string HTML
 	 */
-	static function infoBox( $text, $icon, $alt, $class = '' ) {
+	public static function infoBox( $rawHtml, $icon, $alt, $class = '' ) {
 		$s = self::openElement( 'div', [ 'class' => "mw-infobox $class" ] );
 
 		$s .= self::openElement( 'div', [ 'class' => 'mw-infobox-left' ] ) .
@@ -1002,7 +1031,7 @@ class Html {
 				self::closeElement( 'div' );
 
 		$s .= self::openElement( 'div', [ 'class' => 'mw-infobox-right' ] ) .
-				$text .
+				$rawHtml .
 				self::closeElement( 'div' );
 		$s .= self::element( 'div', [ 'style' => 'clear: left;' ], ' ' );
 

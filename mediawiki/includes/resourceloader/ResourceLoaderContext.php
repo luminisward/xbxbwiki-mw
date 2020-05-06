@@ -1,7 +1,5 @@
 <?php
 /**
- * Context for ResourceLoader modules.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -26,10 +24,16 @@ use MediaWiki\Logger\LoggerFactory;
 use MediaWiki\MediaWikiServices;
 
 /**
- * Object passed around to modules which contains information about the state
- * of a specific loader request.
+ * Context object that contains information about the state of a specific
+ * ResourceLoader web request. Passed around to ResourceLoaderModule methods.
+ *
+ * @ingroup ResourceLoader
+ * @since 1.17
  */
 class ResourceLoaderContext implements MessageLocalizer {
+	const DEFAULT_LANG = 'qqx';
+	const DEFAULT_SKIN = 'fallback';
+
 	protected $resourceLoader;
 	protected $request;
 	protected $logger;
@@ -52,6 +56,7 @@ class ResourceLoaderContext implements MessageLocalizer {
 	protected $direction;
 	protected $hash;
 	protected $userObj;
+	/** @var ResourceLoaderImage|false */
 	protected $imageObj;
 
 	/**
@@ -63,21 +68,18 @@ class ResourceLoaderContext implements MessageLocalizer {
 		$this->request = $request;
 		$this->logger = $resourceLoader->getLogger();
 
-		// Future developers: Use WebRequest::getRawVal() instead getVal().
-		// The getVal() method performs slow Language+UTF logic. (f303bb9360)
+		// Optimisation: Use WebRequest::getRawVal() instead of getVal(). We don't
+		// need the slow Language+UTF logic meant for user input here. (f303bb9360)
 
 		// List of modules
 		$modules = $request->getRawVal( 'modules' );
-		$this->modules = $modules ? self::expandModuleNames( $modules ) : [];
+		$this->modules = $modules ? ResourceLoader::expandModuleNames( $modules ) : [];
 
 		// Various parameters
 		$this->user = $request->getRawVal( 'user' );
-		$this->debug = $request->getFuzzyBool(
-			'debug',
-			$resourceLoader->getConfig()->get( 'ResourceLoaderDebug' )
-		);
-		$this->only = $request->getRawVal( 'only', null );
-		$this->version = $request->getRawVal( 'version', null );
+		$this->debug = $request->getRawVal( 'debug' ) === 'true';
+		$this->only = $request->getRawVal( 'only' );
+		$this->version = $request->getRawVal( 'version' );
 		$this->raw = $request->getFuzzyBool( 'raw' );
 
 		// Image requests
@@ -87,55 +89,29 @@ class ResourceLoaderContext implements MessageLocalizer {
 
 		$this->skin = $request->getRawVal( 'skin' );
 		$skinnames = Skin::getSkinNames();
-		// If no skin is specified, or we don't recognize the skin, use the default skin
 		if ( !$this->skin || !isset( $skinnames[$this->skin] ) ) {
-			$this->skin = $resourceLoader->getConfig()->get( 'DefaultSkin' );
+			// The 'skin' parameter is required. (Not yet enforced.)
+			// For requests without a known skin specified,
+			// use MediaWiki's 'fallback' skin for skin-specific decisions.
+			$this->skin = self::DEFAULT_SKIN;
 		}
-	}
-
-	/**
-	 * Expand a string of the form `jquery.foo,bar|jquery.ui.baz,quux` to
-	 * an array of module names like `[ 'jquery.foo', 'jquery.bar',
-	 * 'jquery.ui.baz', 'jquery.ui.quux' ]`.
-	 *
-	 * This process is reversed by ResourceLoader::makePackedModulesString().
-	 *
-	 * @param string $modules Packed module name list
-	 * @return array Array of module names
-	 */
-	public static function expandModuleNames( $modules ) {
-		$retval = [];
-		$exploded = explode( '|', $modules );
-		foreach ( $exploded as $group ) {
-			if ( strpos( $group, ',' ) === false ) {
-				// This is not a set of modules in foo.bar,baz notation
-				// but a single module
-				$retval[] = $group;
-			} else {
-				// This is a set of modules in foo.bar,baz notation
-				$pos = strrpos( $group, '.' );
-				if ( $pos === false ) {
-					// Prefixless modules, i.e. without dots
-					$retval = array_merge( $retval, explode( ',', $group ) );
-				} else {
-					// We have a prefix and a bunch of suffixes
-					$prefix = substr( $group, 0, $pos ); // 'foo'
-					$suffixes = explode( ',', substr( $group, $pos + 1 ) ); // [ 'bar', 'baz' ]
-					foreach ( $suffixes as $suffix ) {
-						$retval[] = "$prefix.$suffix";
-					}
-				}
-			}
-		}
-		return $retval;
 	}
 
 	/**
 	 * Return a dummy ResourceLoaderContext object suitable for passing into
 	 * things that don't "really" need a context.
+	 *
+	 * Use cases:
+	 * - Unit tests (deprecated, create empty instance directly or use RLTestCase).
+	 *
 	 * @return ResourceLoaderContext
 	 */
 	public static function newDummyContext() {
+		// This currently creates a non-empty instance of ResourceLoader (all modules registered),
+		// but that's probably not needed. So once that moves into ServiceWiring, this'll
+		// become more like the EmptyResourceLoader class we have in PHPUnit tests, which
+		// is what this should've had originally. If this turns out to be untrue, change to:
+		// `MediaWikiServices::getInstance()->getResourceLoader()` instead.
 		return new self( new ResourceLoader(
 			MediaWikiServices::getInstance()->getMainConfig(),
 			LoggerFactory::getInstance( 'resourceloader' )
@@ -150,6 +126,17 @@ class ResourceLoaderContext implements MessageLocalizer {
 	}
 
 	/**
+	 * @deprecated since 1.34 Use ResourceLoaderModule::getConfig instead
+	 * inside module methods. Use ResourceLoader::getConfig elsewhere.
+	 * @return Config
+	 * @codeCoverageIgnore
+	 */
+	public function getConfig() {
+		wfDeprecated( __METHOD__, '1.34' );
+		return $this->getResourceLoader()->getConfig();
+	}
+
+	/**
 	 * @return WebRequest
 	 */
 	public function getRequest() {
@@ -157,6 +144,8 @@ class ResourceLoaderContext implements MessageLocalizer {
 	}
 
 	/**
+	 * @deprecated since 1.34 Use ResourceLoaderModule::getLogger instead
+	 * inside module methods. Use ResourceLoader::getLogger elsewhere.
 	 * @since 1.27
 	 * @return \Psr\Log\LoggerInterface
 	 */
@@ -181,7 +170,9 @@ class ResourceLoaderContext implements MessageLocalizer {
 			$lang = $this->getRequest()->getRawVal( 'lang', '' );
 			// Stricter version of RequestContext::sanitizeLangCode()
 			if ( !Language::isValidBuiltInCode( $lang ) ) {
-				$lang = $this->getResourceLoader()->getConfig()->get( 'LanguageCode' );
+				// The 'lang' parameter is required. (Not yet enforced.)
+				// If omitted, localise with the dummy language code.
+				$lang = self::DEFAULT_LANG;
 			}
 			$this->language = $lang;
 		}
@@ -193,8 +184,10 @@ class ResourceLoaderContext implements MessageLocalizer {
 	 */
 	public function getDirection() {
 		if ( $this->direction === null ) {
-			$this->direction = $this->getRequest()->getRawVal( 'dir' );
-			if ( !$this->direction ) {
+			$direction = $this->getRequest()->getRawVal( 'dir' );
+			if ( $direction === 'ltr' || $direction === 'rtl' ) {
+				$this->direction = $direction;
+			} else {
 				// Determine directionality based on user language (T8100)
 				$this->direction = Language::factory( $this->getLanguage() )->getDir();
 			}
@@ -222,11 +215,11 @@ class ResourceLoaderContext implements MessageLocalizer {
 	 * @since 1.27
 	 * @param string|string[]|MessageSpecifier $key Message key, or array of keys,
 	 *   or a MessageSpecifier.
-	 * @param mixed $args,...
+	 * @param mixed ...$params
 	 * @return Message
 	 */
-	public function msg( $key ) {
-		return call_user_func_array( 'wfMessage', func_get_args() )
+	public function msg( $key, ...$params ) {
+		return wfMessage( $key, ...$params )
 			->inLanguage( $this->getLanguage() )
 			// Use a dummy title because there is no real title
 			// for this endpoint, and the cache won't vary on it
@@ -342,6 +335,22 @@ class ResourceLoaderContext implements MessageLocalizer {
 	}
 
 	/**
+	 * Return the replaced-content mapping callback
+	 *
+	 * When editing a page that's used to generate the scripts or styles of a
+	 * ResourceLoaderWikiModule, a preview should use the to-be-saved version of
+	 * the page rather than the current version in the database. A context
+	 * supporting such previews should return a callback to return these
+	 * mappings here.
+	 *
+	 * @since 1.32
+	 * @return callable|null Signature is `Content|null func( Title $t )`
+	 */
+	public function getContentOverrideCallback() {
+		return null;
+	}
+
+	/**
 	 * @return bool
 	 */
 	public function shouldIncludeScripts() {
@@ -391,5 +400,53 @@ class ResourceLoaderContext implements MessageLocalizer {
 			] );
 		}
 		return $this->hash;
+	}
+
+	/**
+	 * Get the request base parameters, omitting any defaults.
+	 *
+	 * @internal For use by ResourceLoaderStartUpModule only
+	 * @return array
+	 */
+	public function getReqBase() {
+		$reqBase = [];
+		if ( $this->getLanguage() !== self::DEFAULT_LANG ) {
+			$reqBase['lang'] = $this->getLanguage();
+		}
+		if ( $this->getSkin() !== self::DEFAULT_SKIN ) {
+			$reqBase['skin'] = $this->getSkin();
+		}
+		if ( $this->getDebug() ) {
+			$reqBase['debug'] = 'true';
+		}
+		return $reqBase;
+	}
+
+	/**
+	 * Wrapper around json_encode that avoids needless escapes,
+	 * and pretty-prints in debug mode.
+	 *
+	 * @internal
+	 * @param mixed $data
+	 * @return string|false JSON string, false on error
+	 */
+	public function encodeJson( $data ) {
+		// Keep output as small as possible by disabling needless escape modes
+		// that PHP uses by default.
+		// However, while most module scripts are only served on HTTP responses
+		// for JavaScript, some modules can also be embedded in the HTML as inline
+		// scripts. This, and the fact that we sometimes need to export strings
+		// containing user-generated content and labels that may genuinely contain
+		// a sequences like "</script>", we need to encode either '/' or '<'.
+		// By default PHP escapes '/'. Let's escape '<' instead which is less common
+		// and allows URLs to mostly remain readable.
+		$jsonFlags = JSON_UNESCAPED_SLASHES |
+			JSON_UNESCAPED_UNICODE |
+			JSON_HEX_TAG |
+			JSON_HEX_AMP;
+		if ( $this->getDebug() ) {
+			$jsonFlags |= JSON_PRETTY_PRINT;
+		}
+		return json_encode( $data, $jsonFlags );
 	}
 }

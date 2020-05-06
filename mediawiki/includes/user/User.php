@@ -20,6 +20,9 @@
  * @file
  */
 
+use MediaWiki\Block\AbstractBlock;
+use MediaWiki\Block\DatabaseBlock;
+use MediaWiki\Block\SystemBlock;
 use MediaWiki\MediaWikiServices;
 use MediaWiki\Session\SessionManager;
 use MediaWiki\Session\Token;
@@ -27,18 +30,13 @@ use MediaWiki\Auth\AuthManager;
 use MediaWiki\Auth\AuthenticationResponse;
 use MediaWiki\Auth\AuthenticationRequest;
 use MediaWiki\User\UserIdentity;
+use MediaWiki\Logger\LoggerFactory;
+use Wikimedia\Assert\Assert;
 use Wikimedia\IPSet;
 use Wikimedia\ScopedCallback;
 use Wikimedia\Rdbms\Database;
 use Wikimedia\Rdbms\DBExpectedError;
 use Wikimedia\Rdbms\IDatabase;
-
-/**
- * String Some punctuation to prevent editing from broken text-mangling proxies.
- * @deprecated since 1.27, use \MediaWiki\Session\Token::SUFFIX
- * @ingroup Constants
- */
-define( 'EDIT_TOKEN_SUFFIX', Token::SUFFIX );
 
 /**
  * The User object encapsulates all of the user-specific settings (user_id,
@@ -51,27 +49,22 @@ define( 'EDIT_TOKEN_SUFFIX', Token::SUFFIX );
  * of the database.
  */
 class User implements IDBAccessObject, UserIdentity {
+
 	/**
-	 * @const int Number of characters in user_token field.
+	 * Number of characters required for the user_token field.
 	 */
 	const TOKEN_LENGTH = 32;
 
 	/**
-	 * @const string An invalid value for user_token
+	 * An invalid string value for the user_token field.
 	 */
 	const INVALID_TOKEN = '*** INVALID ***';
 
 	/**
-	 * Global constant made accessible as class constants so that autoloader
-	 * magic can be used.
-	 * @deprecated since 1.27, use \MediaWiki\Session\Token::SUFFIX
+	 * Version number to tag cached versions of serialized User objects. Should be increased when
+	 * {@link $mCacheVars} or one of it's members changes.
 	 */
-	const EDIT_TOKEN_SUFFIX = EDIT_TOKEN_SUFFIX;
-
-	/**
-	 * @const int Serialized record version.
-	 */
-	const VERSION = 12;
+	const VERSION = 14;
 
 	/**
 	 * Exclude user options that are set to their default value.
@@ -94,6 +87,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * shared cache (memcached). Any operation which changes the
 	 * corresponding database fields must call a cache-clearing function.
 	 * @showinitializer
+	 * @var string[]
 	 */
 	protected static $mCacheVars = [
 		// user table
@@ -116,95 +110,8 @@ class User implements IDBAccessObject, UserIdentity {
 		'mActorId',
 	];
 
-	/**
-	 * Array of Strings Core rights.
-	 * Each of these should have a corresponding message of the form
-	 * "right-$right".
-	 * @showinitializer
-	 */
-	protected static $mCoreRights = [
-		'apihighlimits',
-		'applychangetags',
-		'autoconfirmed',
-		'autocreateaccount',
-		'autopatrol',
-		'bigdelete',
-		'block',
-		'blockemail',
-		'bot',
-		'browsearchive',
-		'changetags',
-		'createaccount',
-		'createpage',
-		'createtalk',
-		'delete',
-		'deletechangetags',
-		'deletedhistory',
-		'deletedtext',
-		'deletelogentry',
-		'deleterevision',
-		'edit',
-		'editcontentmodel',
-		'editinterface',
-		'editprotected',
-		'editmyoptions',
-		'editmyprivateinfo',
-		'editmyusercss',
-		'editmyuserjson',
-		'editmyuserjs',
-		'editmywatchlist',
-		'editsemiprotected',
-		'editusercss',
-		'edituserjson',
-		'edituserjs',
-		'hideuser',
-		'import',
-		'importupload',
-		'ipblock-exempt',
-		'managechangetags',
-		'markbotedits',
-		'mergehistory',
-		'minoredit',
-		'move',
-		'movefile',
-		'move-categorypages',
-		'move-rootuserpages',
-		'move-subpages',
-		'nominornewtalk',
-		'noratelimit',
-		'override-export-depth',
-		'pagelang',
-		'patrol',
-		'patrolmarks',
-		'protect',
-		'purge',
-		'read',
-		'reupload',
-		'reupload-own',
-		'reupload-shared',
-		'rollback',
-		'sendemail',
-		'siteadmin',
-		'suppressionlog',
-		'suppressredirect',
-		'suppressrevision',
-		'unblockself',
-		'undelete',
-		'unwatchedpages',
-		'upload',
-		'upload_by_url',
-		'userrights',
-		'userrights-interwiki',
-		'viewmyprivateinfo',
-		'viewmywatchlist',
-		'viewsuppressed',
-		'writeapi',
-	];
-
-	/**
-	 * String Cached results of getAllRights()
-	 */
-	protected static $mAllRights = false;
+	/** @var string[]|false Cache for self::isUsableName() */
+	private static $reservedUsernames = false;
 
 	/** Cache variables */
 	// @{
@@ -241,20 +148,20 @@ class User implements IDBAccessObject, UserIdentity {
 	protected $mOptionOverrides;
 	// @}
 
-	/**
-	 * Bool Whether the cache variables have been loaded.
-	 */
 	// @{
+	/**
+	 * @var bool Whether the cache variables have been loaded.
+	 */
 	public $mOptionsLoaded;
 
 	/**
-	 * Array with already loaded items or true if all items have been loaded.
+	 * @var array|bool Array with already loaded items or true if all items have been loaded.
 	 */
 	protected $mLoadedItems = [];
 	// @}
 
 	/**
-	 * String Initialization data source if mLoadedItems!==true. May be one of:
+	 * @var string Initialization data source if mLoadedItems!==true. May be one of:
 	 *  - 'defaults'   anonymous user initialised from class defaults
 	 *  - 'name'       initialise from mName
 	 *  - 'id'         initialise from mId
@@ -268,6 +175,7 @@ class User implements IDBAccessObject, UserIdentity {
 	/**
 	 * Lazy-initialized variables, invalidated with clearInstanceCache
 	 */
+	/** @var int|bool */
 	protected $mNewtalk;
 	/** @var string */
 	protected $mDatePreference;
@@ -275,8 +183,6 @@ class User implements IDBAccessObject, UserIdentity {
 	public $mBlockedby;
 	/** @var string */
 	protected $mHash;
-	/** @var array */
-	public $mRights;
 	/** @var string */
 	protected $mBlockreason;
 	/** @var array */
@@ -285,7 +191,7 @@ class User implements IDBAccessObject, UserIdentity {
 	protected $mImplicitGroups;
 	/** @var array */
 	protected $mFormerGroups;
-	/** @var Block */
+	/** @var AbstractBlock */
 	protected $mGlobalBlock;
 	/** @var bool */
 	protected $mLocked;
@@ -297,18 +203,19 @@ class User implements IDBAccessObject, UserIdentity {
 	/** @var WebRequest */
 	private $mRequest;
 
-	/** @var Block */
+	/** @var AbstractBlock */
 	public $mBlock;
 
 	/** @var bool */
 	protected $mAllowUsertalk;
 
-	/** @var Block */
+	/** @var AbstractBlock|bool */
 	private $mBlockedFromCreateAccount = false;
 
 	/** @var int User::READ_* constant bitfield used to load data */
 	protected $queryFlagsUsed = self::READ_NORMAL;
 
+	/** @var int[] */
 	public static $idCacheByName = [];
 
 	/**
@@ -331,6 +238,38 @@ class User implements IDBAccessObject, UserIdentity {
 	 */
 	public function __toString() {
 		return (string)$this->getName();
+	}
+
+	public function &__get( $name ) {
+		// A shortcut for $mRights deprecation phase
+		if ( $name === 'mRights' ) {
+			$copy = $this->getRights();
+			return $copy;
+		} elseif ( !property_exists( $this, $name ) ) {
+			// T227688 - do not break $u->foo['bar'] = 1
+			wfLogWarning( 'tried to get non-existent property' );
+			$this->$name = null;
+			return $this->$name;
+		} else {
+			wfLogWarning( 'tried to get non-visible property' );
+			$null = null;
+			return $null;
+		}
+	}
+
+	public function __set( $name, $value ) {
+		// A shortcut for $mRights deprecation phase, only known legitimate use was for
+		// testing purposes, other uses seem bad in principle
+		if ( $name === 'mRights' ) {
+			MediaWikiServices::getInstance()->getPermissionManager()->overrideUserRightsForTesting(
+				$this,
+				is_null( $value ) ? [] : $value
+			);
+		} elseif ( !property_exists( $this, $name ) ) {
+			$this->$name = $value;
+		} else {
+			wfLogWarning( 'tried to set non-visible property' );
+		}
 	}
 
 	/**
@@ -391,22 +330,6 @@ class User implements IDBAccessObject, UserIdentity {
 			case 'defaults':
 				$this->loadDefaults();
 				break;
-			case 'name':
-				// Make sure this thread sees its own changes
-				$lb = MediaWikiServices::getInstance()->getDBLoadBalancer();
-				if ( $lb->hasOrMadeRecentMasterChanges() ) {
-					$flags |= self::READ_LATEST;
-					$this->queryFlagsUsed = $flags;
-				}
-
-				$this->mId = self::idFromName( $this->mName, $flags );
-				if ( !$this->mId ) {
-					// Nonexistent user placeholder object
-					$this->loadDefaults( $this->mName );
-				} else {
-					$this->loadFromId( $flags );
-				}
-				break;
 			case 'id':
 				// Make sure this thread sees its own changes, if the ID isn't 0
 				if ( $this->mId != 0 ) {
@@ -420,8 +343,10 @@ class User implements IDBAccessObject, UserIdentity {
 				$this->loadFromId( $flags );
 				break;
 			case 'actor':
+			case 'name':
 				// Make sure this thread sees its own changes
-				if ( wfGetLB()->hasOrMadeRecentMasterChanges() ) {
+				$lb = MediaWikiServices::getInstance()->getDBLoadBalancer();
+				if ( $lb->hasOrMadeRecentMasterChanges() ) {
 					$flags |= self::READ_LATEST;
 					$this->queryFlagsUsed = $flags;
 				}
@@ -429,20 +354,20 @@ class User implements IDBAccessObject, UserIdentity {
 				list( $index, $options ) = DBAccessObjectUtils::getDBOptions( $flags );
 				$row = wfGetDB( $index )->selectRow(
 					'actor',
-					[ 'actor_user', 'actor_name' ],
-					[ 'actor_id' => $this->mActorId ],
+					[ 'actor_id', 'actor_user', 'actor_name' ],
+					$this->mFrom === 'name' ? [ 'actor_name' => $this->mName ] : [ 'actor_id' => $this->mActorId ],
 					__METHOD__,
 					$options
 				);
 
 				if ( !$row ) {
 					// Ugh.
-					$this->loadDefaults();
+					$this->loadDefaults( $this->mFrom === 'name' ? $this->mName : false );
 				} elseif ( $row->actor_user ) {
 					$this->mId = $row->actor_user;
 					$this->loadFromId( $flags );
 				} else {
-					$this->loadDefaults( $row->actor_name );
+					$this->loadDefaults( $row->actor_name, $row->actor_id );
 				}
 				break;
 			case 'session':
@@ -490,12 +415,12 @@ class User implements IDBAccessObject, UserIdentity {
 
 	/**
 	 * @since 1.27
-	 * @param string $wikiId
+	 * @param string $dbDomain
 	 * @param int $userId
 	 */
-	public static function purge( $wikiId, $userId ) {
-		$cache = ObjectCache::getMainWANInstance();
-		$key = $cache->makeGlobalKey( 'user', 'id', $wikiId, $userId );
+	public static function purge( $dbDomain, $userId ) {
+		$cache = MediaWikiServices::getInstance()->getMainWANObjectCache();
+		$key = $cache->makeGlobalKey( 'user', 'id', $dbDomain, $userId );
 		$cache->delete( $key );
 	}
 
@@ -505,7 +430,9 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return string
 	 */
 	protected function getCacheKey( WANObjectCache $cache ) {
-		return $cache->makeGlobalKey( 'user', 'id', wfWikiID(), $this->mId );
+		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+
+		return $cache->makeGlobalKey( 'user', 'id', $lbFactory->getLocalDomainID(), $this->mId );
 	}
 
 	/**
@@ -526,7 +453,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @since 1.25
 	 */
 	protected function loadFromCache() {
-		$cache = ObjectCache::getMainWANInstance();
+		$cache = MediaWikiServices::getInstance()->getMainWANObjectCache();
 		$data = $cache->getWithSetCallback(
 			$this->getCacheKey( $cache ),
 			$cache::TTL_HOUR,
@@ -595,14 +522,15 @@ class User implements IDBAccessObject, UserIdentity {
 		$name = self::getCanonicalName( $name, $validate );
 		if ( $name === false ) {
 			return false;
-		} else {
-			// Create unloaded user object
-			$u = new User;
-			$u->mName = $name;
-			$u->mFrom = 'name';
-			$u->setItemLoaded( 'name' );
-			return $u;
 		}
+
+		// Create unloaded user object
+		$u = new User;
+		$u->mName = $name;
+		$u->mFrom = 'name';
+		$u->setItemLoaded( 'name' );
+
+		return $u;
 	}
 
 	/**
@@ -627,19 +555,32 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return User The corresponding User object
 	 */
 	public static function newFromActorId( $id ) {
-		global $wgActorTableSchemaMigrationStage;
-
-		if ( $wgActorTableSchemaMigrationStage <= MIGRATION_OLD ) {
-			throw new BadMethodCallException(
-				'Cannot use ' . __METHOD__ . ' when $wgActorTableSchemaMigrationStage is MIGRATION_OLD'
-			);
-		}
-
 		$u = new User;
 		$u->mActorId = $id;
 		$u->mFrom = 'actor';
 		$u->setItemLoaded( 'actor' );
 		return $u;
+	}
+
+	/**
+	 * Returns a User object corresponding to the given UserIdentity.
+	 *
+	 * @since 1.32
+	 *
+	 * @param UserIdentity $identity
+	 *
+	 * @return User
+	 */
+	public static function newFromIdentity( UserIdentity $identity ) {
+		if ( $identity instanceof User ) {
+			return $identity;
+		}
+
+		return self::newFromAnyId(
+			$identity->getId() === 0 ? null : $identity->getId(),
+			$identity->getName() === '' ? null : $identity->getName(),
+			$identity->getActorId() === 0 ? null : $identity->getActorId()
+		);
 	}
 
 	/**
@@ -652,15 +593,22 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @param int|null $userId User ID, if known
 	 * @param string|null $userName User name, if known
 	 * @param int|null $actorId Actor ID, if known
+	 * @param bool|string $dbDomain remote wiki to which the User/Actor ID applies, or false if none
 	 * @return User
 	 */
-	public static function newFromAnyId( $userId, $userName, $actorId ) {
-		global $wgActorTableSchemaMigrationStage;
+	public static function newFromAnyId( $userId, $userName, $actorId, $dbDomain = false ) {
+		// Stop-gap solution for the problem described in T222212.
+		// Force the User ID and Actor ID to zero for users loaded from the database
+		// of another wiki, to prevent subtle data corruption and confusing failure modes.
+		if ( $dbDomain !== false ) {
+			$userId = 0;
+			$actorId = 0;
+		}
 
 		$user = new User;
 		$user->mFrom = 'defaults';
 
-		if ( $wgActorTableSchemaMigrationStage > MIGRATION_OLD && $actorId !== null ) {
+		if ( $actorId !== null ) {
 			$user->mActorId = (int)$actorId;
 			if ( $user->mActorId !== 0 ) {
 				$user->mFrom = 'actor';
@@ -744,7 +692,8 @@ class User implements IDBAccessObject, UserIdentity {
 	 * will be loaded once more from the database when accessing them.
 	 *
 	 * @param stdClass $row A row from the user table
-	 * @param array $data Further data to load into the object (see User::loadFromRow for valid keys)
+	 * @param array|null $data Further data to load into the object
+	 *  (see User::loadFromRow for valid keys)
 	 * @return User
 	 */
 	public static function newFromRow( $row, $data = null ) {
@@ -825,9 +774,48 @@ class User implements IDBAccessObject, UserIdentity {
 
 		if ( !$row ) {
 			// No user. Create it?
-			return $options['create']
-				? self::createNew( $name, [ 'token' => self::INVALID_TOKEN ] )
-				: null;
+			if ( !$options['create'] ) {
+				// No.
+				return null;
+			}
+
+			// If it's a reserved user that had an anonymous actor created for it at
+			// some point, we need special handling.
+			if ( !self::isValidUserName( $name ) || self::isUsableName( $name ) ) {
+				// Not reserved, so just create it.
+				return self::createNew( $name, [ 'token' => self::INVALID_TOKEN ] );
+			}
+
+			// It is reserved. Check for an anonymous actor row.
+			$dbw = wfGetDB( DB_MASTER );
+			return $dbw->doAtomicSection( __METHOD__, function ( IDatabase $dbw, $fname ) use ( $name ) {
+				$row = $dbw->selectRow(
+					'actor',
+					[ 'actor_id' ],
+					[ 'actor_name' => $name, 'actor_user' => null ],
+					$fname,
+					[ 'FOR UPDATE' ]
+				);
+				if ( !$row ) {
+					// No anonymous actor.
+					return self::createNew( $name, [ 'token' => self::INVALID_TOKEN ] );
+				}
+
+				// There is an anonymous actor. Delete the actor row so we can create the user,
+				// then restore the old actor_id so as to not break existing references.
+				// @todo If MediaWiki ever starts using foreign keys for `actor`, this will break things.
+				$dbw->delete( 'actor', [ 'actor_id' => $row->actor_id ], $fname );
+				$user = self::createNew( $name, [ 'token' => self::INVALID_TOKEN ] );
+				$dbw->update(
+					'actor',
+					[ 'actor_id' => $row->actor_id ],
+					[ 'actor_id' => $user->getActorId() ],
+					$fname
+				);
+				$user->clearInstanceCache( 'id' );
+				$user->invalidateCache();
+				return $user;
+			} );
 		}
 
 		$user = self::newFromRow( $row );
@@ -881,6 +869,8 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return int|null The corresponding user's ID, or null if user is nonexistent
 	 */
 	public static function idFromName( $name, $flags = self::READ_NORMAL ) {
+		// Don't explode on self::$idCacheByName[$name] if $name is not a string but e.g. a User object
+		$name = (string)$name;
 		$nt = Title::makeTitleSafe( NS_USER, $name );
 		if ( is_null( $nt ) ) {
 			// Illegal name
@@ -888,7 +878,7 @@ class User implements IDBAccessObject, UserIdentity {
 		}
 
 		if ( !( $flags & self::READ_LATEST ) && array_key_exists( $name, self::$idCacheByName ) ) {
-			return self::$idCacheByName[$name];
+			return is_null( self::$idCacheByName[$name] ) ? null : (int)self::$idCacheByName[$name];
 		}
 
 		list( $index, $options ) = DBAccessObjectUtils::getDBOptions( $flags );
@@ -905,14 +895,14 @@ class User implements IDBAccessObject, UserIdentity {
 		if ( $s === false ) {
 			$result = null;
 		} else {
-			$result = $s->user_id;
+			$result = (int)$s->user_id;
+		}
+
+		if ( count( self::$idCacheByName ) >= 1000 ) {
+			self::$idCacheByName = [];
 		}
 
 		self::$idCacheByName[$name] = $result;
-
-		if ( count( self::$idCacheByName ) > 1000 ) {
-			self::$idCacheByName = [];
-		}
 
 		return $result;
 	}
@@ -967,13 +957,13 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool
 	 */
 	public static function isValidUserName( $name ) {
-		global $wgContLang, $wgMaxNameChars;
+		global $wgMaxNameChars;
 
 		if ( $name == ''
 			|| self::isIP( $name )
 			|| strpos( $name, '/' ) !== false
 			|| strlen( $name ) > $wgMaxNameChars
-			|| $name != $wgContLang->ucfirst( $name )
+			|| $name != MediaWikiServices::getInstance()->getContentLanguage()->ucfirst( $name )
 		) {
 			return false;
 		}
@@ -991,10 +981,10 @@ class User implements IDBAccessObject, UserIdentity {
 		// Should these be merged into the title char list?
 		$unicodeBlacklist = '/[' .
 			'\x{0080}-\x{009f}' . # iso-8859-1 control chars
-			'\x{00a0}' .          # non-breaking space
+			'\x{00a0}' . # non-breaking space
 			'\x{2000}-\x{200f}' . # various whitespace
 			'\x{2028}-\x{202f}' . # breaks and control chars
-			'\x{3000}' .          # ideographic space
+			'\x{3000}' . # ideographic space
 			'\x{e000}-\x{f8ff}' . # private use
 			']/u';
 		if ( preg_match( $unicodeBlacklist, $name ) ) {
@@ -1022,16 +1012,15 @@ class User implements IDBAccessObject, UserIdentity {
 			return false;
 		}
 
-		static $reservedUsernames = false;
-		if ( !$reservedUsernames ) {
-			$reservedUsernames = $wgReservedUsernames;
-			Hooks::run( 'UserGetReservedNames', [ &$reservedUsernames ] );
+		if ( !self::$reservedUsernames ) {
+			self::$reservedUsernames = $wgReservedUsernames;
+			Hooks::run( 'UserGetReservedNames', [ &self::$reservedUsernames ] );
 		}
 
 		// Certain names may be reserved for batch processes.
-		foreach ( $reservedUsernames as $reserved ) {
+		foreach ( self::$reservedUsernames as $reserved ) {
 			if ( substr( $reserved, 0, 4 ) == 'msg:' ) {
-				$reserved = wfMessage( substr( $reserved, 4 ) )->inContentLanguage()->text();
+				$reserved = wfMessage( substr( $reserved, 4 ) )->inContentLanguage()->plain();
 			}
 			if ( $reserved == $name ) {
 				return false;
@@ -1047,7 +1036,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @param string|array $groups A single group name or an array of group names
 	 * @param int $limit Max number of users to return. The actual limit will never exceed 5000
 	 *   records; larger values are ignored.
-	 * @param int $after ID the user to start after
+	 * @param int|null $after ID the user to start after
 	 * @return UserArrayFromResult
 	 */
 	public static function findUsersByGroup( $groups, $limit = 5000, $after = null ) {
@@ -1103,12 +1092,12 @@ class User implements IDBAccessObject, UserIdentity {
 		}
 
 		// Preg yells if you try to give it an empty string
-		if ( $wgInvalidUsernameCharacters !== '' ) {
-			if ( preg_match( '/[' . preg_quote( $wgInvalidUsernameCharacters, '/' ) . ']/', $name ) ) {
-				wfDebugLog( 'username', __METHOD__ .
-					": '$name' invalid due to wgInvalidUsernameCharacters" );
-				return false;
-			}
+		if ( $wgInvalidUsernameCharacters !== '' &&
+			preg_match( '/[' . preg_quote( $wgInvalidUsernameCharacters, '/' ) . ']/', $name )
+		) {
+			wfDebugLog( 'username', __METHOD__ .
+				": '$name' invalid due to wgInvalidUsernameCharacters" );
+			return false;
 		}
 
 		return self::isUsableName( $name );
@@ -1121,47 +1110,26 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool
 	 */
 	public function isValidPassword( $password ) {
-		// simple boolean wrapper for getPasswordValidity
-		return $this->getPasswordValidity( $password ) === true;
-	}
-
-	/**
-	 * Given unvalidated password input, return error message on failure.
-	 *
-	 * @param string $password Desired password
-	 * @return bool|string|array True on success, string or array of error message on failure
-	 */
-	public function getPasswordValidity( $password ) {
-		$result = $this->checkPasswordValidity( $password );
-		if ( $result->isGood() ) {
-			return true;
-		} else {
-			$messages = [];
-			foreach ( $result->getErrorsByType( 'error' ) as $error ) {
-				$messages[] = $error['message'];
-			}
-			foreach ( $result->getErrorsByType( 'warning' ) as $warning ) {
-				$messages[] = $warning['message'];
-			}
-			if ( count( $messages ) === 1 ) {
-				return $messages[0];
-			}
-			return $messages;
-		}
+		// simple boolean wrapper for checkPasswordValidity
+		return $this->checkPasswordValidity( $password )->isGood();
 	}
 
 	/**
 	 * Check if this is a valid password for this user
 	 *
-	 * Create a Status object based on the password's validity.
-	 * The Status should be set to fatal if the user should not
-	 * be allowed to log in, and should have any errors that
-	 * would block changing the password.
-	 *
-	 * If the return value of this is not OK, the password
-	 * should not be checked. If the return value is not Good,
-	 * the password can be checked, but the user should not be
-	 * able to set their password to this.
+	 * Returns a Status object with a set of messages describing
+	 * problems with the password. If the return status is fatal,
+	 * the action should be refused and the password should not be
+	 * checked at all (this is mainly meant for DoS mitigation).
+	 * If the return value is OK but not good, the password can be checked,
+	 * but the user should not be able to set their password to this.
+	 * The value of the returned Status object will be an array which
+	 * can have the following fields:
+	 * - forceChange (bool): if set to true, the user should not be
+	 *   allowed to log with this password unless they change it during
+	 *   the login process (see ResetPasswordSecondaryAuthenticationProvider).
+	 * - suggestChangeOnLogin (bool): if set to true, the user should be prompted for
+	 *   a password change on login.
 	 *
 	 * @param string $password Desired password
 	 * @return Status
@@ -1175,7 +1143,7 @@ class User implements IDBAccessObject, UserIdentity {
 			$wgPasswordPolicy['checks']
 		);
 
-		$status = Status::newGood();
+		$status = Status::newGood( [] );
 		$result = false; // init $result to false for the internal checks
 
 		if ( !Hooks::run( 'isValidPassword', [ $password, &$result, $this ] ) ) {
@@ -1184,14 +1152,16 @@ class User implements IDBAccessObject, UserIdentity {
 		}
 
 		if ( $result === false ) {
-			$status->merge( $upp->checkUserPassword( $this, $password ) );
+			$status->merge( $upp->checkUserPassword( $this, $password ), true );
 			return $status;
-		} elseif ( $result === true ) {
-			return $status;
-		} else {
-			$status->error( $result );
-			return $status; // the isValidPassword hook set a string $result and returned true
 		}
+
+		if ( $result === true ) {
+			return $status;
+		}
+
+		$status->error( $result );
+		return $status; // the isValidPassword hook set a string $result and returned true
 	}
 
 	/**
@@ -1209,8 +1179,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 */
 	public static function getCanonicalName( $name, $validate = 'valid' ) {
 		// Force usernames to capital
-		global $wgContLang;
-		$name = $wgContLang->ucfirst( $name );
+		$name = MediaWikiServices::getInstance()->getContentLanguage()->ucfirst( $name );
 
 		# Reject names containing '#'; these will be cleaned up
 		# with title normalisation, but then it's too late to
@@ -1228,10 +1197,7 @@ class User implements IDBAccessObject, UserIdentity {
 			return false;
 		}
 
-		// Reject various classes of invalid names
-		$name = AuthManager::callLegacyAuthPlugin(
-			'getCanonicalName', [ $t->getText() ], $t->getText()
-		);
+		$name = $t->getText();
 
 		switch ( $validate ) {
 			case false:
@@ -1259,28 +1225,18 @@ class User implements IDBAccessObject, UserIdentity {
 	}
 
 	/**
-	 * Return a random password.
-	 *
-	 * @deprecated since 1.27, use PasswordFactory::generateRandomPasswordString()
-	 * @return string New random password
-	 */
-	public static function randomPassword() {
-		global $wgMinimalPasswordLength;
-		return PasswordFactory::generateRandomPasswordString( $wgMinimalPasswordLength );
-	}
-
-	/**
 	 * Set cached properties to default.
 	 *
 	 * @note This no longer clears uncached lazy-initialised properties;
 	 *       the constructor does that instead.
 	 *
 	 * @param string|bool $name
+	 * @param int|null $actorId
 	 */
-	public function loadDefaults( $name = false ) {
+	public function loadDefaults( $name = false, $actorId = null ) {
 		$this->mId = 0;
 		$this->mName = $name;
-		$this->mActorId = null;
+		$this->mActorId = $actorId;
 		$this->mRealName = '';
 		$this->mEmail = '';
 		$this->mOptionOverrides = null;
@@ -1338,13 +1294,6 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool True if the user is logged in, false otherwise.
 	 */
 	private function loadFromSession() {
-		// Deprecated hook
-		$result = null;
-		Hooks::run( 'UserLoadFromSession', [ $this, &$result ], '1.27' );
-		if ( $result !== null ) {
-			return $result;
-		}
-
 		// MediaWiki\Session\Session already did the necessary authentication of the user
 		// returned here, so just use it if applicable.
 		$session = $this->getRequest()->getSession();
@@ -1352,29 +1301,29 @@ class User implements IDBAccessObject, UserIdentity {
 		if ( $user->isLoggedIn() ) {
 			$this->loadFromUserObject( $user );
 
-			// If this user is autoblocked, set a cookie to track the Block. This has to be done on
+			// If this user is autoblocked, set a cookie to track the block. This has to be done on
 			// every session load, because an autoblocked editor might not edit again from the same
 			// IP address after being blocked.
-			$config = RequestContext::getMain()->getConfig();
-			if ( $config->get( 'CookieSetOnAutoblock' ) === true ) {
-				$block = $this->getBlock();
-				$shouldSetCookie = $this->getRequest()->getCookie( 'BlockID' ) === null
-					&& $block
-					&& $block->getType() === Block::TYPE_USER
-					&& $block->isAutoblocking();
-				if ( $shouldSetCookie ) {
-					wfDebug( __METHOD__ . ': User is autoblocked, setting cookie to track' );
-					$block->setCookie( $this->getRequest()->response() );
-				}
-			}
+			MediaWikiServices::getInstance()->getBlockManager()->trackBlockWithCookie( $this );
 
 			// Other code expects these to be set in the session, so set them.
 			$session->set( 'wsUserID', $this->getId() );
 			$session->set( 'wsUserName', $this->getName() );
 			$session->set( 'wsToken', $this->getToken() );
+
 			return true;
 		}
+
 		return false;
+	}
+
+	/**
+	 * Set the 'BlockID' cookie depending on block type and user authentication status.
+	 *
+	 * @deprecated since 1.34 Use BlockManager::trackBlockWithCookie instead
+	 */
+	public function trackBlockWithCookie() {
+		MediaWikiServices::getInstance()->getBlockManager()->trackBlockWithCookie( $this );
 	}
 
 	/**
@@ -1416,19 +1365,20 @@ class User implements IDBAccessObject, UserIdentity {
 			$this->mGroupMemberships = null; // deferred
 			$this->getEditCount(); // revalidation for nulls
 			return true;
-		} else {
-			// Invalid user_id
-			$this->mId = 0;
-			$this->loadDefaults();
-			return false;
 		}
+
+		// Invalid user_id
+		$this->mId = 0;
+		$this->loadDefaults();
+
+		return false;
 	}
 
 	/**
 	 * Initialize this object from a row from the user table.
 	 *
 	 * @param stdClass $row Row from the user table to load.
-	 * @param array $data Further user data to load into the object
+	 * @param array|null $data Further user data to load into the object
 	 *
 	 *  user_groups   Array of arrays or stdClass result rows out of the user_groups
 	 *                table. Previously you were supposed to pass an array of strings
@@ -1437,8 +1387,6 @@ class User implements IDBAccessObject, UserIdentity {
 	 *  user_properties   Array with properties out of the user_properties table
 	 */
 	protected function loadFromRow( $row, $data = null ) {
-		global $wgActorTableSchemaMigrationStage;
-
 		if ( !is_object( $row ) ) {
 			throw new InvalidArgumentException( '$row must be an object' );
 		}
@@ -1447,16 +1395,14 @@ class User implements IDBAccessObject, UserIdentity {
 
 		$this->mGroupMemberships = null; // deferred
 
-		if ( $wgActorTableSchemaMigrationStage > MIGRATION_OLD ) {
-			if ( isset( $row->actor_id ) ) {
-				$this->mActorId = (int)$row->actor_id;
-				if ( $this->mActorId !== 0 ) {
-					$this->mFrom = 'actor';
-				}
-				$this->setItemLoaded( 'actor' );
-			} else {
-				$all = false;
+		if ( isset( $row->actor_id ) ) {
+			$this->mActorId = (int)$row->actor_id;
+			if ( $this->mActorId !== 0 ) {
+				$this->mFrom = 'actor';
 			}
+			$this->setItemLoaded( 'actor' );
+		} else {
+			$all = false;
 		}
 
 		if ( isset( $row->user_name ) && $row->user_name !== '' ) {
@@ -1528,7 +1474,7 @@ class User implements IDBAccessObject, UserIdentity {
 
 		if ( is_array( $data ) ) {
 			if ( isset( $data['user_groups'] ) && is_array( $data['user_groups'] ) ) {
-				if ( !count( $data['user_groups'] ) ) {
+				if ( $data['user_groups'] === [] ) {
 					$this->mGroupMemberships = [];
 				} else {
 					$firstGroup = reset( $data['user_groups'] );
@@ -1594,7 +1540,7 @@ class User implements IDBAccessObject, UserIdentity {
 		}
 
 		$toPromote = Autopromote::getAutopromoteOnceGroups( $this, $event );
-		if ( !count( $toPromote ) ) {
+		if ( $toPromote === [] ) {
 			return [];
 		}
 
@@ -1612,7 +1558,6 @@ class User implements IDBAccessObject, UserIdentity {
 
 		// update groups in external authentication database
 		Hooks::run( 'UserGroupsChanged', [ $this, $toPromote, [], false, false, $oldUGMs, $newUGMs ] );
-		AuthManager::callLegacyAuthPlugin( 'updateExternalDBGroups', [ $this, $toPromote ] );
 
 		$logEntry = new ManualLogEntry( 'rights', 'autopromote' );
 		$logEntry->setPerformer( $this );
@@ -1634,11 +1579,11 @@ class User implements IDBAccessObject, UserIdentity {
 	 * protected against race conditions using a compare-and-set (CAS) mechanism
 	 * based on comparing $this->mTouched with the user_touched field.
 	 *
-	 * @param Database $db
+	 * @param IDatabase $db
 	 * @param array $conditions WHERE conditions for use with Database::update
 	 * @return array WHERE conditions for use with Database::update
 	 */
-	protected function makeUpdateConditions( Database $db, array $conditions ) {
+	protected function makeUpdateConditions( IDatabase $db, array $conditions ) {
 		if ( $this->mTouched ) {
 			// CAS check: only update if the row wasn't changed sicne it was loaded.
 			$conditions['user_touched'] = $db->timestamp( $this->mTouched );
@@ -1678,7 +1623,7 @@ class User implements IDBAccessObject, UserIdentity {
 
 		if ( $success ) {
 			$this->mTouched = $newTouched;
-			$this->clearSharedCache();
+			$this->clearSharedCache( 'changed' );
 		} else {
 			// Clears on failure too since that is desired if the cache is stale
 			$this->clearSharedCache( 'refresh' );
@@ -1695,11 +1640,12 @@ class User implements IDBAccessObject, UserIdentity {
 	 *   given source. May be "name", "id", "actor", "defaults", "session", or false for no reload.
 	 */
 	public function clearInstanceCache( $reloadFrom = false ) {
+		global $wgFullyInitialised;
+
 		$this->mNewtalk = -1;
 		$this->mDatePreference = null;
 		$this->mBlockedby = -1; # Unset
 		$this->mHash = false;
-		$this->mRights = null;
 		$this->mEffectiveGroups = null;
 		$this->mImplicitGroups = null;
 		$this->mGroupMemberships = null;
@@ -1707,10 +1653,34 @@ class User implements IDBAccessObject, UserIdentity {
 		$this->mOptionsLoaded = false;
 		$this->mEditCount = null;
 
+		// Replacement of former `$this->mRights = null` line
+		if ( $wgFullyInitialised && $this->mFrom ) {
+			MediaWikiServices::getInstance()->getPermissionManager()->invalidateUsersRightsCache(
+				$this
+			);
+		}
+
 		if ( $reloadFrom ) {
 			$this->mLoadedItems = [];
 			$this->mFrom = $reloadFrom;
 		}
+	}
+
+	/** @var array|null */
+	private static $defOpt = null;
+	/** @var string|null */
+	private static $defOptLang = null;
+
+	/**
+	 * Reset the process cache of default user options. This is only necessary
+	 * if the wiki configuration has changed since defaults were calculated,
+	 * and as such should only be performed inside the testing suite that
+	 * regularly changes wiki configuration.
+	 */
+	public static function resetGetDefaultOptionsForTestsOnly() {
+		Assert::invariant( defined( 'MW_PHPUNIT_TEST' ), 'Unit tests only' );
+		self::$defOpt = null;
+		self::$defOptLang = null;
 	}
 
 	/**
@@ -1720,37 +1690,39 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return array Array of String options
 	 */
 	public static function getDefaultOptions() {
-		global $wgNamespacesToBeSearchedDefault, $wgDefaultUserOptions, $wgContLang, $wgDefaultSkin;
+		global $wgNamespacesToBeSearchedDefault, $wgDefaultUserOptions, $wgDefaultSkin;
 
-		static $defOpt = null;
-		static $defOptLang = null;
-
-		if ( $defOpt !== null && $defOptLang === $wgContLang->getCode() ) {
-			// $wgContLang does not change (and should not change) mid-request,
-			// but the unit tests change it anyway, and expect this method to
-			// return values relevant to the current $wgContLang.
-			return $defOpt;
+		$contLang = MediaWikiServices::getInstance()->getContentLanguage();
+		if ( self::$defOpt !== null && self::$defOptLang === $contLang->getCode() ) {
+			// The content language does not change (and should not change) mid-request, but the
+			// unit tests change it anyway, and expect this method to return values relevant to the
+			// current content language.
+			return self::$defOpt;
 		}
 
-		$defOpt = $wgDefaultUserOptions;
+		self::$defOpt = $wgDefaultUserOptions;
 		// Default language setting
-		$defOptLang = $wgContLang->getCode();
-		$defOpt['language'] = $defOptLang;
+		self::$defOptLang = $contLang->getCode();
+		self::$defOpt['language'] = self::$defOptLang;
 		foreach ( LanguageConverter::$languagesWithVariants as $langCode ) {
-			$defOpt[$langCode == $wgContLang->getCode() ? 'variant' : "variant-$langCode"] = $langCode;
+			if ( $langCode === $contLang->getCode() ) {
+				self::$defOpt['variant'] = $langCode;
+			} else {
+				self::$defOpt["variant-$langCode"] = $langCode;
+			}
 		}
 
 		// NOTE: don't use SearchEngineConfig::getSearchableNamespaces here,
 		// since extensions may change the set of searchable namespaces depending
 		// on user groups/permissions.
 		foreach ( $wgNamespacesToBeSearchedDefault as $nsnum => $val ) {
-			$defOpt['searchNs' . $nsnum] = (bool)$val;
+			self::$defOpt['searchNs' . $nsnum] = (bool)$val;
 		}
-		$defOpt['skin'] = Skin::normalizeKey( $wgDefaultSkin );
+		self::$defOpt['skin'] = Skin::normalizeKey( $wgDefaultSkin );
 
-		Hooks::run( 'UserGetDefaultOptions', [ &$defOpt ] );
+		Hooks::run( 'UserGetDefaultOptions', [ &self::$defOpt ] );
 
-		return $defOpt;
+		return self::$defOpt;
 	}
 
 	/**
@@ -1761,23 +1733,20 @@ class User implements IDBAccessObject, UserIdentity {
 	 */
 	public static function getDefaultOption( $opt ) {
 		$defOpts = self::getDefaultOptions();
-		if ( isset( $defOpts[$opt] ) ) {
-			return $defOpts[$opt];
-		} else {
-			return null;
-		}
+		return $defOpts[$opt] ?? null;
 	}
 
 	/**
 	 * Get blocking information
-	 * @param bool $bFromSlave Whether to check the replica DB first.
+	 *
+	 * TODO: Move this into the BlockManager, along with block-related properties.
+	 *
+	 * @param bool $fromReplica Whether to check the replica DB first.
 	 *   To improve performance, non-critical checks are done against replica DBs.
 	 *   Check when actually saving should be done against master.
 	 */
-	private function getBlockedStatus( $bFromSlave = true ) {
-		global $wgProxyWhitelist, $wgApplyIpBlocksToXff, $wgSoftBlockRanges;
-
-		if ( -1 != $this->mBlockedby ) {
+	private function getBlockedStatus( $fromReplica = true ) {
+		if ( $this->mBlockedby != -1 ) {
 			return;
 		}
 
@@ -1790,87 +1759,40 @@ class User implements IDBAccessObject, UserIdentity {
 		// overwriting mBlockedby, surely?
 		$this->load();
 
-		# We only need to worry about passing the IP address to the Block generator if the
-		# user is not immune to autoblocks/hardblocks, and they are the current user so we
-		# know which IP address they're actually coming from
-		$ip = null;
-		$sessionUser = RequestContext::getMain()->getUser();
-		// the session user is set up towards the end of Setup.php. Until then,
+		// TODO: Block checking shouldn't really be done from the User object. Block
+		// checking can involve checking for IP blocks, cookie blocks, and/or XFF blocks,
+		// which need more knowledge of the request context than the User should have.
+		// Since we do currently check blocks from the User, we have to do the following
+		// here:
+		// - Check if this is the user associated with the main request
+		// - If so, pass the relevant request information to the block manager
+		$request = null;
+
+		// The session user is set up towards the end of Setup.php. Until then,
 		// assume it's a logged-out user.
+		$sessionUser = RequestContext::getMain()->getUser();
 		$globalUserName = $sessionUser->isSafeToLoad()
 			? $sessionUser->getName()
 			: IP::sanitizeIP( $sessionUser->getRequest()->getIP() );
-		if ( $this->getName() === $globalUserName && !$this->isAllowed( 'ipblock-exempt' ) ) {
-			$ip = $this->getRequest()->getIP();
+
+		if ( $this->getName() === $globalUserName ) {
+			// This is the global user, so we need to pass the request
+			$request = $this->getRequest();
 		}
 
-		// User/IP blocking
-		$block = Block::newFromTarget( $this, $ip, !$bFromSlave );
+		// @phan-suppress-next-line PhanAccessMethodInternal It's the only allowed use
+		$block = MediaWikiServices::getInstance()->getBlockManager()->getUserBlock(
+			$this,
+			$request,
+			$fromReplica
+		);
 
-		// Cookie blocking
-		if ( !$block instanceof Block ) {
-			$block = $this->getBlockFromCookieValue( $this->getRequest()->getCookie( 'BlockID' ) );
-		}
-
-		// Proxy blocking
-		if ( !$block instanceof Block && $ip !== null && !in_array( $ip, $wgProxyWhitelist ) ) {
-			// Local list
-			if ( self::isLocallyBlockedProxy( $ip ) ) {
-				$block = new Block( [
-					'byText' => wfMessage( 'proxyblocker' )->text(),
-					'reason' => wfMessage( 'proxyblockreason' )->text(),
-					'address' => $ip,
-					'systemBlock' => 'proxy',
-				] );
-			} elseif ( $this->isAnon() && $this->isDnsBlacklisted( $ip ) ) {
-				$block = new Block( [
-					'byText' => wfMessage( 'sorbs' )->text(),
-					'reason' => wfMessage( 'sorbsreason' )->text(),
-					'address' => $ip,
-					'systemBlock' => 'dnsbl',
-				] );
-			}
-		}
-
-		// (T25343) Apply IP blocks to the contents of XFF headers, if enabled
-		if ( !$block instanceof Block
-			&& $wgApplyIpBlocksToXff
-			&& $ip !== null
-			&& !in_array( $ip, $wgProxyWhitelist )
-		) {
-			$xff = $this->getRequest()->getHeader( 'X-Forwarded-For' );
-			$xff = array_map( 'trim', explode( ',', $xff ) );
-			$xff = array_diff( $xff, [ $ip ] );
-			$xffblocks = Block::getBlocksForIPList( $xff, $this->isAnon(), !$bFromSlave );
-			$block = Block::chooseBlock( $xffblocks, $xff );
-			if ( $block instanceof Block ) {
-				# Mangle the reason to alert the user that the block
-				# originated from matching the X-Forwarded-For header.
-				$block->mReason = wfMessage( 'xffblockreason', $block->mReason )->text();
-			}
-		}
-
-		if ( !$block instanceof Block
-			&& $ip !== null
-			&& $this->isAnon()
-			&& IP::isInRanges( $ip, $wgSoftBlockRanges )
-		) {
-			$block = new Block( [
-				'address' => $ip,
-				'byText' => 'MediaWiki default',
-				'reason' => wfMessage( 'softblockrangesreason', $ip )->text(),
-				'anonOnly' => true,
-				'systemBlock' => 'wgSoftBlockRanges',
-			] );
-		}
-
-		if ( $block instanceof Block ) {
-			wfDebug( __METHOD__ . ": Found block.\n" );
+		if ( $block ) {
 			$this->mBlock = $block;
 			$this->mBlockedby = $block->getByName();
-			$this->mBlockreason = $block->mReason;
-			$this->mHideName = $block->mHideName;
-			$this->mAllowUsertalk = !$block->prevents( 'editownusertalk' );
+			$this->mBlockreason = $block->getReason();
+			$this->mHideName = $block->getHideName();
+			$this->mAllowUsertalk = $block->isUsertalkEditAllowed();
 		} else {
 			$this->mBlock = null;
 			$this->mBlockedby = '';
@@ -1882,75 +1804,33 @@ class User implements IDBAccessObject, UserIdentity {
 		// Avoid PHP 7.1 warning of passing $this by reference
 		$thisUser = $this;
 		// Extensions
-		Hooks::run( 'GetBlockedStatus', [ &$thisUser ] );
-	}
-
-	/**
-	 * Try to load a Block from an ID given in a cookie value.
-	 * @param string|null $blockCookieVal The cookie value to check.
-	 * @return Block|bool The Block object, or false if none could be loaded.
-	 */
-	protected function getBlockFromCookieValue( $blockCookieVal ) {
-		// Make sure there's something to check. The cookie value must start with a number.
-		if ( strlen( $blockCookieVal ) < 1 || !is_numeric( substr( $blockCookieVal, 0, 1 ) ) ) {
-			return false;
-		}
-		// Load the Block from the ID in the cookie.
-		$blockCookieId = Block::getIdFromCookieValue( $blockCookieVal );
-		if ( $blockCookieId !== null ) {
-			// An ID was found in the cookie.
-			$tmpBlock = Block::newFromID( $blockCookieId );
-			if ( $tmpBlock instanceof Block ) {
-				// Check the validity of the block.
-				$blockIsValid = $tmpBlock->getType() == Block::TYPE_USER
-					&& !$tmpBlock->isExpired()
-					&& $tmpBlock->isAutoblocking();
-				$config = RequestContext::getMain()->getConfig();
-				$useBlockCookie = ( $config->get( 'CookieSetOnAutoblock' ) === true );
-				if ( $blockIsValid && $useBlockCookie ) {
-					// Use the block.
-					return $tmpBlock;
-				} else {
-					// If the block is not valid, remove the cookie.
-					Block::clearCookie( $this->getRequest()->response() );
-				}
-			} else {
-				// If the block doesn't exist, remove the cookie.
-				Block::clearCookie( $this->getRequest()->response() );
-			}
-		}
-		return false;
+		Hooks::run( 'GetBlockedStatus', [ &$thisUser ], '1.34' );
 	}
 
 	/**
 	 * Whether the given IP is in a DNS blacklist.
 	 *
+	 * @deprecated since 1.34 Use BlockManager::isDnsBlacklisted.
 	 * @param string $ip IP to check
 	 * @param bool $checkWhitelist Whether to check the whitelist first
 	 * @return bool True if blacklisted.
 	 */
 	public function isDnsBlacklisted( $ip, $checkWhitelist = false ) {
-		global $wgEnableDnsBlacklist, $wgDnsBlacklistUrls, $wgProxyWhitelist;
-
-		if ( !$wgEnableDnsBlacklist ) {
-			return false;
-		}
-
-		if ( $checkWhitelist && in_array( $ip, $wgProxyWhitelist ) ) {
-			return false;
-		}
-
-		return $this->inDnsBlacklist( $ip, $wgDnsBlacklistUrls );
+		return MediaWikiServices::getInstance()->getBlockManager()
+			->isDnsBlacklisted( $ip, $checkWhitelist );
 	}
 
 	/**
 	 * Whether the given IP is in a given DNS blacklist.
 	 *
+	 * @deprecated since 1.34 Check via BlockManager::isDnsBlacklisted instead.
 	 * @param string $ip IP to check
 	 * @param string|array $bases Array of Strings: URL of the DNS blacklist
 	 * @return bool True if blacklisted.
 	 */
 	public function inDnsBlacklist( $ip, $bases ) {
+		wfDeprecated( __METHOD__, '1.34' );
+
 		$found = false;
 		// @todo FIXME: IPv6 ???  (https://bugs.php.net/bug.php?id=33170)
 		if ( IP::isIPv4( $ip ) ) {
@@ -1980,9 +1860,9 @@ class User implements IDBAccessObject, UserIdentity {
 					wfDebugLog( 'dnsblacklist', "Hostname $host is {$ipList[0]}, it's a proxy says $basename!" );
 					$found = true;
 					break;
-				} else {
-					wfDebugLog( 'dnsblacklist', "Requested $host, not found in $basename." );
 				}
+
+				wfDebugLog( 'dnsblacklist', "Requested $host, not found in $basename." );
 			}
 		}
 
@@ -1992,11 +1872,13 @@ class User implements IDBAccessObject, UserIdentity {
 	/**
 	 * Check if an IP address is in the local proxy list
 	 *
+	 * @deprecated since 1.34 Use BlockManager::getUserBlock instead.
 	 * @param string $ip
-	 *
 	 * @return bool
 	 */
 	public static function isLocallyBlockedProxy( $ip ) {
+		wfDeprecated( __METHOD__, '1.34' );
+
 		global $wgProxyList;
 
 		if ( !$wgProxyList ) {
@@ -2102,11 +1984,9 @@ class User implements IDBAccessObject, UserIdentity {
 			if ( isset( $limits['anon'] ) ) {
 				$keys[$cache->makeKey( 'limiter', $action, 'anon' )] = $limits['anon'];
 			}
-		} else {
+		} elseif ( isset( $limits['user'] ) ) {
 			// limits for logged-in users
-			if ( isset( $limits['user'] ) ) {
-				$userLimit = $limits['user'];
-			}
+			$userLimit = $limits['user'];
 		}
 
 		// limits for anons and for newbie logged-in users
@@ -2145,6 +2025,9 @@ class User implements IDBAccessObject, UserIdentity {
 
 		// Set the user limit key
 		if ( $userLimit !== false ) {
+			// phan is confused because &can-bypass's value is a bool, so it assumes
+			// that $userLimit is also a bool here.
+			// @phan-suppress-next-line PhanTypeInvalidExpressionArrayDestructuring
 			list( $max, $period ) = $userLimit;
 			wfDebug( __METHOD__ . ": effective user limit: $max in {$period}s\n" );
 			$keys[$cache->makeKey( 'limiter', $action, 'user', $id )] = $userLimit;
@@ -2176,18 +2059,17 @@ class User implements IDBAccessObject, UserIdentity {
 
 		$triggered = false;
 		foreach ( $keys as $key => $limit ) {
+			// phan is confused because &can-bypass's value is a bool, so it assumes
+			// that $userLimit is also a bool here.
+			// @phan-suppress-next-line PhanTypeInvalidExpressionArrayDestructuring
 			list( $max, $period ) = $limit;
 			$summary = "(limit $max in {$period}s)";
 			$count = $cache->get( $key );
 			// Already pinged?
-			if ( $count ) {
-				if ( $count >= $max ) {
-					wfDebugLog( 'ratelimit', "User '{$this->getName()}' " .
-						"(IP {$this->getRequest()->getIP()}) tripped $key at $count $summary" );
-					$triggered = true;
-				} else {
-					wfDebug( __METHOD__ . ": ok. $key at $count $summary\n" );
-				}
+			if ( $count && $count >= $max ) {
+				wfDebugLog( 'ratelimit', "User '{$this->getName()}' " .
+					"(IP {$this->getRequest()->getIP()}) tripped $key at $count $summary" );
+				$triggered = true;
 			} else {
 				wfDebug( __METHOD__ . ": adding record for $key $summary\n" );
 				if ( $incrBy > 0 ) {
@@ -2195,7 +2077,7 @@ class User implements IDBAccessObject, UserIdentity {
 				}
 			}
 			if ( $incrBy > 0 ) {
-				$cache->incr( $key, $incrBy );
+				$cache->incrWithInit( $key, (int)$period, $incrBy, $incrBy );
 			}
 		}
 
@@ -2205,47 +2087,44 @@ class User implements IDBAccessObject, UserIdentity {
 	/**
 	 * Check if user is blocked
 	 *
-	 * @param bool $bFromSlave Whether to check the replica DB instead of
+	 * @deprecated since 1.34, use User::getBlock() or
+	 *             PermissionManager::isBlockedFrom() or
+	 *             PermissionManager::userCan() instead.
+	 *
+	 * @param bool $fromReplica Whether to check the replica DB instead of
 	 *   the master. Hacked from false due to horrible probs on site.
 	 * @return bool True if blocked, false otherwise
 	 */
-	public function isBlocked( $bFromSlave = true ) {
-		return $this->getBlock( $bFromSlave ) instanceof Block && $this->getBlock()->prevents( 'edit' );
+	public function isBlocked( $fromReplica = true ) {
+		return $this->getBlock( $fromReplica ) instanceof AbstractBlock &&
+			$this->getBlock()->appliesToRight( 'edit' );
 	}
 
 	/**
 	 * Get the block affecting the user, or null if the user is not blocked
 	 *
-	 * @param bool $bFromSlave Whether to check the replica DB instead of the master
-	 * @return Block|null
+	 * @param bool $fromReplica Whether to check the replica DB instead of the master
+	 * @return AbstractBlock|null
 	 */
-	public function getBlock( $bFromSlave = true ) {
-		$this->getBlockedStatus( $bFromSlave );
-		return $this->mBlock instanceof Block ? $this->mBlock : null;
+	public function getBlock( $fromReplica = true ) {
+		$this->getBlockedStatus( $fromReplica );
+		return $this->mBlock instanceof AbstractBlock ? $this->mBlock : null;
 	}
 
 	/**
 	 * Check if user is blocked from editing a particular article
 	 *
 	 * @param Title $title Title to check
-	 * @param bool $bFromSlave Whether to check the replica DB instead of the master
+	 * @param bool $fromReplica Whether to check the replica DB instead of the master
 	 * @return bool
+	 *
+	 * @deprecated since 1.33,
+	 * use MediaWikiServices::getInstance()->getPermissionManager()->isBlockedFrom(..)
+	 *
 	 */
-	public function isBlockedFrom( $title, $bFromSlave = false ) {
-		global $wgBlockAllowsUTEdit;
-
-		$blocked = $this->isBlocked( $bFromSlave );
-		$allowUsertalk = ( $wgBlockAllowsUTEdit ? $this->mAllowUsertalk : false );
-		// If a user's name is suppressed, they cannot make edits anywhere
-		if ( !$this->mHideName && $allowUsertalk && $title->getText() === $this->getName()
-			&& $title->getNamespace() == NS_USER_TALK ) {
-			$blocked = false;
-			wfDebug( __METHOD__ . ": self-talk page, ignoring any blocks\n" );
-		}
-
-		Hooks::run( 'UserIsBlockedFrom', [ $this, $title, &$blocked, &$allowUsertalk ] );
-
-		return $blocked;
+	public function isBlockedFrom( $title, $fromReplica = false ) {
+		return MediaWikiServices::getInstance()->getPermissionManager()
+			->isBlockedFrom( $this, $title, $fromReplica );
 	}
 
 	/**
@@ -2284,7 +2163,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool True if blocked, false otherwise
 	 */
 	public function isBlockedGlobally( $ip = '' ) {
-		return $this->getGlobalBlock( $ip ) instanceof Block;
+		return $this->getGlobalBlock( $ip ) instanceof AbstractBlock;
 	}
 
 	/**
@@ -2293,7 +2172,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * This is intended for quick UI checks.
 	 *
 	 * @param string $ip IP address, uses current client if none given
-	 * @return Block|null Block object if blocked, null otherwise
+	 * @return AbstractBlock|null Block object if blocked, null otherwise
 	 * @throws FatalError
 	 * @throws MWException
 	 */
@@ -2315,7 +2194,7 @@ class User implements IDBAccessObject, UserIdentity {
 
 		if ( $blocked && $block === null ) {
 			// back-compat: UserIsBlockedGlobally didn't have $block param first
-			$block = new Block( [
+			$block = new SystemBlock( [
 				'address' => $ip,
 				'systemBlock' => 'global-block'
 			] );
@@ -2334,10 +2213,8 @@ class User implements IDBAccessObject, UserIdentity {
 		if ( $this->mLocked !== null ) {
 			return $this->mLocked;
 		}
-		// Avoid PHP 7.1 warning of passing $this by reference
-		$user = $this;
-		$authUser = AuthManager::callLegacyAuthPlugin( 'getUserInstance', [ &$user ], null );
-		$this->mLocked = $authUser && $authUser->isLocked();
+		// Reset for hook
+		$this->mLocked = false;
 		Hooks::run( 'UserIsLocked', [ $this, &$this->mLocked ] );
 		return $this->mLocked;
 	}
@@ -2349,17 +2226,15 @@ class User implements IDBAccessObject, UserIdentity {
 	 */
 	public function isHidden() {
 		if ( $this->mHideName !== null ) {
-			return $this->mHideName;
+			return (bool)$this->mHideName;
 		}
 		$this->getBlockedStatus();
 		if ( !$this->mHideName ) {
-			// Avoid PHP 7.1 warning of passing $this by reference
-			$user = $this;
-			$authUser = AuthManager::callLegacyAuthPlugin( 'getUserInstance', [ &$user ], null );
-			$this->mHideName = $authUser && $authUser->isHidden();
-			Hooks::run( 'UserIsHidden', [ $this, &$this->mHideName ] );
+			// Reset for hook
+			$this->mHideName = false;
+			Hooks::run( 'UserIsHidden', [ $this, &$this->mHideName ], '1.34' );
 		}
-		return $this->mHideName;
+		return (bool)$this->mHideName;
 	}
 
 	/**
@@ -2367,10 +2242,14 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return int The user's ID; 0 if the user is anonymous or nonexistent
 	 */
 	public function getId() {
-		if ( $this->mId === null && $this->mName !== null && self::isIP( $this->mName ) ) {
+		if ( $this->mId === null && $this->mName !== null &&
+			( self::isIP( $this->mName ) || ExternalUserNames::isExternal( $this->mName ) )
+		) {
 			// Special case, we know the user is anonymous
 			return 0;
-		} elseif ( !$this->isItemLoaded( 'id' ) ) {
+		}
+
+		if ( !$this->isItemLoaded( 'id' ) ) {
 			// Don't load if this was initialized from an ID
 			$this->load();
 		}
@@ -2395,14 +2274,15 @@ class User implements IDBAccessObject, UserIdentity {
 		if ( $this->isItemLoaded( 'name', 'only' ) ) {
 			// Special case optimisation
 			return $this->mName;
-		} else {
-			$this->load();
-			if ( $this->mName === false ) {
-				// Clean up IPs
-				$this->mName = IP::sanitizeIP( $this->getRequest()->getIP() );
-			}
-			return $this->mName;
 		}
+
+		$this->load();
+		if ( $this->mName === false ) {
+			// Clean up IPs
+			$this->mName = IP::sanitizeIP( $this->getRequest()->getIP() );
+		}
+
+		return $this->mName;
 	}
 
 	/**
@@ -2430,60 +2310,48 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return int The actor's ID, or 0 if no actor ID exists and $dbw was null
 	 */
 	public function getActorId( IDatabase $dbw = null ) {
-		global $wgActorTableSchemaMigrationStage;
-
-		if ( $wgActorTableSchemaMigrationStage <= MIGRATION_OLD ) {
-			return 0;
-		}
-
 		if ( !$this->isItemLoaded( 'actor' ) ) {
 			$this->load();
 		}
 
-		// Currently $this->mActorId might be null if $this was loaded from a
-		// cache entry that was written when $wgActorTableSchemaMigrationStage
-		// was MIGRATION_OLD. Once that is no longer a possibility (i.e. when
-		// User::VERSION is incremented after $wgActorTableSchemaMigrationStage
-		// has been removed), that condition may be removed.
-		if ( $this->mActorId === null || !$this->mActorId && $dbw ) {
+		if ( !$this->mActorId && $dbw ) {
 			$q = [
 				'actor_user' => $this->getId() ?: null,
 				'actor_name' => (string)$this->getName(),
 			];
-			if ( $dbw ) {
-				if ( $q['actor_user'] === null && self::isUsableName( $q['actor_name'] ) ) {
-					throw new CannotCreateActorException(
-						'Cannot create an actor for a usable name that is not an existing user'
-					);
-				}
-				if ( $q['actor_name'] === '' ) {
-					throw new CannotCreateActorException( 'Cannot create an actor for a user with no name' );
-				}
-				$dbw->insert( 'actor', $q, __METHOD__, [ 'IGNORE' ] );
-				if ( $dbw->affectedRows() ) {
-					$this->mActorId = (int)$dbw->insertId();
-				} else {
-					// Outdated cache?
-					// Use LOCK IN SHARE MODE to bypass any MySQL REPEATABLE-READ snapshot.
-					$this->mActorId = (int)$dbw->selectField(
-						'actor',
-						'actor_id',
-						$q,
-						__METHOD__,
-						[ 'LOCK IN SHARE MODE' ]
-					);
-					if ( !$this->mActorId ) {
-						throw new CannotCreateActorException(
-							"Cannot create actor ID for user_id={$this->getId()} user_name={$this->getName()}"
-						);
-					}
-				}
-				$this->invalidateCache();
-			} else {
-				list( $index, $options ) = DBAccessObjectUtils::getDBOptions( $this->queryFlagsUsed );
-				$db = wfGetDB( $index );
-				$this->mActorId = (int)$db->selectField( 'actor', 'actor_id', $q, __METHOD__, $options );
+			if ( $q['actor_user'] === null && self::isUsableName( $q['actor_name'] ) ) {
+				throw new CannotCreateActorException(
+					'Cannot create an actor for a usable name that is not an existing user: ' .
+						"user_id={$this->getId()} user_name=\"{$this->getName()}\""
+				);
 			}
+			if ( $q['actor_name'] === '' ) {
+				throw new CannotCreateActorException(
+					'Cannot create an actor for a user with no name: ' .
+						"user_id={$this->getId()} user_name=\"{$this->getName()}\""
+				);
+			}
+			$dbw->insert( 'actor', $q, __METHOD__, [ 'IGNORE' ] );
+			if ( $dbw->affectedRows() ) {
+				$this->mActorId = (int)$dbw->insertId();
+			} else {
+				// Outdated cache?
+				// Use LOCK IN SHARE MODE to bypass any MySQL REPEATABLE-READ snapshot.
+				$this->mActorId = (int)$dbw->selectField(
+					'actor',
+					'actor_id',
+					$q,
+					__METHOD__,
+					[ 'LOCK IN SHARE MODE' ]
+				);
+				if ( !$this->mActorId ) {
+					throw new CannotCreateActorException(
+						"Failed to create actor ID for " .
+							"user_id={$this->getId()} user_name=\"{$this->getName()}\""
+					);
+				}
+			}
+			$this->invalidateCache();
 			$this->setItemLoaded( 'actor' );
 		}
 
@@ -2546,7 +2414,9 @@ class User implements IDBAccessObject, UserIdentity {
 		$talks = [];
 		if ( !Hooks::run( 'UserRetrieveNewTalks', [ &$user, &$talks ] ) ) {
 			return $talks;
-		} elseif ( !$this->getNewtalk() ) {
+		}
+
+		if ( !$this->getNewtalk() ) {
 			return [];
 		}
 		$utp = $this->getTalkPage();
@@ -2557,7 +2427,13 @@ class User implements IDBAccessObject, UserIdentity {
 			$this->isAnon() ? [ 'user_ip' => $this->getName() ] : [ 'user_id' => $this->getId() ],
 			__METHOD__ );
 		$rev = $timestamp ? Revision::loadFromTimestamp( $dbr, $utp, $timestamp ) : null;
-		return [ [ 'wiki' => wfWikiID(), 'link' => $utp->getLocalURL(), 'rev' => $rev ] ];
+		return [
+			[
+				'wiki' => WikiMap::getWikiIdFromDbDomain( WikiMap::getCurrentWikiDbDomain() ),
+				'link' => $utp->getLocalURL(),
+				'rev' => $rev
+			]
+		];
 	}
 
 	/**
@@ -2568,19 +2444,19 @@ class User implements IDBAccessObject, UserIdentity {
 	public function getNewMessageRevisionId() {
 		$newMessageRevisionId = null;
 		$newMessageLinks = $this->getNewMessageLinks();
-		if ( $newMessageLinks ) {
-			// Note: getNewMessageLinks() never returns more than a single link
-			// and it is always for the same wiki, but we double-check here in
-			// case that changes some time in the future.
-			if ( count( $newMessageLinks ) === 1
-				&& $newMessageLinks[0]['wiki'] === wfWikiID()
-				&& $newMessageLinks[0]['rev']
-			) {
-				/** @var Revision $newMessageRevision */
-				$newMessageRevision = $newMessageLinks[0]['rev'];
-				$newMessageRevisionId = $newMessageRevision->getId();
-			}
+
+		// Note: getNewMessageLinks() never returns more than a single link
+		// and it is always for the same wiki, but we double-check here in
+		// case that changes some time in the future.
+		if ( $newMessageLinks && count( $newMessageLinks ) === 1
+			&& WikiMap::isCurrentWikiId( $newMessageLinks[0]['wiki'] )
+			&& $newMessageLinks[0]['rev']
+		) {
+			/** @var Revision $newMessageRevision */
+			$newMessageRevision = $newMessageLinks[0]['rev'];
+			$newMessageRevisionId = $newMessageRevision->getId();
 		}
+
 		return $newMessageRevisionId;
 	}
 
@@ -2616,14 +2492,14 @@ class User implements IDBAccessObject, UserIdentity {
 		$dbw->insert( 'user_newtalk',
 			[ $field => $id, 'user_last_timestamp' => $dbw->timestampOrNull( $ts ) ],
 			__METHOD__,
-			'IGNORE' );
+			[ 'IGNORE' ] );
 		if ( $dbw->affectedRows() ) {
 			wfDebug( __METHOD__ . ": set on ($field, $id)\n" );
 			return true;
-		} else {
-			wfDebug( __METHOD__ . " already set ($field, $id)\n" );
-			return false;
 		}
+
+		wfDebug( __METHOD__ . " already set ($field, $id)\n" );
+		return false;
 	}
 
 	/**
@@ -2640,16 +2516,16 @@ class User implements IDBAccessObject, UserIdentity {
 		if ( $dbw->affectedRows() ) {
 			wfDebug( __METHOD__ . ": killed on ($field, $id)\n" );
 			return true;
-		} else {
-			wfDebug( __METHOD__ . ": already gone ($field, $id)\n" );
-			return false;
 		}
+
+		wfDebug( __METHOD__ . ": already gone ($field, $id)\n" );
+		return false;
 	}
 
 	/**
 	 * Update the 'You have new messages!' status.
 	 * @param bool $val Whether the user has new messages
-	 * @param Revision $curRev New, as yet unseen revision of the user talk
+	 * @param Revision|null $curRev New, as yet unseen revision of the user talk
 	 *   page. Ignored if null or !$val.
 	 */
 	public function setNewtalk( $val, $curRev = null ) {
@@ -2682,17 +2558,16 @@ class User implements IDBAccessObject, UserIdentity {
 	/**
 	 * Generate a current or new-future timestamp to be stored in the
 	 * user_touched field when we update things.
+	 *
 	 * @return string Timestamp in TS_MW format
 	 */
 	private function newTouchedTimestamp() {
-		global $wgClockSkewFudge;
-
-		$time = wfTimestamp( TS_MW, time() + $wgClockSkewFudge );
-		if ( $this->mTouched && $time <= $this->mTouched ) {
-			$time = wfTimestamp( TS_MW, wfTimestamp( TS_UNIX, $this->mTouched ) + 1 );
+		$time = time();
+		if ( $this->mTouched ) {
+			$time = max( $time, wfTimestamp( TS_UNIX, $this->mTouched ) + 1 );
 		}
 
-		return $time;
+		return wfTimestamp( TS_MW, $time );
 	}
 
 	/**
@@ -2703,29 +2578,26 @@ class User implements IDBAccessObject, UserIdentity {
 	 *
 	 * Called implicitly from invalidateCache() and saveSettings().
 	 *
-	 * @param string $mode Use 'refresh' to clear now; otherwise before DB commit
+	 * @param string $mode Use 'refresh' to clear now or 'changed' to clear before DB commit
 	 */
-	public function clearSharedCache( $mode = 'changed' ) {
+	public function clearSharedCache( $mode = 'refresh' ) {
 		if ( !$this->getId() ) {
 			return;
 		}
 
-		$cache = ObjectCache::getMainWANInstance();
+		$lb = MediaWikiServices::getInstance()->getDBLoadBalancer();
+		$cache = MediaWikiServices::getInstance()->getMainWANObjectCache();
 		$key = $this->getCacheKey( $cache );
+
 		if ( $mode === 'refresh' ) {
-			$cache->delete( $key, 1 );
+			$cache->delete( $key, 1 ); // low tombstone/"hold-off" TTL
 		} else {
-			$lb = MediaWikiServices::getInstance()->getDBLoadBalancer();
-			if ( $lb->hasOrMadeRecentMasterChanges() ) {
-				$lb->getConnection( DB_MASTER )->onTransactionPreCommitOrIdle(
-					function () use ( $cache, $key ) {
-						$cache->delete( $key );
-					},
-					__METHOD__
-				);
-			} else {
-				$cache->delete( $key );
-			}
+			$lb->getConnectionRef( DB_MASTER )->onTransactionPreCommitOrIdle(
+				function () use ( $cache, $key ) {
+					$cache->delete( $key );
+				},
+				__METHOD__
+			);
 		}
 	}
 
@@ -2736,7 +2608,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 */
 	public function invalidateCache() {
 		$this->touch();
-		$this->clearSharedCache();
+		$this->clearSharedCache( 'changed' );
 	}
 
 	/**
@@ -2823,6 +2695,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool
 	 */
 	public function setPassword( $str ) {
+		wfDeprecated( __METHOD__, '1.27' );
 		return $this->setPasswordInternal( $str );
 	}
 
@@ -2835,6 +2708,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 *  through the web interface.
 	 */
 	public function setInternalPassword( $str ) {
+		wfDeprecated( __METHOD__, '1.27' );
 		$this->setPasswordInternal( $str );
 	}
 
@@ -2922,25 +2796,30 @@ class User implements IDBAccessObject, UserIdentity {
 		if ( !$this->mToken ) {
 			// The user doesn't have a token, return null to indicate that.
 			return null;
-		} elseif ( $this->mToken === self::INVALID_TOKEN ) {
+		}
+
+		if ( $this->mToken === self::INVALID_TOKEN ) {
 			// We return a random value here so existing token checks are very
 			// likely to fail.
 			return MWCryptRand::generateHex( self::TOKEN_LENGTH );
-		} elseif ( $wgAuthenticationTokenVersion === null ) {
+		}
+
+		if ( $wgAuthenticationTokenVersion === null ) {
 			// $wgAuthenticationTokenVersion not in use, so return the raw secret
 			return $this->mToken;
-		} else {
-			// $wgAuthenticationTokenVersion in use, so hmac it.
-			$ret = MWCryptHash::hmac( $wgAuthenticationTokenVersion, $this->mToken, false );
-
-			// The raw hash can be overly long. Shorten it up.
-			$len = max( 32, self::TOKEN_LENGTH );
-			if ( strlen( $ret ) < $len ) {
-				// Should never happen, even md5 is 128 bits
-				throw new \UnexpectedValueException( 'Hmac returned less than 128 bits' );
-			}
-			return substr( $ret, -$len );
 		}
+
+		// $wgAuthenticationTokenVersion in use, so hmac it.
+		$ret = MWCryptHash::hmac( $wgAuthenticationTokenVersion, $this->mToken, false );
+
+		// The raw hash can be overly long. Shorten it up.
+		$len = max( 32, self::TOKEN_LENGTH );
+		if ( strlen( $ret ) < $len ) {
+			// Should never happen, even md5 is 128 bits
+			throw new \UnexpectedValueException( 'Hmac returned less than 128 bits' );
+		}
+
+		return substr( $ret, -$len );
 	}
 
 	/**
@@ -2959,18 +2838,6 @@ class User implements IDBAccessObject, UserIdentity {
 		} else {
 			$this->mToken = $token;
 		}
-	}
-
-	/**
-	 * Set the password for a password reminder or new account email
-	 *
-	 * @deprecated Removed in 1.27. Use PasswordReset instead.
-	 * @param string $str New password to set or null to set an invalid
-	 *  password hash meaning that the user will not be able to use it
-	 * @param bool $throttle If true, reset the throttle timestamp to the present
-	 */
-	public function setNewpassword( $str, $throttle = true ) {
-		throw new BadMethodCallException( __METHOD__ . ' has been removed in 1.27' );
 	}
 
 	/**
@@ -3029,19 +2896,17 @@ class User implements IDBAccessObject, UserIdentity {
 		$type = $oldaddr != '' ? 'changed' : 'set';
 		$notificationResult = null;
 
-		if ( $wgEmailAuthentication ) {
+		if ( $wgEmailAuthentication && $type === 'changed' ) {
 			// Send the user an email notifying the user of the change in registered
 			// email address on their previous email address
-			if ( $type == 'changed' ) {
-				$change = $str != '' ? 'changed' : 'removed';
-				$notificationResult = $this->sendMail(
-					wfMessage( 'notificationemail_subject_' . $change )->text(),
-					wfMessage( 'notificationemail_body_' . $change,
-						$this->getRequest()->getIP(),
-						$this->getName(),
-						$str )->text()
-				);
-			}
+			$change = $str != '' ? 'changed' : 'removed';
+			$notificationResult = $this->sendMail(
+				wfMessage( 'notificationemail_subject_' . $change )->text(),
+				wfMessage( 'notificationemail_body_' . $change,
+					$this->getRequest()->getIP(),
+					$this->getName(),
+					$str )->text()
+			);
 		}
 
 		$this->setEmail( $str );
@@ -3090,7 +2955,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * Get the user's current setting for a given option.
 	 *
 	 * @param string $oname The option to check
-	 * @param string|array $defaultOverride A default value returned if the option does not exist
+	 * @param string|array|null $defaultOverride A default value returned if the option does not exist
 	 * @param bool $ignoreHidden Whether to ignore the effects of $wgHiddenPrefs
 	 * @return string|array|int|null User's current value for the option
 	 * @see getBoolOption()
@@ -3111,9 +2976,9 @@ class User implements IDBAccessObject, UserIdentity {
 
 		if ( array_key_exists( $oname, $this->mOptions ) ) {
 			return $this->mOptions[$oname];
-		} else {
-			return $defaultOverride;
 		}
+
+		return $defaultOverride;
 	}
 
 	/**
@@ -3285,7 +3150,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 *
 	 * @see User::listOptionKinds
 	 * @param IContextSource $context
-	 * @param array $options Assoc. array with options keys to check as keys.
+	 * @param array|null $options Assoc. array with options keys to check as keys.
 	 *   Defaults to $this->mOptions.
 	 * @return array The key => kind mapping data
 	 */
@@ -3313,7 +3178,7 @@ class User implements IDBAccessObject, UserIdentity {
 			if ( ( isset( $info['type'] ) && $info['type'] == 'multiselect' ) ||
 					( isset( $info['class'] ) && $info['class'] == HTMLMultiSelectField::class ) ) {
 				$opts = HTMLFormField::flattenOptions( $info['options'] );
-				$prefix = isset( $info['prefix'] ) ? $info['prefix'] : $name;
+				$prefix = $info['prefix'] ?? $name;
 
 				foreach ( $opts as $value ) {
 					$multiselectOptions["$prefix$value"] = true;
@@ -3328,7 +3193,7 @@ class User implements IDBAccessObject, UserIdentity {
 					( isset( $info['class'] ) && $info['class'] == HTMLCheckMatrix::class ) ) {
 				$columns = HTMLFormField::flattenOptions( $info['columns'] );
 				$rows = HTMLFormField::flattenOptions( $info['rows'] );
-				$prefix = isset( $info['prefix'] ) ? $info['prefix'] : $name;
+				$prefix = $info['prefix'] ?? $name;
 
 				foreach ( $columns as $column ) {
 					foreach ( $rows as $row ) {
@@ -3368,7 +3233,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * and 'all', which forces a reset of *all* preferences and overrides everything else.
 	 *
 	 * @param array|string $resetKinds Which kinds of preferences to reset. Defaults to
-	 *  array( 'registered', 'registered-multiselect', 'registered-checkmatrix', 'unused' )
+	 *  [ 'registered', 'registered-multiselect', 'registered-checkmatrix', 'unused' ]
 	 *  for backwards-compatibility.
 	 * @param IContextSource|null $context Context source used when $resetKinds
 	 *  does not contain 'all', passed to getOptionKinds().
@@ -3443,14 +3308,15 @@ class User implements IDBAccessObject, UserIdentity {
 		global $wgSecureLogin;
 		if ( !$wgSecureLogin ) {
 			return false;
-		} else {
-			$https = $this->getBoolOption( 'prefershttps' );
-			Hooks::run( 'UserRequiresHTTPS', [ $this, &$https ] );
-			if ( $https ) {
-				$https = wfCanIPUseHTTPS( $this->getRequest()->getIP() );
-			}
-			return $https;
 		}
+
+		$https = $this->getBoolOption( 'prefershttps' );
+		Hooks::run( 'UserRequiresHTTPS', [ $this, &$https ] );
+		if ( $https ) {
+			$https = wfCanIPUseHTTPS( $this->getRequest()->getIP() );
+		}
+
+		return $https;
 	}
 
 	/**
@@ -3472,47 +3338,20 @@ class User implements IDBAccessObject, UserIdentity {
 	/**
 	 * Get the permissions this user has.
 	 * @return string[] permission names
+	 *
+	 * @deprecated since 1.34, use MediaWikiServices::getInstance()->getPermissionManager()
+	 * ->getUserPermissions(..) instead
+	 *
 	 */
 	public function getRights() {
-		if ( is_null( $this->mRights ) ) {
-			$this->mRights = self::getGroupPermissions( $this->getEffectiveGroups() );
-			Hooks::run( 'UserGetRights', [ $this, &$this->mRights ] );
-
-			// Deny any rights denied by the user's session, unless this
-			// endpoint has no sessions.
-			if ( !defined( 'MW_NO_SESSION' ) ) {
-				$allowedRights = $this->getRequest()->getSession()->getAllowedUserRights();
-				if ( $allowedRights !== null ) {
-					$this->mRights = array_intersect( $this->mRights, $allowedRights );
-				}
-			}
-
-			// Force reindexation of rights when a hook has unset one of them
-			$this->mRights = array_values( array_unique( $this->mRights ) );
-
-			// If block disables login, we should also remove any
-			// extra rights blocked users might have, in case the
-			// blocked user has a pre-existing session (T129738).
-			// This is checked here for cases where people only call
-			// $user->isAllowed(). It is also checked in Title::checkUserBlock()
-			// to give a better error message in the common case.
-			$config = RequestContext::getMain()->getConfig();
-			if (
-				$this->isLoggedIn() &&
-				$config->get( 'BlockDisablesLogin' ) &&
-				$this->isBlocked()
-			) {
-				$anon = new User;
-				$this->mRights = array_intersect( $this->mRights, $anon->getRights() );
-			}
-		}
-		return $this->mRights;
+		return MediaWikiServices::getInstance()->getPermissionManager()->getUserPermissions( $this );
 	}
 
 	/**
 	 * Get the list of explicit group memberships this user has.
 	 * The implicit * and user groups are not included.
-	 * @return array Array of String internal group names
+	 *
+	 * @return string[] Array of internal group names (sorted since 1.33)
 	 */
 	public function getGroups() {
 		$this->load();
@@ -3633,7 +3472,7 @@ class User implements IDBAccessObject, UserIdentity {
 
 			if ( $count === null ) {
 				// it has not been initialized. do so.
-				$count = $this->initEditCount();
+				$count = $this->initEditCountInternal( $dbr );
 			}
 			$this->mEditCount = $count;
 		}
@@ -3647,7 +3486,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * never expire.)
 	 *
 	 * @param string $group Name of the group to add
-	 * @param string $expiry Optional expiry timestamp in any format acceptable to
+	 * @param string|null $expiry Optional expiry timestamp in any format acceptable to
 	 *   wfTimestamp(), or null if the group assignment should not expire
 	 * @return bool
 	 */
@@ -3674,8 +3513,7 @@ class User implements IDBAccessObject, UserIdentity {
 		// Refresh the groups caches, and clear the rights cache so it will be
 		// refreshed on the next call to $this->getRights().
 		$this->getEffectiveGroups( true );
-		$this->mRights = null;
-
+		MediaWikiServices::getInstance()->getPermissionManager()->invalidateUsersRightsCache( $this );
 		$this->invalidateCache();
 
 		return true;
@@ -3706,11 +3544,23 @@ class User implements IDBAccessObject, UserIdentity {
 		// Refresh the groups caches, and clear the rights cache so it will be
 		// refreshed on the next call to $this->getRights().
 		$this->getEffectiveGroups( true );
-		$this->mRights = null;
-
+		MediaWikiServices::getInstance()->getPermissionManager()->invalidateUsersRightsCache( $this );
 		$this->invalidateCache();
 
 		return true;
+	}
+
+	/**
+	 * Alias of isLoggedIn() with a name that describes its actual functionality. UserIdentity has
+	 * only this new name and not the old isLoggedIn() variant.
+	 *
+	 * @return bool True if user is registered on this wiki, i.e., has a user ID. False if user is
+	 *   anonymous or has no local account (which can happen when importing). This is equivalent to
+	 *   getId() != 0 and is provided for code readability.
+	 * @since 1.34
+	 */
+	public function isRegistered() {
+		return $this->getId() != 0;
 	}
 
 	/**
@@ -3718,7 +3568,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool
 	 */
 	public function isLoggedIn() {
-		return $this->getId() != 0;
+		return $this->isRegistered();
 	}
 
 	/**
@@ -3726,7 +3576,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool
 	 */
 	public function isAnon() {
-		return !$this->isLoggedIn();
+		return !$this->isRegistered();
 	}
 
 	/**
@@ -3747,46 +3597,43 @@ class User implements IDBAccessObject, UserIdentity {
 	/**
 	 * Check if user is allowed to access a feature / make an action
 	 *
-	 * @param string $permissions,... Permissions to test
+	 * @deprecated since 1.34, use MediaWikiServices::getInstance()
+	 * ->getPermissionManager()->userHasAnyRights(...) instead
+	 *
+	 * @param string ...$permissions Permissions to test
 	 * @return bool True if user is allowed to perform *any* of the given actions
 	 */
-	public function isAllowedAny() {
-		$permissions = func_get_args();
-		foreach ( $permissions as $permission ) {
-			if ( $this->isAllowed( $permission ) ) {
-				return true;
-			}
-		}
-		return false;
+	public function isAllowedAny( ...$permissions ) {
+		return MediaWikiServices::getInstance()
+			->getPermissionManager()
+			->userHasAnyRight( $this, ...$permissions );
 	}
 
 	/**
-	 *
-	 * @param string $permissions,... Permissions to test
+	 * @deprecated since 1.34, use MediaWikiServices::getInstance()
+	 * ->getPermissionManager()->userHasAllRights(...) instead
+	 * @param string ...$permissions Permissions to test
 	 * @return bool True if the user is allowed to perform *all* of the given actions
 	 */
-	public function isAllowedAll() {
-		$permissions = func_get_args();
-		foreach ( $permissions as $permission ) {
-			if ( !$this->isAllowed( $permission ) ) {
-				return false;
-			}
-		}
-		return true;
+	public function isAllowedAll( ...$permissions ) {
+		return MediaWikiServices::getInstance()
+			->getPermissionManager()
+			->userHasAllRights( $this, ...$permissions );
 	}
 
 	/**
 	 * Internal mechanics of testing a permission
+	 *
+	 * @deprecated since 1.34, use MediaWikiServices::getInstance()
+	 * ->getPermissionManager()->userHasRight(...) instead
+	 *
 	 * @param string $action
+	 *
 	 * @return bool
 	 */
 	public function isAllowed( $action = '' ) {
-		if ( $action === '' ) {
-			return true; // In the spirit of DWIM
-		}
-		// Use strict parameter to avoid matching numeric 0 accidentally inserted
-		// by misconfiguration: 0 == 'foo'
-		return in_array( $action, $this->getRights(), true );
+		return MediaWikiServices::getInstance()->getPermissionManager()
+			->userHasRight( $this, $action );
 	}
 
 	/**
@@ -3830,10 +3677,10 @@ class User implements IDBAccessObject, UserIdentity {
 	public function getRequest() {
 		if ( $this->mRequest ) {
 			return $this->mRequest;
-		} else {
-			global $wgRequest;
-			return $wgRequest;
 		}
+
+		global $wgRequest;
+		return $wgRequest;
 	}
 
 	/**
@@ -3923,11 +3770,17 @@ class User implements IDBAccessObject, UserIdentity {
 				$this->setNewtalk( false );
 
 				// If there is a new, unseen, revision, use its timestamp
-				$nextid = $oldid
-					? $title->getNextRevisionID( $oldid, Title::GAID_FOR_UPDATE )
-					: null;
-				if ( $nextid ) {
-					$this->setNewtalk( true, Revision::newFromId( $nextid ) );
+				if ( $oldid ) {
+					$rl = MediaWikiServices::getInstance()->getRevisionLookup();
+					$oldRev = $rl->getRevisionById( $oldid, Title::READ_LATEST );
+					if ( $oldRev ) {
+						$newRev = $rl->getNextRevision( $oldRev );
+						if ( $newRev ) {
+							// TODO: actually no need to wrap in a revision,
+							// setNewtalk really only needs a RevRecord
+							$this->setNewtalk( true, new Revision( $newRev ) );
+						}
+					}
 				}
 			} );
 		}
@@ -4005,19 +3858,18 @@ class User implements IDBAccessObject, UserIdentity {
 		$learnerRegistration = wfTimestamp( TS_MW, $now - $wgLearnerMemberSince * 86400 );
 		$experiencedRegistration = wfTimestamp( TS_MW, $now - $wgExperiencedUserMemberSince * 86400 );
 
-		if (
-			$editCount < $wgLearnerEdits ||
-			$registration > $learnerRegistration
-		) {
+		if ( $editCount < $wgLearnerEdits ||
+		$registration > $learnerRegistration ) {
 			return 'newcomer';
-		} elseif (
-			$editCount > $wgExperiencedUserEdits &&
+		}
+
+		if ( $editCount > $wgExperiencedUserEdits &&
 			$registration <= $experiencedRegistration
 		) {
 			return 'experienced';
-		} else {
-			return 'learner';
 		}
+
+		return 'learner';
 	}
 
 	/**
@@ -4025,12 +3877,12 @@ class User implements IDBAccessObject, UserIdentity {
 	 *
 	 * @param WebRequest|null $request WebRequest object to use; $wgRequest will be used if null
 	 *        is passed.
-	 * @param bool $secure Whether to force secure/insecure cookies or use default
+	 * @param bool|null $secure Whether to force secure/insecure cookies or use default
 	 * @param bool $rememberMe Whether to add a Token cookie for elongated sessions
 	 */
 	public function setCookies( $request = null, $secure = null, $rememberMe = false ) {
 		$this->load();
-		if ( 0 == $this->mId ) {
+		if ( $this->mId == 0 ) {
 			return;
 		}
 
@@ -4124,7 +3976,7 @@ class User implements IDBAccessObject, UserIdentity {
 		}
 
 		$this->load();
-		if ( 0 == $this->mId ) {
+		if ( $this->mId == 0 ) {
 			return; // anon
 		}
 
@@ -4134,9 +3986,7 @@ class User implements IDBAccessObject, UserIdentity {
 		$newTouched = $this->newTouchedTimestamp();
 
 		$dbw = wfGetDB( DB_MASTER );
-		$dbw->doAtomicSection( __METHOD__, function ( $dbw, $fname ) use ( $newTouched ) {
-			global $wgActorTableSchemaMigrationStage;
-
+		$dbw->doAtomicSection( __METHOD__, function ( IDatabase $dbw, $fname ) use ( $newTouched ) {
 			$dbw->update( 'user',
 				[ /* SET */
 					'user_name' => $this->mName,
@@ -4157,28 +4007,29 @@ class User implements IDBAccessObject, UserIdentity {
 				$this->clearSharedCache( 'refresh' );
 				// User was changed in the meantime or loaded with stale data
 				$from = ( $this->queryFlagsUsed & self::READ_LATEST ) ? 'master' : 'replica';
-				throw new MWException(
-					"CAS update failed on user_touched for user ID '{$this->mId}' (read from $from);" .
-					" the version of the user to be saved is older than the current version."
+				LoggerFactory::getInstance( 'preferences' )->warning(
+					"CAS update failed on user_touched for user ID '{user_id}' ({db_flag} read)",
+					[ 'user_id' => $this->mId, 'db_flag' => $from ]
+				);
+				throw new MWException( "CAS update failed on user_touched. " .
+					"The version of the user to be saved is older than the current version."
 				);
 			}
 
-			if ( $wgActorTableSchemaMigrationStage > MIGRATION_OLD ) {
-				$dbw->update(
-					'actor',
-					[ 'actor_name' => $this->mName ],
-					[ 'actor_user' => $this->mId ],
-					$fname
-				);
-			}
+			$dbw->update(
+				'actor',
+				[ 'actor_name' => $this->mName ],
+				[ 'actor_user' => $this->mId ],
+				$fname
+			);
 		} );
 
 		$this->mTouched = $newTouched;
 		$this->saveOptions();
 
 		Hooks::run( 'UserSaveSettings', [ $this ] );
-		$this->clearSharedCache();
-		$this->getUserPage()->invalidateCache();
+		$this->clearSharedCache( 'changed' );
+		$this->getUserPage()->purgeSquid();
 	}
 
 	/**
@@ -4257,13 +4108,14 @@ class User implements IDBAccessObject, UserIdentity {
 			$fields["user_$name"] = $value;
 		}
 
-		return $dbw->doAtomicSection( __METHOD__, function ( $dbw, $fname ) use ( $fields ) {
+		return $dbw->doAtomicSection( __METHOD__, function ( IDatabase $dbw, $fname ) use ( $fields ) {
 			$dbw->insert( 'user', $fields, $fname, [ 'IGNORE' ] );
 			if ( $dbw->affectedRows() ) {
 				$newUser = self::newFromId( $dbw->insertId() );
+				$newUser->mName = $fields['user_name'];
+				$newUser->updateActorId( $dbw );
 				// Load the user from master to avoid replica lag
 				$newUser->load( self::READ_LATEST );
-				$newUser->updateActorId( $dbw );
 			} else {
 				$newUser = null;
 			}
@@ -4310,7 +4162,7 @@ class User implements IDBAccessObject, UserIdentity {
 		$this->mTouched = $this->newTouchedTimestamp();
 
 		$dbw = wfGetDB( DB_MASTER );
-		$status = $dbw->doAtomicSection( __METHOD__, function ( $dbw, $fname ) {
+		$status = $dbw->doAtomicSection( __METHOD__, function ( IDatabase $dbw, $fname ) {
 			$noPass = PasswordFactory::newInvalidPassword()->toString();
 			$dbw->insert( 'user',
 				[
@@ -4333,17 +4185,15 @@ class User implements IDBAccessObject, UserIdentity {
 					'user',
 					'user_id',
 					[ 'user_name' => $this->mName ],
-					__METHOD__,
+					$fname,
 					[ 'LOCK IN SHARE MODE' ]
 				);
 				$loaded = false;
-				if ( $this->mId ) {
-					if ( $this->loadFromDatabase( self::READ_LOCKING ) ) {
-						$loaded = true;
-					}
+				if ( $this->mId && $this->loadFromDatabase( self::READ_LOCKING ) ) {
+					$loaded = true;
 				}
 				if ( !$loaded ) {
-					throw new MWException( __METHOD__ . ": hit a key conflict attempting " .
+					throw new MWException( $fname . ": hit a key conflict attempting " .
 						"to insert user '{$this->mName}' row, but it was not present in select!" );
 				}
 				return Status::newFatal( 'userexists' );
@@ -4370,16 +4220,12 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @param IDatabase $dbw Writable database handle
 	 */
 	private function updateActorId( IDatabase $dbw ) {
-		global $wgActorTableSchemaMigrationStage;
-
-		if ( $wgActorTableSchemaMigrationStage > MIGRATION_OLD ) {
-			$dbw->insert(
-				'actor',
-				[ 'actor_user' => $this->mId, 'actor_name' => $this->mName ],
-				__METHOD__
-			);
-			$this->mActorId = (int)$dbw->insertId();
-		}
+		$dbw->insert(
+			'actor',
+			[ 'actor_user' => $this->mId, 'actor_name' => $this->mName ],
+			__METHOD__
+		);
+		$this->mActorId = (int)$dbw->insertId();
 	}
 
 	/**
@@ -4388,7 +4234,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool A block was spread
 	 */
 	public function spreadAnyEditBlock() {
-		if ( $this->isLoggedIn() && $this->isBlocked() ) {
+		if ( $this->isLoggedIn() && $this->getBlock() ) {
 			return $this->spreadBlock();
 		}
 
@@ -4407,7 +4253,7 @@ class User implements IDBAccessObject, UserIdentity {
 			return false;
 		}
 
-		$userblock = Block::newFromTarget( $this->getName() );
+		$userblock = DatabaseBlock::newFromTarget( $this->getName() );
 		if ( !$userblock ) {
 			return false;
 		}
@@ -4417,11 +4263,11 @@ class User implements IDBAccessObject, UserIdentity {
 
 	/**
 	 * Get whether the user is explicitly blocked from account creation.
-	 * @return bool|Block
+	 * @return bool|AbstractBlock
 	 */
 	public function isBlockedFromCreateAccount() {
 		$this->getBlockedStatus();
-		if ( $this->mBlock && $this->mBlock->prevents( 'createaccount' ) ) {
+		if ( $this->mBlock && $this->mBlock->appliesToRight( 'createaccount' ) ) {
 			return $this->mBlock;
 		}
 
@@ -4429,10 +4275,12 @@ class User implements IDBAccessObject, UserIdentity {
 		# blocked with createaccount disabled, prevent new account creation there even
 		# when the user is logged in
 		if ( $this->mBlockedFromCreateAccount === false && !$this->isAllowed( 'ipblock-exempt' ) ) {
-			$this->mBlockedFromCreateAccount = Block::newFromTarget( null, $this->getRequest()->getIP() );
+			$this->mBlockedFromCreateAccount = DatabaseBlock::newFromTarget(
+				null, $this->getRequest()->getIP()
+			);
 		}
-		return $this->mBlockedFromCreateAccount instanceof Block
-			&& $this->mBlockedFromCreateAccount->prevents( 'createaccount' )
+		return $this->mBlockedFromCreateAccount instanceof AbstractBlock
+			&& $this->mBlockedFromCreateAccount->appliesToRight( 'createaccount' )
 			? $this->mBlockedFromCreateAccount
 			: false;
 	}
@@ -4443,7 +4291,18 @@ class User implements IDBAccessObject, UserIdentity {
 	 */
 	public function isBlockedFromEmailuser() {
 		$this->getBlockedStatus();
-		return $this->mBlock && $this->mBlock->prevents( 'sendemail' );
+		return $this->mBlock && $this->mBlock->appliesToRight( 'sendemail' );
+	}
+
+	/**
+	 * Get whether the user is blocked from using Special:Upload
+	 *
+	 * @since 1.33
+	 * @return bool
+	 */
+	public function isBlockedFromUpload() {
+		$this->getBlockedStatus();
+		return $this->mBlock && $this->mBlock->appliesToRight( 'upload' );
 	}
 
 	/**
@@ -4489,6 +4348,8 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool True if the given password is correct, otherwise False
 	 */
 	public function checkPassword( $password ) {
+		wfDeprecated( __METHOD__, '1.27' );
+
 		$manager = AuthManager::singleton();
 		$reqs = AuthenticationRequest::loadRequestsFromSubmission(
 			$manager->getAuthenticationRequests( AuthManager::ACTION_LOGIN ),
@@ -4497,13 +4358,13 @@ class User implements IDBAccessObject, UserIdentity {
 				'password' => $password,
 			]
 		);
-		$res = AuthManager::singleton()->beginAuthentication( $reqs, 'null:' );
+		$res = $manager->beginAuthentication( $reqs, 'null:' );
 		switch ( $res->status ) {
 			case AuthenticationResponse::PASS:
 				return true;
 			case AuthenticationResponse::FAIL:
 				// Hope it's not a PreAuthenticationProvider that failed...
-				\MediaWiki\Logger\LoggerFactory::getInstance( 'authentication' )
+				LoggerFactory::getInstance( 'authentication' )
 					->info( __METHOD__ . ': Authentication failed: ' . $res->message->plain() );
 				return false;
 			default:
@@ -4522,6 +4383,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool True if matches, false otherwise
 	 */
 	public function checkTemporaryPassword( $plaintext ) {
+		wfDeprecated( __METHOD__, '1.27' );
 		// Can't check the temporary password individually.
 		return $this->checkPassword( $plaintext );
 	}
@@ -4572,9 +4434,9 @@ class User implements IDBAccessObject, UserIdentity {
 	 * site.
 	 *
 	 * @param string $val Input value to compare
-	 * @param string $salt Optional function-specific data for hashing
+	 * @param string|array $salt Optional function-specific data for hashing
 	 * @param WebRequest|null $request Object to use or null to use $wgRequest
-	 * @param int $maxage Fail tokens older than this, in seconds
+	 * @param int|null $maxage Fail tokens older than this, in seconds
 	 * @return bool Whether the token matches
 	 */
 	public function matchEditToken( $val, $salt = '', $request = null, $maxage = null ) {
@@ -4586,9 +4448,9 @@ class User implements IDBAccessObject, UserIdentity {
 	 * ignoring the suffix.
 	 *
 	 * @param string $val Input value to compare
-	 * @param string $salt Optional function-specific data for hashing
+	 * @param string|array $salt Optional function-specific data for hashing
 	 * @param WebRequest|null $request Object to use or null to use $wgRequest
-	 * @param int $maxage Fail tokens older than this, in seconds
+	 * @param int|null $maxage Fail tokens older than this, in seconds
 	 * @return bool Whether the token matches
 	 */
 	public function matchEditTokenNoSuffix( $val, $salt = '', $request = null, $maxage = null ) {
@@ -4613,22 +4475,38 @@ class User implements IDBAccessObject, UserIdentity {
 
 		if ( $type == 'created' || $type === false ) {
 			$message = 'confirmemail_body';
+			$type = 'created';
 		} elseif ( $type === true ) {
 			$message = 'confirmemail_body_changed';
+			$type = 'changed';
 		} else {
 			// Messages: confirmemail_body_changed, confirmemail_body_set
 			$message = 'confirmemail_body_' . $type;
 		}
 
-		return $this->sendMail( wfMessage( 'confirmemail_subject' )->text(),
-			wfMessage( $message,
+		$mail = [
+			'subject' => wfMessage( 'confirmemail_subject' )->text(),
+			'body' => wfMessage( $message,
 				$this->getRequest()->getIP(),
 				$this->getName(),
 				$url,
 				$wgLang->userTimeAndDate( $expiration, $this ),
 				$invalidateURL,
 				$wgLang->userDate( $expiration, $this ),
-				$wgLang->userTime( $expiration, $this ) )->text() );
+				$wgLang->userTime( $expiration, $this ) )->text(),
+			'from' => null,
+			'replyTo' => null,
+		];
+		$info = [
+			'type' => $type,
+			'ip' => $this->getRequest()->getIP(),
+			'confirmURL' => $url,
+			'invalidateURL' => $invalidateURL,
+			'expiration' => $expiration
+		];
+
+		Hooks::run( 'UserSendConfirmationMail', [ $this, &$mail, $info ] );
+		return $this->sendMail( $mail['subject'], $mail['body'], $mail['from'], $mail['replyTo'] );
 	}
 
 	/**
@@ -4639,7 +4517,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @param string $body Message body
 	 * @param User|null $from Optional sending user; if unspecified, default
 	 *   $wgPasswordSender will be used.
-	 * @param string $replyto Reply-To address
+	 * @param MailAddress|null $replyto Reply-To address
 	 * @return Status
 	 */
 	public function sendMail( $subject, $body, $from = null, $replyto = null ) {
@@ -4816,9 +4694,9 @@ class User implements IDBAccessObject, UserIdentity {
 				return false;
 			}
 			return true;
-		} else {
-			return $confirmed;
 		}
+
+		return $confirmed;
 	}
 
 	/**
@@ -4855,17 +4733,42 @@ class User implements IDBAccessObject, UserIdentity {
 	 *  non-existent/anonymous user accounts.
 	 */
 	public function getFirstEditTimestamp() {
+		return $this->getEditTimestamp( true );
+	}
+
+	/**
+	 * Get the timestamp of the latest edit
+	 *
+	 * @since 1.33
+	 * @return string|bool Timestamp of first edit, or false for
+	 *  non-existent/anonymous user accounts.
+	 */
+	public function getLatestEditTimestamp() {
+		return $this->getEditTimestamp( false );
+	}
+
+	/**
+	 * Get the timestamp of the first or latest edit
+	 *
+	 * @param bool $first True for the first edit, false for the latest one
+	 * @return string|bool Timestamp of first or latest edit, or false for
+	 *  non-existent/anonymous user accounts.
+	 */
+	private function getEditTimestamp( $first ) {
 		if ( $this->getId() == 0 ) {
 			return false; // anons
 		}
 		$dbr = wfGetDB( DB_REPLICA );
 		$actorWhere = ActorMigration::newMigration()->getWhere( $dbr, 'rev_user', $this );
+		$tsField = isset( $actorWhere['tables']['temp_rev_user'] )
+			? 'revactor_timestamp' : 'rev_timestamp';
+		$sortOrder = $first ? 'ASC' : 'DESC';
 		$time = $dbr->selectField(
 			[ 'revision' ] + $actorWhere['tables'],
-			'rev_timestamp',
+			$tsField,
 			[ $actorWhere['conds'] ],
 			__METHOD__,
-			[ 'ORDER BY' => 'rev_timestamp ASC' ],
+			[ 'ORDER BY' => "$tsField $sortOrder" ],
 			$actorWhere['joins']
 		);
 		if ( !$time ) {
@@ -4877,45 +4780,27 @@ class User implements IDBAccessObject, UserIdentity {
 	/**
 	 * Get the permissions associated with a given list of groups
 	 *
+	 * @deprecated since 1.34, use MediaWikiServices::getInstance()->getPermissionManager()
+	 *             ->getGroupPermissions() instead
+	 *
 	 * @param array $groups Array of Strings List of internal group names
 	 * @return array Array of Strings List of permission key names for given groups combined
 	 */
 	public static function getGroupPermissions( $groups ) {
-		global $wgGroupPermissions, $wgRevokePermissions;
-		$rights = [];
-		// grant every granted permission first
-		foreach ( $groups as $group ) {
-			if ( isset( $wgGroupPermissions[$group] ) ) {
-				$rights = array_merge( $rights,
-					// array_filter removes empty items
-					array_keys( array_filter( $wgGroupPermissions[$group] ) ) );
-			}
-		}
-		// now revoke the revoked permissions
-		foreach ( $groups as $group ) {
-			if ( isset( $wgRevokePermissions[$group] ) ) {
-				$rights = array_diff( $rights,
-					array_keys( array_filter( $wgRevokePermissions[$group] ) ) );
-			}
-		}
-		return array_unique( $rights );
+		return MediaWikiServices::getInstance()->getPermissionManager()->getGroupPermissions( $groups );
 	}
 
 	/**
 	 * Get all the groups who have a given permission
 	 *
+	 * @deprecated since 1.34, use MediaWikiServices::getInstance()->getPermissionManager()
+	 *             ->getGroupsWithPermission() instead
+	 *
 	 * @param string $role Role to check
 	 * @return array Array of Strings List of internal group names with the given permission
 	 */
 	public static function getGroupsWithPermission( $role ) {
-		global $wgGroupPermissions;
-		$allowedGroups = [];
-		foreach ( array_keys( $wgGroupPermissions ) as $group ) {
-			if ( self::groupHasPermission( $group, $role ) ) {
-				$allowedGroups[] = $group;
-			}
-		}
-		return $allowedGroups;
+		return MediaWikiServices::getInstance()->getPermissionManager()->getGroupsWithPermission( $role );
 	}
 
 	/**
@@ -4925,15 +4810,17 @@ class User implements IDBAccessObject, UserIdentity {
 	 * User::isEveryoneAllowed() instead. That properly checks if it's revoked
 	 * from anyone.
 	 *
+	 * @deprecated since 1.34, use MediaWikiServices::getInstance()->getPermissionManager()
+	 * ->groupHasPermission(..) instead
+	 *
 	 * @since 1.21
 	 * @param string $group Group to check
 	 * @param string $role Role to check
 	 * @return bool
 	 */
 	public static function groupHasPermission( $group, $role ) {
-		global $wgGroupPermissions, $wgRevokePermissions;
-		return isset( $wgGroupPermissions[$group][$role] ) && $wgGroupPermissions[$group][$role]
-			&& !( isset( $wgRevokePermissions[$group][$role] ) && $wgRevokePermissions[$group][$role] );
+		return MediaWikiServices::getInstance()->getPermissionManager()
+			->groupHasPermission( $group, $role );
 	}
 
 	/**
@@ -4946,76 +4833,16 @@ class User implements IDBAccessObject, UserIdentity {
 	 * Specifically, session-based rights restrictions (such as OAuth or bot
 	 * passwords) are applied based on the current session.
 	 *
-	 * @since 1.22
+	 * @deprecated since 1.34, use MediaWikiServices::getInstance()->getPermissionManager()
+	 *             ->isEveryoneAllowed() instead
+	 *
 	 * @param string $right Right to check
+	 *
 	 * @return bool
+	 * @since 1.22
 	 */
 	public static function isEveryoneAllowed( $right ) {
-		global $wgGroupPermissions, $wgRevokePermissions;
-		static $cache = [];
-
-		// Use the cached results, except in unit tests which rely on
-		// being able change the permission mid-request
-		if ( isset( $cache[$right] ) && !defined( 'MW_PHPUNIT_TEST' ) ) {
-			return $cache[$right];
-		}
-
-		if ( !isset( $wgGroupPermissions['*'][$right] ) || !$wgGroupPermissions['*'][$right] ) {
-			$cache[$right] = false;
-			return false;
-		}
-
-		// If it's revoked anywhere, then everyone doesn't have it
-		foreach ( $wgRevokePermissions as $rights ) {
-			if ( isset( $rights[$right] ) && $rights[$right] ) {
-				$cache[$right] = false;
-				return false;
-			}
-		}
-
-		// Remove any rights that aren't allowed to the global-session user,
-		// unless there are no sessions for this endpoint.
-		if ( !defined( 'MW_NO_SESSION' ) ) {
-			$allowedRights = SessionManager::getGlobalSession()->getAllowedUserRights();
-			if ( $allowedRights !== null && !in_array( $right, $allowedRights, true ) ) {
-				$cache[$right] = false;
-				return false;
-			}
-		}
-
-		// Allow extensions to say false
-		if ( !Hooks::run( 'UserIsEveryoneAllowed', [ $right ] ) ) {
-			$cache[$right] = false;
-			return false;
-		}
-
-		$cache[$right] = true;
-		return true;
-	}
-
-	/**
-	 * Get the localized descriptive name for a group, if it exists
-	 * @deprecated since 1.29 Use UserGroupMembership::getGroupName instead
-	 *
-	 * @param string $group Internal group name
-	 * @return string Localized descriptive group name
-	 */
-	public static function getGroupName( $group ) {
-		wfDeprecated( __METHOD__, '1.29' );
-		return UserGroupMembership::getGroupName( $group );
-	}
-
-	/**
-	 * Get the localized descriptive name for a member of a group, if it exists
-	 * @deprecated since 1.29 Use UserGroupMembership::getGroupMemberName instead
-	 *
-	 * @param string $group Internal group name
-	 * @param string $username Username for gender (since 1.19)
-	 * @return string Localized name for group member
-	 */
-	public static function getGroupMember( $group, $username = '#' ) {
-		wfDeprecated( __METHOD__, '1.29' );
-		return UserGroupMembership::getGroupMemberName( $group, $username );
+		return MediaWikiServices::getInstance()->getPermissionManager()->isEveryoneAllowed( $right );
 	}
 
 	/**
@@ -5026,113 +4853,42 @@ class User implements IDBAccessObject, UserIdentity {
 	 */
 	public static function getAllGroups() {
 		global $wgGroupPermissions, $wgRevokePermissions;
-		return array_diff(
+		return array_values( array_diff(
 			array_merge( array_keys( $wgGroupPermissions ), array_keys( $wgRevokePermissions ) ),
 			self::getImplicitGroups()
-		);
+		) );
 	}
 
 	/**
 	 * Get a list of all available permissions.
+	 *
+	 * @deprecated since 1.34, use PermissionManager::getAllPermissions() instead
+	 *
 	 * @return string[] Array of permission names
 	 */
 	public static function getAllRights() {
-		if ( self::$mAllRights === false ) {
-			global $wgAvailableRights;
-			if ( count( $wgAvailableRights ) ) {
-				self::$mAllRights = array_unique( array_merge( self::$mCoreRights, $wgAvailableRights ) );
-			} else {
-				self::$mAllRights = self::$mCoreRights;
-			}
-			Hooks::run( 'UserGetAllRights', [ &self::$mAllRights ] );
-		}
-		return self::$mAllRights;
+		return MediaWikiServices::getInstance()->getPermissionManager()->getAllPermissions();
 	}
 
 	/**
 	 * Get a list of implicit groups
+	 * TODO: Should we deprecate this? It's trivial, but we don't want to encourage use of globals.
+	 *
 	 * @return array Array of Strings Array of internal group names
 	 */
 	public static function getImplicitGroups() {
 		global $wgImplicitGroups;
-
-		$groups = $wgImplicitGroups;
-		# Deprecated, use $wgImplicitGroups instead
-		Hooks::run( 'UserGetImplicitGroups', [ &$groups ], '1.25' );
-
-		return $groups;
-	}
-
-	/**
-	 * Get the title of a page describing a particular group
-	 * @deprecated since 1.29 Use UserGroupMembership::getGroupPage instead
-	 *
-	 * @param string $group Internal group name
-	 * @return Title|bool Title of the page if it exists, false otherwise
-	 */
-	public static function getGroupPage( $group ) {
-		wfDeprecated( __METHOD__, '1.29' );
-		return UserGroupMembership::getGroupPage( $group );
-	}
-
-	/**
-	 * Create a link to the group in HTML, if available;
-	 * else return the group name.
-	 * @deprecated since 1.29 Use UserGroupMembership::getLink instead, or
-	 * make the link yourself if you need custom text
-	 *
-	 * @param string $group Internal name of the group
-	 * @param string $text The text of the link
-	 * @return string HTML link to the group
-	 */
-	public static function makeGroupLinkHTML( $group, $text = '' ) {
-		wfDeprecated( __METHOD__, '1.29' );
-
-		if ( $text == '' ) {
-			$text = UserGroupMembership::getGroupName( $group );
-		}
-		$title = UserGroupMembership::getGroupPage( $group );
-		if ( $title ) {
-			return MediaWikiServices::getInstance()
-				->getLinkRenderer()->makeLink( $title, $text );
-		} else {
-			return htmlspecialchars( $text );
-		}
-	}
-
-	/**
-	 * Create a link to the group in Wikitext, if available;
-	 * else return the group name.
-	 * @deprecated since 1.29 Use UserGroupMembership::getLink instead, or
-	 * make the link yourself if you need custom text
-	 *
-	 * @param string $group Internal name of the group
-	 * @param string $text The text of the link
-	 * @return string Wikilink to the group
-	 */
-	public static function makeGroupLinkWiki( $group, $text = '' ) {
-		wfDeprecated( __METHOD__, '1.29' );
-
-		if ( $text == '' ) {
-			$text = UserGroupMembership::getGroupName( $group );
-		}
-		$title = UserGroupMembership::getGroupPage( $group );
-		if ( $title ) {
-			$page = $title->getFullText();
-			return "[[$page|$text]]";
-		} else {
-			return $text;
-		}
+		return $wgImplicitGroups;
 	}
 
 	/**
 	 * Returns an array of the groups that a particular group can add/remove.
 	 *
 	 * @param string $group The group to check for whether it can add/remove
-	 * @return array Array( 'add' => array( addablegroups ),
-	 *     'remove' => array( removablegroups ),
-	 *     'add-self' => array( addablegroups to self),
-	 *     'remove-self' => array( removable groups from self) )
+	 * @return array [ 'add' => [ addablegroups ],
+	 *     'remove' => [ removablegroups ],
+	 *     'add-self' => [ addablegroups to self ],
+	 *     'remove-self' => [ removable groups from self ] ]
 	 */
 	public static function changeableByGroup( $group ) {
 		global $wgAddGroups, $wgRemoveGroups, $wgGroupsAddToSelf, $wgGroupsRemoveFromSelf;
@@ -5202,10 +4958,10 @@ class User implements IDBAccessObject, UserIdentity {
 
 	/**
 	 * Returns an array of groups that this user can add and remove
-	 * @return array Array( 'add' => array( addablegroups ),
-	 *  'remove' => array( removablegroups ),
-	 *  'add-self' => array( addablegroups to self),
-	 *  'remove-self' => array( removable groups from self) )
+	 * @return array [ 'add' => [ addablegroups ],
+	 *  'remove' => [ removablegroups ],
+	 *  'add-self' => [ addablegroups to self ],
+	 *  'remove-self' => [ removable groups from self ] ]
 	 */
 	public function changeableGroups() {
 		if ( $this->isAllowed( 'userrights' ) ) {
@@ -5244,76 +5000,38 @@ class User implements IDBAccessObject, UserIdentity {
 	}
 
 	/**
-	 * Deferred version of incEditCountImmediate()
-	 *
-	 * This function, rather than incEditCountImmediate(), should be used for
-	 * most cases as it avoids potential deadlocks caused by concurrent editing.
+	 * Schedule a deferred update to update the user's edit count
 	 */
 	public function incEditCount() {
-		wfGetDB( DB_MASTER )->onTransactionPreCommitOrIdle(
-			function () {
-				$this->incEditCountImmediate();
-			},
-			__METHOD__
+		if ( $this->isAnon() ) {
+			return; // sanity
+		}
+
+		DeferredUpdates::addUpdate(
+			new UserEditCountUpdate( $this, 1 ),
+			DeferredUpdates::POSTSEND
 		);
 	}
 
 	/**
-	 * Increment the user's edit-count field.
-	 * Will have no effect for anonymous users.
-	 * @since 1.26
+	 * This method should not be called outside User/UserEditCountUpdate
+	 *
+	 * @param int $count
 	 */
-	public function incEditCountImmediate() {
-		if ( $this->isAnon() ) {
-			return;
-		}
-
-		$dbw = wfGetDB( DB_MASTER );
-		// No rows will be "affected" if user_editcount is NULL
-		$dbw->update(
-			'user',
-			[ 'user_editcount=user_editcount+1' ],
-			[ 'user_id' => $this->getId(), 'user_editcount IS NOT NULL' ],
-			__METHOD__
-		);
-		// Lazy initialization check...
-		if ( $dbw->affectedRows() == 0 ) {
-			// Now here's a goddamn hack...
-			$dbr = wfGetDB( DB_REPLICA );
-			if ( $dbr !== $dbw ) {
-				// If we actually have a replica DB server, the count is
-				// at least one behind because the current transaction
-				// has not been committed and replicated.
-				$this->mEditCount = $this->initEditCount( 1 );
-			} else {
-				// But if DB_REPLICA is selecting the master, then the
-				// count we just read includes the revision that was
-				// just added in the working transaction.
-				$this->mEditCount = $this->initEditCount();
-			}
-		} else {
-			if ( $this->mEditCount === null ) {
-				$this->getEditCount();
-				$dbr = wfGetDB( DB_REPLICA );
-				$this->mEditCount += ( $dbr !== $dbw ) ? 1 : 0;
-			} else {
-				$this->mEditCount++;
-			}
-		}
-		// Edit count in user cache too
-		$this->invalidateCache();
+	public function setEditCountInternal( $count ) {
+		$this->mEditCount = $count;
 	}
 
 	/**
 	 * Initialize user_editcount from data out of the revision table
 	 *
-	 * @param int $add Edits to add to the count from the revision table
+	 * @internal This method should not be called outside User/UserEditCountUpdate
+	 * @param IDatabase $dbr Replica database
 	 * @return int Number of edits
 	 */
-	protected function initEditCount( $add = 0 ) {
+	public function initEditCountInternal( IDatabase $dbr ) {
 		// Pull from a replica DB to be less cruel to servers
 		// Accuracy isn't the point anyway here
-		$dbr = wfGetDB( DB_REPLICA );
 		$actorWhere = ActorMigration::newMigration()->getWhere( $dbr, 'rev_user', $this );
 		$count = (int)$dbr->selectField(
 			[ 'revision' ] + $actorWhere['tables'],
@@ -5323,13 +5041,15 @@ class User implements IDBAccessObject, UserIdentity {
 			[],
 			$actorWhere['joins']
 		);
-		$count = $count + $add;
 
 		$dbw = wfGetDB( DB_MASTER );
 		$dbw->update(
 			'user',
 			[ 'user_editcount' => $count ],
-			[ 'user_id' => $this->getId() ],
+			[
+				'user_id' => $this->getId(),
+				'user_editcount IS NULL OR user_editcount < ' . (int)$count
+			],
 			__METHOD__
 		);
 
@@ -5395,6 +5115,7 @@ class User implements IDBAccessObject, UserIdentity {
 	 * @return bool
 	 */
 	public function addNewUserLogEntryAutoCreate() {
+		wfDeprecated( __METHOD__, '1.27' );
 		$this->addNewUserLogEntry( 'autocreate' );
 
 		return true;
@@ -5403,11 +5124,9 @@ class User implements IDBAccessObject, UserIdentity {
 	/**
 	 * Load the user options either from cache, the database or an array
 	 *
-	 * @param array $data Rows for the current user out of the user_properties table
+	 * @param array|null $data Rows for the current user out of the user_properties table
 	 */
 	protected function loadOptions( $data = null ) {
-		global $wgContLang;
-
 		$this->load();
 
 		if ( $this->mOptionsLoaded ) {
@@ -5421,7 +5140,7 @@ class User implements IDBAccessObject, UserIdentity {
 			// There's no need to do it for logged-in users: they can set preferences,
 			// and handling of page content is done by $pageLang->getPreferredVariant() and such,
 			// so don't override user's choice (especially when the user chooses site default).
-			$variant = $wgContLang->getDefaultVariant();
+			$variant = MediaWikiServices::getInstance()->getContentLanguage()->getDefaultVariant();
 			$this->mOptions['variant'] = $variant;
 			$this->mOptions['language'] = $variant;
 			$this->mOptionsLoaded = true;
@@ -5463,17 +5182,16 @@ class User implements IDBAccessObject, UserIdentity {
 				}
 			}
 
-			// Convert the email blacklist from a new line delimited string
-			// to an array of ids.
-			if ( isset( $data['email-blacklist'] ) && $data['email-blacklist'] ) {
-				$data['email-blacklist'] = array_map( 'intval', explode( "\n", $data['email-blacklist'] ) );
-			}
-
 			foreach ( $data as $property => $value ) {
 				$this->mOptionOverrides[$property] = $value;
 				$this->mOptions[$property] = $value;
 			}
 		}
+
+		// Replace deprecated language codes
+		$this->mOptions['language'] = LanguageCode::replaceDeprecatedCodes(
+			$this->mOptions['language']
+		);
 
 		$this->mOptionsLoaded = true;
 
@@ -5490,26 +5208,6 @@ class User implements IDBAccessObject, UserIdentity {
 
 		// Not using getOptions(), to keep hidden preferences in database
 		$saveOptions = $this->mOptions;
-
-		// Convert usernames to ids.
-		if ( isset( $this->mOptions['email-blacklist'] ) ) {
-			if ( $this->mOptions['email-blacklist'] ) {
-				$value = $this->mOptions['email-blacklist'];
-				// Email Blacklist may be an array of ids or a string of new line
-				// delimnated user names.
-				if ( is_array( $value ) ) {
-					$ids = array_filter( $value, 'is_numeric' );
-				} else {
-					$lookup = CentralIdLookup::factory();
-					$ids = $lookup->centralIdsFromNames( explode( "\n", $value ), $this );
-				}
-				$this->mOptions['email-blacklist'] = $ids;
-				$saveOptions['email-blacklist'] = implode( "\n", $this->mOptions['email-blacklist'] );
-			} else {
-				// If the blacklist is empty, set it to null rather than an empty string.
-				$this->mOptions['email-blacklist'] = null;
-			}
-		}
 
 		// Allow hooks to abort, for instance to save to a global profile.
 		// Reset options to default state before saving.
@@ -5598,10 +5296,8 @@ class User implements IDBAccessObject, UserIdentity {
 	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()`
 	 */
 	public static function getQueryInfo() {
-		global $wgActorTableSchemaMigrationStage;
-
 		$ret = [
-			'tables' => [ 'user' ],
+			'tables' => [ 'user', 'user_actor' => 'actor' ],
 			'fields' => [
 				'user_id',
 				'user_name',
@@ -5614,17 +5310,13 @@ class User implements IDBAccessObject, UserIdentity {
 				'user_email_token_expires',
 				'user_registration',
 				'user_editcount',
+				'user_actor.actor_id',
 			],
-			'joins' => [],
+			'joins' => [
+				'user_actor' => [ 'JOIN', 'user_actor.actor_user = user_id' ],
+			],
 		];
-		if ( $wgActorTableSchemaMigrationStage > MIGRATION_OLD ) {
-			$ret['tables']['user_actor'] = 'actor';
-			$ret['fields'][] = 'user_actor.actor_id';
-			$ret['joins']['user_actor'] = [
-				$wgActorTableSchemaMigrationStage === MIGRATION_NEW ? 'JOIN' : 'LEFT JOIN',
-				[ 'user_actor.actor_user = user_id' ]
-			];
-		}
+
 		return $ret;
 	}
 
@@ -5639,15 +5331,17 @@ class User implements IDBAccessObject, UserIdentity {
 		global $wgLang;
 
 		$groups = [];
-		foreach ( self::getGroupsWithPermission( $permission ) as $group ) {
+		foreach ( MediaWikiServices::getInstance()
+					  ->getPermissionManager()
+					  ->getGroupsWithPermission( $permission ) as $group ) {
 			$groups[] = UserGroupMembership::getLink( $group, RequestContext::getMain(), 'wiki' );
 		}
 
 		if ( $groups ) {
 			return Status::newFatal( 'badaccess-groups', $wgLang->commaList( $groups ), count( $groups ) );
-		} else {
-			return Status::newFatal( 'badaccess-group0' );
 		}
+
+		return Status::newFatal( 'badaccess-group0' );
 	}
 
 	/**
@@ -5675,11 +5369,22 @@ class User implements IDBAccessObject, UserIdentity {
 	/**
 	 * Checks if two user objects point to the same user.
 	 *
-	 * @since 1.25
-	 * @param User $user
+	 * @since 1.25 ; takes a UserIdentity instead of a User since 1.32
+	 * @param UserIdentity $user
 	 * @return bool
 	 */
-	public function equals( User $user ) {
+	public function equals( UserIdentity $user ) {
+		// XXX it's not clear whether central ID providers are supposed to obey this
 		return $this->getName() === $user->getName();
 	}
+
+	/**
+	 * Checks if usertalk is allowed
+	 *
+	 * @return bool
+	 */
+	public function isAllowUsertalk() {
+		return $this->mAllowUsertalk;
+	}
+
 }

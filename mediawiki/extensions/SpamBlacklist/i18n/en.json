@@ -9,15 +9,12 @@
 	"spam-blacklisted-email": "Blacklisted email address",
 	"spam-blacklisted-email-text": "Your email address is currently blacklisted from sending emails to other users.",
 	"spam-blacklisted-email-signup": "The given email address is currently blacklisted from use.",
+	"spam-blacklisted-link": "{{int:spamprotectiontext}}\n{{int:spamprotectionmatch|$1}}",
 	"spam-invalid-lines": "The following spam blacklist {{PLURAL:$1|line is an|lines are}} invalid regular {{PLURAL:$1|expression|expressions}} and {{PLURAL:$1|needs|need}} to be corrected before saving the page:",
 	"spam-blacklist-desc": "Regex-based anti-spam tool allowing to blacklist URLs in pages and email addresses for registered users",
 	"log-name-spamblacklist": "Spam blacklist log",
 	"log-description-spamblacklist": "These events track spam blacklist hits.",
 	"logentry-spamblacklist-hit": "{{GENDER:$2|$1}} caused a spam blacklist hit on $3 by attempting to add $4.",
 	"right-spamblacklistlog": "View the spam blacklist log",
-	"action-spamblacklistlog": "view the spam blacklist log",
-	"apihelp-spamblacklist-description": "Validate one or more URLs against the SpamBlacklist.",
-	"apihelp-spamblacklist-summary": "Validate one or more URLs against the SpamBlacklist.",
-	"apihelp-spamblacklist-param-url": "URLs to validate against the blacklist.",
-	"apihelp-spamblacklist-example-1": "Check two URLs against the blacklist"
+	"action-spamblacklistlog": "view the spam blacklist log"
 }

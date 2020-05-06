@@ -40,10 +40,12 @@ class ApiHelp extends ApiBase {
 
 		// Get the help
 		$context = new DerivativeContext( $this->getMain()->getContext() );
-		$context->setSkin( SkinFactory::getDefaultInstance()->makeSkin( 'apioutput' ) );
+		$skinFactory = MediaWikiServices::getInstance()->getSkinFactory();
+		$context->setSkin( $skinFactory->makeSkin( 'apioutput' ) );
 		$context->setLanguage( $this->getMain()->getLanguage() );
 		$context->setTitle( SpecialPage::getTitleFor( 'ApiHelp' ) );
 		$out = new OutputPage( $context );
+		$out->setRobotPolicy( 'noindex,nofollow' );
 		$out->setCopyrightUrl( 'https://www.mediawiki.org/wiki/Special:MyLanguage/Copyright' );
 		$context->setOutput( $out );
 
@@ -64,6 +66,23 @@ class ApiHelp extends ApiBase {
 			ApiResult::setSubelementsList( $data, 'help' );
 			$result->addValue( null, $this->getModuleName(), $data );
 		} else {
+			// Show any errors at the top of the HTML
+			$transform = [
+				'Types' => [ 'AssocAsObject' => true ],
+				'Strip' => 'all',
+			];
+			$errors = array_filter( [
+				'errors' => $this->getResult()->getResultData( [ 'errors' ], $transform ),
+				'warnings' => $this->getResult()->getResultData( [ 'warnings' ], $transform ),
+			] );
+			if ( $errors ) {
+				$json = FormatJson::encode( $errors, true, FormatJson::UTF8_OK );
+				// Escape any "--", some parsers might interpret that as end-of-comment.
+				// The above already escaped any "<" and ">".
+				$json = str_replace( '--', '-\u002D', $json );
+				$html = "<!-- API warnings and errors:\n$json\n-->\n$html";
+			}
+
 			$result->reset();
 			$result->addValue( null, 'text', $html, ApiResult::NO_SIZE_CHECK );
 			$result->addValue( null, 'mime', 'text/html', ApiResult::NO_SIZE_CHECK );
@@ -91,8 +110,6 @@ class ApiHelp extends ApiBase {
 	 * @param array $options Formatting options (described above)
 	 */
 	public static function getHelp( IContextSource $context, $modules, array $options ) {
-		global $wgContLang;
-
 		if ( !is_array( $modules ) ) {
 			$modules = [ $modules ];
 		}
@@ -100,17 +117,19 @@ class ApiHelp extends ApiBase {
 		$out = $context->getOutput();
 		$out->addModuleStyles( [
 			'mediawiki.hlist',
-			'mediawiki.apihelp',
+			'mediawiki.apipretty',
 		] );
 		if ( !empty( $options['toc'] ) ) {
-			$out->addModules( 'mediawiki.toc' );
+			$out->addModuleStyles( 'mediawiki.toc.styles' );
 		}
 		$out->setPageTitle( $context->msg( 'api-help-title' ) );
 
-		$cache = MediaWikiServices::getInstance()->getMainWANObjectCache();
+		$services = MediaWikiServices::getInstance();
+		$cache = $services->getMainWANObjectCache();
 		$cacheKey = null;
 		if ( count( $modules ) == 1 && $modules[0] instanceof ApiMain &&
-			$options['recursivesubmodules'] && $context->getLanguage() === $wgContLang
+			$options['recursivesubmodules'] &&
+			$context->getLanguage()->equals( $services->getContentLanguage() )
 		) {
 			$cacheHelpTimeout = $context->getConfig()->get( 'APICacheHelpTimeout' );
 			if ( $cacheHelpTimeout > 0 ) {
@@ -149,7 +168,7 @@ class ApiHelp extends ApiBase {
 		}
 		$out->addHTML( $html );
 
-		$helptitle = isset( $options['helptitle'] ) ? $options['helptitle'] : null;
+		$helptitle = $options['helptitle'] ?? null;
 		$html = self::fixHelpLinks( $out->getHTML(), $helptitle, $haveModules );
 		$out->clearHTML();
 		$out->addHTML( $html );
@@ -466,11 +485,23 @@ class ApiHelp extends ApiBase {
 						}
 					}
 
+					// Templated?
+					if ( !empty( $settings[ApiBase::PARAM_TEMPLATE_VARS] ) ) {
+						$vars = [];
+						$msg = 'api-help-param-templated-var-first';
+						foreach ( $settings[ApiBase::PARAM_TEMPLATE_VARS] as $k => $v ) {
+							$vars[] = $context->msg( $msg, $k, $module->encodeParamName( $v ) );
+							$msg = 'api-help-param-templated-var';
+						}
+						$info[] = $context->msg( 'api-help-param-templated' )
+							->numParams( count( $vars ) )
+							->params( Message::listParam( $vars ) )
+							->parse();
+					}
+
 					// Type documentation
 					if ( !isset( $settings[ApiBase::PARAM_TYPE] ) ) {
-						$dflt = isset( $settings[ApiBase::PARAM_DFLT] )
-							? $settings[ApiBase::PARAM_DFLT]
-							: null;
+						$dflt = $settings[ApiBase::PARAM_DFLT] ?? null;
 						if ( is_bool( $dflt ) ) {
 							$settings[ApiBase::PARAM_TYPE] = 'boolean';
 						} elseif ( is_string( $dflt ) || is_null( $dflt ) ) {
@@ -489,12 +520,8 @@ class ApiHelp extends ApiBase {
 
 						if ( is_array( $type ) ) {
 							$count = count( $type );
-							$deprecatedValues = isset( $settings[ApiBase::PARAM_DEPRECATED_VALUES] )
-								? $settings[ApiBase::PARAM_DEPRECATED_VALUES]
-								: [];
-							$links = isset( $settings[ApiBase::PARAM_VALUE_LINKS] )
-								? $settings[ApiBase::PARAM_VALUE_LINKS]
-								: [];
+							$deprecatedValues = $settings[ApiBase::PARAM_DEPRECATED_VALUES] ?? [];
+							$links = $settings[ApiBase::PARAM_VALUE_LINKS] ?? [];
 							$values = array_map( function ( $v ) use ( $links, $deprecatedValues ) {
 								$attr = [];
 								if ( $v !== '' ) {
@@ -550,11 +577,9 @@ class ApiHelp extends ApiBase {
 										$arr = &$submodules;
 										try {
 											$submod = $module->getModuleFromPath( $m );
-											if ( $submod ) {
-												if ( $submod->isDeprecated() ) {
-													$arr = &$deprecatedSubmodules;
-													$attrs['class'] = 'apihelp-deprecated-value';
-												}
+											if ( $submod && $submod->isDeprecated() ) {
+												$arr = &$deprecatedSubmodules;
+												$attrs['class'] = 'apihelp-deprecated-value';
 											}
 										} catch ( ApiUsageException $ex ) {
 											// Ignore
@@ -576,7 +601,8 @@ class ApiHelp extends ApiBase {
 									break;
 
 								case 'namespace':
-									$namespaces = MWNamespace::getValidNamespaces();
+									$namespaces = MediaWikiServices::getInstance()->
+										getNamespaceInfo()->getValidNamespaces();
 									if ( isset( $settings[ApiBase::PARAM_EXTRA_NAMESPACES] ) &&
 										is_array( $settings[ApiBase::PARAM_EXTRA_NAMESPACES] )
 									) {
@@ -693,9 +719,7 @@ class ApiHelp extends ApiBase {
 								$info[] = implode( ' ', $extra );
 							}
 
-							$allowAll = isset( $settings[ApiBase::PARAM_ALL] )
-								? $settings[ApiBase::PARAM_ALL]
-								: false;
+							$allowAll = $settings[ApiBase::PARAM_ALL] ?? false;
 							if ( $allowAll || $settings[ApiBase::PARAM_TYPE] === 'namespace' ) {
 								if ( $settings[ApiBase::PARAM_TYPE] === 'namespace' ) {
 									$allSpecifier = ApiBase::ALL_DEFAULT_STRING;
@@ -719,9 +743,7 @@ class ApiHelp extends ApiBase {
 					}
 
 					// Add default
-					$default = isset( $settings[ApiBase::PARAM_DFLT] )
-						? $settings[ApiBase::PARAM_DFLT]
-						: null;
+					$default = $settings[ApiBase::PARAM_DFLT] ?? null;
 					if ( $default === '' ) {
 						$info[] = $context->msg( 'api-help-param-default-empty' )
 							->parse();

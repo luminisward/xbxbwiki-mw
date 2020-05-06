@@ -19,7 +19,7 @@
  * @version 0.1.1 -- 2010-09-11
  * @author Trevor Parscal <tparscal@wikimedia.org>
  * @copyright Copyright 2010 Wikimedia Foundation
- * @license http://www.apache.org/licenses/LICENSE-2.0
+ * @license Apache-2.0
  */
 
 /**
@@ -29,7 +29,7 @@
  */
 class CSSMin {
 
-	/** @var string Strip marker for comments. **/
+	/** @var string Strip marker for comments. */
 	const PLACEHOLDER = "\x7fPLACEHOLDER\x7f";
 
 	/**
@@ -40,7 +40,7 @@ class CSSMin {
 	const EMBED_REGEX = '\/\*\s*\@embed\s*\*\/';
 	const COMMENT_REGEX = '\/\*.*?\*\/';
 
-	/** @var array List of common image files extensions and MIME-types */
+	/** @var string[] List of common image files extensions and MIME-types */
 	protected static $mimeTypes = [
 		'gif' => 'image/gif',
 		'jpe' => 'image/jpeg',
@@ -58,7 +58,7 @@ class CSSMin {
 	 *
 	 * @param string $source CSS stylesheet source to process
 	 * @param string $path File path where the source was read from
-	 * @return array List of local file references
+	 * @return string[] List of local file references
 	 */
 	public static function getLocalFileReferences( $source, $path ) {
 		$stripped = preg_replace( '/' . self::COMMENT_REGEX . '/s', '', $source );
@@ -72,13 +72,22 @@ class CSSMin {
 				$url = $match['file'][0];
 
 				// Skip fully-qualified and protocol-relative URLs and data URIs
-				// Also skips the rare `behavior` property specifying application's default behavior
 				if (
 					substr( $url, 0, 2 ) === '//' ||
-					parse_url( $url, PHP_URL_SCHEME ) ||
-					substr( $url, 0, 9 ) === '#default#'
+					parse_url( $url, PHP_URL_SCHEME )
 				) {
 					break;
+				}
+
+				// Strip trailing anchors - T115436
+				$anchor = strpos( $url, '#' );
+				if ( $anchor !== false ) {
+					$url = substr( $url, 0, $anchor );
+
+					// '#some-anchors' is not a file
+					if ( $url === '' ) {
+						break;
+					}
 				}
 
 				$files[] = $path . $url;
@@ -100,7 +109,7 @@ class CSSMin {
 	 * @param bool $ie8Compat By default, a data URI will only be produced if it can be made short
 	 *     enough to fit in Internet Explorer 8 (and earlier) URI length limit (32,768 bytes). Pass
 	 *     `false` to remove this limitation.
-	 * @return string|bool Image contents encoded as a data URI or false.
+	 * @return string|false Image contents encoded as a data URI or false.
 	 */
 	public static function encodeImageAsDataURI( $file, $type = null, $ie8Compat = true ) {
 		// Fast-fail for files that definitely exceed the maximum data URI length
@@ -128,7 +137,7 @@ class CSSMin {
 	 * @param string $contents File contents to encode.
 	 * @param string $type File's MIME type.
 	 * @param bool $ie8Compat See encodeImageAsDataURI().
-	 * @return string|bool Image contents encoded as a data URI or false.
+	 * @return string|false Image contents encoded as a data URI or false.
 	 */
 	public static function encodeStringAsDataURI( $contents, $type, $ie8Compat = true ) {
 		// Try #1: Non-encoded data URI
@@ -173,13 +182,13 @@ class CSSMin {
 
 	/**
 	 * Serialize a string (escape and quote) for use as a CSS string value.
-	 * https://www.w3.org/TR/2016/WD-cssom-1-20160317/#serialize-a-string
+	 * https://drafts.csswg.org/cssom/#serialize-a-string
 	 *
 	 * @param string $value
 	 * @return string
 	 */
 	public static function serializeStringValue( $value ) {
-		$value = strtr( $value, [ "\0" => "\\fffd ", '\\' => '\\\\', '"' => '\\"' ] );
+		$value = strtr( $value, [ "\0" => "\u{FFFD}", '\\' => '\\\\', '"' => '\\"' ] );
 		$value = preg_replace_callback( '/[\x01-\x1f\x7f]/', function ( $match ) {
 			return '\\' . base_convert( ord( $match[0] ), 10, 16 ) . ' ';
 		}, $value );
@@ -193,11 +202,7 @@ class CSSMin {
 	public static function getMimeType( $file ) {
 		// Infer the MIME-type from the file extension
 		$ext = strtolower( pathinfo( $file, PATHINFO_EXTENSION ) );
-		if ( isset( self::$mimeTypes[$ext] ) ) {
-			return self::$mimeTypes[$ext];
-		}
-
-		return mime_content_type( realpath( $file ) );
+		return self::$mimeTypes[$ext] ?? mime_content_type( realpath( $file ) );
 	}
 
 	/**
@@ -387,10 +392,7 @@ class CSSMin {
 	 * @return bool
 	 */
 	protected static function isLocalUrl( $maybeUrl ) {
-		if ( $maybeUrl !== '' && $maybeUrl[0] === '/' && !self::isRemoteUrl( $maybeUrl ) ) {
-			return true;
-		}
-		return false;
+		return isset( $maybeUrl[1] ) && $maybeUrl[0] === '/' && $maybeUrl[1] !== '/';
 	}
 
 	/**
@@ -405,14 +407,14 @@ class CSSMin {
 			// FIXME: Simplify now we only support PHP 7.0.0+
 			// Note: PCRE doesn't support multiple capture groups with the same name by default.
 			// - PCRE 6.7 introduced the "J" modifier (PCRE_INFO_JCHANGED for PCRE_DUPNAMES).
-			//   https://secure.php.net/manual/en/reference.pcre.pattern.modifiers.php
+			//   https://www.php.net/manual/en/reference.pcre.pattern.modifiers.php
 			//   However this isn't useful since it just ignores all but the first one.
 			//   Also, while the modifier was introduced in PCRE 6.7 (PHP 5.2+) it was
 			//   not exposed to public preg_* functions until PHP 5.6.0.
 			// - PCRE 8.36 fixed this to work as expected (e.g. merge conceptually to
 			//   only return the one matched in the part that actually matched).
 			//   However MediaWiki supports 5.5.9, which has PCRE 8.32
-			//   Per https://secure.php.net/manual/en/pcre.installation.php:
+			//   Per https://www.php.net/manual/en/pcre.installation.php:
 			//   - PCRE 8.32 (PHP 5.5.0)
 			//   - PCRE 8.34 (PHP 5.5.10, PHP 5.6.0)
 			//   - PCRE 8.37 (PHP 5.5.26, PHP 5.6.9, PHP 7.0.0)
@@ -488,11 +490,11 @@ class CSSMin {
 
 		// Pass thru fully-qualified and protocol-relative URLs and data URIs, as well as local URLs if
 		// we can't expand them.
-		// Also skips the rare `behavior` property specifying application's default behavior
+		// Also skips anchors or the rare `behavior` property specifying application's default behavior
 		if (
 			self::isRemoteUrl( $url ) ||
 			self::isLocalUrl( $url ) ||
-			substr( $url, 0, 9 ) === '#default#'
+			substr( $url, 0, 1 ) === '#'
 		) {
 			return $url;
 		}
@@ -512,7 +514,7 @@ class CSSMin {
 						return $data;
 					}
 				}
-				if ( method_exists( 'OutputPage', 'transformFilePath' ) ) {
+				if ( class_exists( OutputPage::class ) ) {
 					$url = OutputPage::transformFilePath( $remote, $local, $file );
 				} else {
 					// Add version parameter as the first five hex digits

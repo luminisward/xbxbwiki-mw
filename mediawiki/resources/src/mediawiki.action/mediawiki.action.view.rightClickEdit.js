@@ -3,7 +3,7 @@
  * When the user right-clicks in a heading, it will open the
  * edit screen.
  */
-( function ( $ ) {
+( function () {
 	// Trigger this when a contextmenu click on the page targets an h1-h6 element.
 	// This uses a delegate handler which 1) starts immediately instead of blocking
 	// response on dom-ready, and 2) selects and binds once instead of N times.
@@ -21,7 +21,8 @@
 		if ( e.target.nodeName.toLowerCase() !== 'a' ) {
 			// Trigger native HTMLElement click instead of opening URL (T45052)
 			e.preventDefault();
+			// eslint-disable-next-line no-jquery/no-event-shorthand
 			$edit.get( 0 ).click();
 		}
 	} );
-}( jQuery ) );
+}() );

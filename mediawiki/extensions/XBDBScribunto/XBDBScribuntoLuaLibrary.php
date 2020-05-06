@@ -16,8 +16,6 @@ class XBDBScribuntoLuaLibrary extends Scribunto_LuaLibraryBase
         $password   = $wgXBDBScribuntoConnection["password"];
         $dbname     = $wgXBDBScribuntoConnection["dbname"];
 
-        $e = function_exists(pg_connect);
-
         try {
             $this->conn = new PDO("pgsql:host=$servername;dbname=$dbname;user=$username;password=$password");
         } catch (\Throwable $th) {

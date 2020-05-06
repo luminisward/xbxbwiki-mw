@@ -85,7 +85,9 @@ class PoolCounterRedis extends PoolCounter {
 		parent::__construct( $conf, $type, $key );
 
 		$this->serversByLabel = $conf['servers'];
-		$this->ring = new HashRing( array_fill_keys( array_keys( $conf['servers'] ), 100 ) );
+
+		$serverLabels = array_keys( $conf['servers'] );
+		$this->ring = new HashRing( array_fill_keys( $serverLabels, 10 ) );
 
 		$conf['redisConfig']['serializer'] = 'none'; // for use with Lua
 		$this->pool = RedisConnectionPool::singleton( $conf['redisConfig'] );
@@ -150,7 +152,9 @@ class PoolCounterRedis extends PoolCounter {
 		if ( !$status->isOK() ) {
 			return $status;
 		}
+		/** @var RedisConnRef $conn */
 		$conn = $status->value;
+		'@phan-var RedisConnRef $conn';
 
 		// phpcs:disable Generic.Files.LineLength
 		static $script =
@@ -236,7 +240,9 @@ LUA;
 		if ( !$status->isOK() ) {
 			return $status;
 		}
+		/** @var RedisConnRef $conn */
 		$conn = $status->value;
+		'@phan-var RedisConnRef $conn';
 
 		$now = microtime( true );
 		try {

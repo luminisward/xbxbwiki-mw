@@ -19,24 +19,25 @@
  */
 
 /**
- * ResourceLoaderFileModule which magically loads the right skinScripts and skinStyles for every
+ * Module which magically loads the right skinScripts and skinStyles for every
  * skin, using the specified OOUI theme for each.
  *
- * @since 1.30
+ * @ingroup ResourceLoader
+ * @internal
  */
 class ResourceLoaderOOUIFileModule extends ResourceLoaderFileModule {
 	use ResourceLoaderOOUIModule;
 
 	public function __construct( $options = [] ) {
-		if ( isset( $options[ 'themeScripts' ] ) ) {
-			$skinScripts = $this->getSkinSpecific( $options[ 'themeScripts' ], 'scripts' );
+		if ( isset( $options['themeScripts'] ) ) {
+			$skinScripts = $this->getSkinSpecific( $options['themeScripts'], 'scripts' );
 			if ( !isset( $options['skinScripts'] ) ) {
 				$options['skinScripts'] = [];
 			}
 			$this->extendSkinSpecific( $options['skinScripts'], $skinScripts );
 		}
-		if ( isset( $options[ 'themeStyles' ] ) ) {
-			$skinStyles = $this->getSkinSpecific( $options[ 'themeStyles' ], 'styles' );
+		if ( isset( $options['themeStyles'] ) ) {
+			$skinStyles = $this->getSkinSpecific( $options['themeStyles'], 'styles' );
 			if ( !isset( $options['skinStyles'] ) ) {
 				$options['skinStyles'] = [];
 			}

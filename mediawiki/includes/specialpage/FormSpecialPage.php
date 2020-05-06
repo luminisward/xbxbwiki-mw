@@ -31,7 +31,7 @@
 abstract class FormSpecialPage extends SpecialPage {
 	/**
 	 * The sub-page of the special page.
-	 * @var string
+	 * @var string|null
 	 */
 	protected $par = null;
 
@@ -150,10 +150,11 @@ abstract class FormSpecialPage extends SpecialPage {
 	/**
 	 * Process the form on POST submission.
 	 * @param array $data
-	 * @param HTMLForm $form
+	 * @param HTMLForm|null $form
+	 * @suppress PhanCommentParamWithoutRealParam Many implementations don't have $form
 	 * @return bool|string|array|Status As documented for HTMLForm::trySubmit.
 	 */
-	abstract public function onSubmit( array $data /* $form = null */ );
+	abstract public function onSubmit( array $data /* HTMLForm $form = null */ );
 
 	/**
 	 * Do something exciting on successful processing of the form, most likely to show a
@@ -166,7 +167,7 @@ abstract class FormSpecialPage extends SpecialPage {
 	/**
 	 * Basic SpecialPage workflow: get a form, send it to the user; get some data back,
 	 *
-	 * @param string $par Subpage string if one was specified
+	 * @param string|null $par Subpage string if one was specified
 	 */
 	public function execute( $par ) {
 		$this->setParameter( $par );
@@ -188,7 +189,7 @@ abstract class FormSpecialPage extends SpecialPage {
 
 	/**
 	 * Maybe do something interesting with the subpage parameter
-	 * @param string $par
+	 * @param string|null $par
 	 */
 	protected function setParameter( $par ) {
 		$this->par = $par;
@@ -203,9 +204,11 @@ abstract class FormSpecialPage extends SpecialPage {
 	protected function checkExecutePermissions( User $user ) {
 		$this->checkPermissions();
 
-		if ( $this->requiresUnblock() && $user->isBlocked() ) {
+		if ( $this->requiresUnblock() ) {
 			$block = $user->getBlock();
-			throw new UserBlockedError( $block );
+			if ( $block && $block->isSitewide() ) {
+				throw new UserBlockedError( $block );
+			}
 		}
 
 		if ( $this->requiresWrite() ) {

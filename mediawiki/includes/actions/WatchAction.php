@@ -20,6 +20,8 @@
  * @ingroup Actions
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * Page addition to a user's watchlist
  *
@@ -40,9 +42,7 @@ class WatchAction extends FormAction {
 	}
 
 	public function onSubmit( $data ) {
-		self::doWatch( $this->getTitle(), $this->getUser() );
-
-		return true;
+		return self::doWatch( $this->getTitle(), $this->getUser() );
 	}
 
 	protected function checkCanExecute( User $user ) {
@@ -118,7 +118,8 @@ class WatchAction extends FormAction {
 		User $user,
 		$checkRights = User::CHECK_USER_RIGHTS
 	) {
-		if ( $checkRights && !$user->isAllowed( 'editmywatchlist' ) ) {
+		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
+		if ( $checkRights && !$permissionManager->userHasRight( $user, 'editmywatchlist' ) ) {
 			return User::newFatalPermissionDeniedStatus( 'editmywatchlist' );
 		}
 
@@ -142,7 +143,9 @@ class WatchAction extends FormAction {
 	 * @return Status
 	 */
 	public static function doUnwatch( Title $title, User $user ) {
-		if ( !$user->isAllowed( 'editmywatchlist' ) ) {
+		if ( !MediaWikiServices::getInstance()
+			->getPermissionManager()
+			->userHasRight( $user, 'editmywatchlist' ) ) {
 			return User::newFatalPermissionDeniedStatus( 'editmywatchlist' );
 		}
 
@@ -173,19 +176,6 @@ class WatchAction extends FormAction {
 		}
 		// Match ApiWatch and ResourceLoaderUserTokensModule
 		return $user->getEditToken( $action );
-	}
-
-	/**
-	 * Get token to unwatch (or watch) a page for a user
-	 *
-	 * @param Title $title Title object of page to unwatch
-	 * @param User $user User for whom the action is going to be performed
-	 * @param string $action Optionally override the action to 'watch'
-	 * @return string Token
-	 * @since 1.18
-	 */
-	public static function getUnwatchToken( Title $title, User $user, $action = 'unwatch' ) {
-		return self::getWatchToken( $title, $user, $action );
 	}
 
 	public function doesWrites() {

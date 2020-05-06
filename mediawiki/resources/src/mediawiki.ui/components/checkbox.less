@@ -35,17 +35,15 @@
 }
 
 // We use the `:not` selector to cancel out styling on IE 8 and below
-// We also disable this styling on JavaScript disabled devices. This fixes the issue with
-// Opera Mini where checking/unchecking doesn't apply styling but potentially leaves other
-// more capable browsers with unstyled checkboxes.
-.client-js .mw-ui-checkbox:not( #noop ) {
+// Note: This may be broken on older Opera Mini devices.
+.mw-ui-checkbox:not( #noop ) {
 	display: table;
 	// Position relatively so we can make use of absolute pseudo elements
 	position: relative;
 
 	* {
 		// Reset font sizes, see T74727
-		font: inherit;
+		font-size: inherit;
 		vertical-align: middle;
 	}
 
@@ -76,7 +74,7 @@
 			background-origin: border-box;
 			background-position: center center;
 			background-repeat: no-repeat;
-			.background-size( 0, 0 );
+			background-size: 0 0;
 			.box-sizing( border-box );
 			position: absolute;
 			// Ensure alignment of checkbox to middle of the text in long labels, see T85241
@@ -92,7 +90,7 @@
 		// Apply a checkmark on the pseudo `:before` element when the input is checked
 		&:checked + label:before {
 			.background-image-svg( 'images/checkbox-checked.svg', 'images/checkbox-checked.png' );
-			.background-size( 90%, 90% );
+			background-size: 90% 90%;
 		}
 
 		&:enabled {

@@ -5,12 +5,12 @@
  *
  * This script assumes that:
  * - hooks names in hooks.txt are at the beginning of a line and single quoted.
- * - hooks names in code are the first parameter of wfRunHooks.
+ * - hooks names in code are the first parameter of Hooks::run.
  *
  * if --online option is passed, the script will compare the hooks in the code
  * with the ones at https://www.mediawiki.org/wiki/Manual:Hooks
  *
- * Any instance of wfRunHooks that doesn't meet these parameters will be noted.
+ * Any instance of Hooks::run that doesn't meet these requirements will be noted.
  *
  * Copyright © Antoine Musso
  *
@@ -33,6 +33,8 @@
  * @ingroup Maintenance
  * @author Antoine Musso <hashar at free dot fr>
  */
+
+use MediaWiki\MediaWikiServices;
 
 require_once __DIR__ . '/Maintenance.php';
 
@@ -80,7 +82,7 @@ class FindHooks extends Maintenance {
 			"$IP/",
 		];
 		$extraFiles = [
-			"$IP/tests/phpunit/MediaWikiTestCase.php",
+			"$IP/tests/phpunit/MediaWikiIntegrationTestCase.php",
 		];
 
 		foreach ( $recurseDirs as $dir ) {
@@ -216,7 +218,7 @@ class FindHooks extends Maintenance {
 
 		$retval = [];
 		while ( true ) {
-			$json = Http::get(
+			$json = MediaWikiServices::getInstance()->getHttpRequestFactory()->get(
 				wfAppendQuery( 'https://www.mediawiki.org/w/api.php', $params ),
 				[],
 				__METHOD__
@@ -245,7 +247,7 @@ class FindHooks extends Maintenance {
 		$m = [];
 		preg_match_all(
 			// All functions which runs hooks
-			'/(?:wfRunHooks|Hooks\:\:run|Hooks\:\:runWithoutAbort)\s*\(\s*' .
+			'/(?:Hooks\:\:run|Hooks\:\:runWithoutAbort)\s*\(\s*' .
 				// First argument is the hook name as string
 				'([\'"])(.*?)\1' .
 				// Comma for second argument
@@ -287,13 +289,12 @@ class FindHooks extends Maintenance {
 	/**
 	 * Get bad hooks (where the hook name could not be determined) from a PHP file
 	 * @param string $filePath Full filename to the PHP file.
-	 * @return array Array of bad wfRunHooks() lines
+	 * @return array Array of source code lines
 	 */
 	private function getBadHooksFromFile( $filePath ) {
 		$content = file_get_contents( $filePath );
 		$m = [];
-		// We want to skip the "function wfRunHooks()" one.  :)
-		preg_match_all( '/(?<!function )wfRunHooks\(\s*[^\s\'"].*/', $content, $m );
+		preg_match_all( '/(?:Hooks\:\:run|Hooks\:\:runWithoutAbort)\(\s*[^\s\'"].*/', $content, $m );
 		$list = [];
 		foreach ( $m[0] as $match ) {
 			$list[] = $match . "(" . $filePath . ")";
@@ -305,7 +306,7 @@ class FindHooks extends Maintenance {
 	/**
 	 * Get hooks from a directory of PHP files.
 	 * @param string $dir Directory path to start at
-	 * @param int $recursive Pass self::FIND_RECURSIVE
+	 * @param int $recurse Pass self::FIND_RECURSIVE
 	 * @return array Array: key => hook name; value => array of arguments or string 'unknown'
 	 */
 	private function getHooksFromDir( $dir, $recurse = 0 ) {
@@ -321,6 +322,7 @@ class FindHooks extends Maintenance {
 			$iterator = new DirectoryIterator( $dir );
 		}
 
+		/** @var SplFileInfo $info */
 		foreach ( $iterator as $info ) {
 			// Ignore directories, work only on php files,
 			if ( $info->isFile() && in_array( $info->getExtension(), [ 'php', 'inc' ] )

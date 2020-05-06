@@ -1,7 +1,7 @@
 /*!
  * Live edit preview.
  */
-( function ( mw, $ ) {
+( function () {
 
 	/**
 	 * @ignore
@@ -71,9 +71,7 @@
 			$spinner.show();
 		}
 
-		// Can't use fadeTo because it calls show(), and we might want to keep some elements hidden
-		// (e.g. empty #catlinks)
-		$copyElements.animate( { opacity: 0.4 }, 'fast' );
+		$copyElements.addClass( [ 'mw-preview-copyelements', 'mw-preview-copyelements-loading' ] );
 
 		api = new mw.Api();
 		postData = {
@@ -143,12 +141,12 @@
 				}
 				if ( response.parse.modules ) {
 					mw.loader.load( response.parse.modules.concat(
-						response.parse.modulescripts,
 						response.parse.modulestyles
 					) );
 				}
 
 				newList = [];
+				// eslint-disable-next-line no-jquery/no-each-util
 				$.each( response.parse.indicators, function ( name, indicator ) {
 					newList.push(
 						$( '<div>' )
@@ -188,7 +186,7 @@
 							.append( $( '<a>' )
 								.attr( {
 									href: mw.util.getUrl( template.title ),
-									'class': ( template.exists ? '' : 'new' )
+									class: ( template.exists ? '' : 'new' )
 								} )
 								.text( template.title )
 							);
@@ -257,9 +255,7 @@
 			mw.hook( 'wikipage.editform' ).fire( $editform );
 		} ).always( function () {
 			$spinner.hide();
-			$copyElements.animate( {
-				opacity: 1
-			}, 'fast' );
+			$copyElements.removeClass( 'mw-preview-copyelements-loading' );
 		} ).fail( function ( code, result ) {
 			// This just shows the error for whatever request failed first
 			var errorMsg = 'API error: ' + code;
@@ -294,9 +290,9 @@
 		// can change where they are output).
 
 		if ( !document.getElementById( 'p-lang' ) && document.getElementById( 'p-tb' ) && mw.config.get( 'skin' ) === 'vector' ) {
-			$( '.portal:last' ).after(
+			$( '.portal' ).last().after(
 				$( '<div>' ).attr( {
-					'class': 'portal',
+					class: 'portal',
 					id: 'p-lang',
 					role: 'navigation',
 					'aria-labelledby': 'p-lang-label'
@@ -328,4 +324,4 @@
 		$( document.body ).on( 'click', '#wpPreview, #wpDiff', doLivePreview );
 	} );
 
-}( mediaWiki, jQuery ) );
+}() );

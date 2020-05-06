@@ -33,7 +33,7 @@ require_once __DIR__ . '/Maintenance.php';
  *
  * @ingroup Maintenance
  */
-class UploadStashCleanup extends Maintenance {
+class CleanupUploadStash extends Maintenance {
 
 	public function __construct() {
 		parent::__construct();
@@ -147,10 +147,11 @@ class UploadStashCleanup extends Maintenance {
 	protected function doOperations( FileRepo $tempRepo, array $ops ) {
 		$status = $tempRepo->getBackend()->doQuickOperations( $ops );
 		if ( !$status->isOK() ) {
+			// @phan-suppress-next-line PhanUndeclaredMethod
 			$this->error( print_r( $status->getErrorsArray(), true ) );
 		}
 	}
 }
 
-$maintClass = UploadStashCleanup::class;
+$maintClass = CleanupUploadStash::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

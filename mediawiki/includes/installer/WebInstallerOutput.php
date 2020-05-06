@@ -21,6 +21,8 @@
  * @ingroup Deployment
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * Output class modelled on OutputPage.
  *
@@ -31,6 +33,7 @@
  *
  * @ingroup Deployment
  * @since 1.17
+ * @private
  */
 class WebInstallerOutput {
 
@@ -89,8 +92,9 @@ class WebInstallerOutput {
 
 	/**
 	 * @param string $text
+	 * @since 1.32
 	 */
-	public function addWikiText( $text ) {
+	public function addWikiTextAsInterface( $text ) {
 		$this->addHTML( $this->parent->parse( $text ) );
 	}
 
@@ -130,13 +134,13 @@ class WebInstallerOutput {
 		global $wgStyleDirectory;
 
 		$moduleNames = [
-			// See SkinTemplate::setupSkinUserCss
+			// Based on Skin::getDefaultModules
 			'mediawiki.legacy.shared',
-			// See Vector::setupSkinUserCss
+			// Based on Vector::setupSkinUserCss
 			'mediawiki.skinning.interface',
 		];
 
-		$resourceLoader = new ResourceLoader();
+		$resourceLoader = MediaWikiServices::getInstance()->getResourceLoader();
 
 		if ( file_exists( "$wgStyleDirectory/Vector/skin.json" ) ) {
 			// Force loading Vector skin if available as a fallback skin
@@ -156,7 +160,7 @@ class WebInstallerOutput {
 
 		$rlContext = new ResourceLoaderContext( $resourceLoader, new FauxRequest( [
 				'debug' => 'true',
-				'lang' => $this->getLanguageCode(),
+				'lang' => $this->getLanguage()->getCode(),
 				'only' => 'styles',
 		] ) );
 
@@ -164,6 +168,7 @@ class WebInstallerOutput {
 		foreach ( $moduleNames as $moduleName ) {
 			/** @var ResourceLoaderFileModule $module */
 			$module = $resourceLoader->getModule( $moduleName );
+			'@phan-var ResourceLoaderFileModule $module';
 			if ( !$module ) {
 				// T98043: Don't fatal, but it won't look as pretty.
 				continue;
@@ -187,7 +192,7 @@ class WebInstallerOutput {
 	 * @return string
 	 */
 	private function getCssUrl() {
-		return Html::linkedStyle( $_SERVER['PHP_SELF'] . '?css=1' );
+		return Html::linkedStyle( $this->parent->getUrl( [ 'css' => 1 ] ) );
 	}
 
 	public function useShortHeader( $use = true ) {
@@ -210,21 +215,13 @@ class WebInstallerOutput {
 	}
 
 	/**
-	 * @return string
+	 * @since 1.33
+	 * @return Language
 	 */
-	public function getDir() {
+	private function getLanguage() {
 		global $wgLang;
 
-		return is_object( $wgLang ) ? $wgLang->getDir() : 'ltr';
-	}
-
-	/**
-	 * @return string
-	 */
-	public function getLanguageCode() {
-		global $wgLang;
-
-		return is_object( $wgLang ) ? $wgLang->getCode() : 'en';
+		return is_object( $wgLang ) ? $wgLang : Language::factory( 'en' );
 	}
 
 	/**
@@ -232,8 +229,8 @@ class WebInstallerOutput {
 	 */
 	public function getHeadAttribs() {
 		return [
-			'dir' => $this->getDir(),
-			'lang' => LanguageCode::bcp47( $this->getLanguageCode() ),
+			'dir' => $this->getLanguage()->getDir(),
+			'lang' => $this->getLanguage()->getHtmlCode(),
 		];
 	}
 
@@ -277,10 +274,10 @@ class WebInstallerOutput {
 	<?php echo Html::linkedScript( 'config.js' ) . "\n"; ?>
 </head>
 
-<?php echo Html::openElement( 'body', [ 'class' => $this->getDir() ] ) . "\n"; ?>
+<?php echo Html::openElement( 'body', [ 'class' => $this->getLanguage()->getDir() ] ) . "\n"; ?>
 <div id="mw-page-base"></div>
 <div id="mw-head-base"></div>
-<div id="content" class="mw-body">
+<div id="content" class="mw-body" role="main">
 <div id="bodyContent" class="mw-body-content">
 
 <h1><?php $this->outputTitle(); ?></h1>
@@ -299,17 +296,31 @@ class WebInstallerOutput {
 
 <div id="mw-panel">
 	<div class="portal" id="p-logo">
-		<a style="background-image: url(images/installer-logo.png);"
-			href="https://www.mediawiki.org/"
-			title="Main Page"></a>
+		<a href="https://www.mediawiki.org/" title="Main Page"></a>
 	</div>
 <?php
 	$message = wfMessage( 'config-sidebar' )->plain();
+	// Section 1: External links
+	// @todo FIXME: Migrate to plain link label messages (T227297).
 	foreach ( explode( '----', $message ) as $section ) {
 		echo '<div class="portal"><div class="body">';
 		echo $this->parent->parse( $section, true );
 		echo '</div></div>';
 	}
+	// Section 2: Installer pages
+	echo '<div class="portal"><div class="body"><ul>';
+	foreach ( [
+		'config-sidebar-readme' => 'Readme',
+		'config-sidebar-relnotes' => 'ReleaseNotes',
+		'config-sidebar-license' => 'Copying',
+		'config-sidebar-upgrade' => 'UpgradeDoc',
+	] as $msgKey => $pageName ) {
+		echo $this->parent->makeLinkItem(
+			$this->parent->getDocUrl( $pageName ),
+			wfMessage( $msgKey )->text()
+		);
+	}
+	echo '</ul></div></div>';
 ?>
 </div>
 
@@ -320,13 +331,14 @@ class WebInstallerOutput {
 	public function outputShortHeader() {
 ?>
 <?php echo Html::htmlHeader( $this->getHeadAttribs() ); ?>
+
 <head>
-	<meta http-equiv="Content-type" content="text/html; charset=utf-8" />
 	<meta name="robots" content="noindex, nofollow" />
+	<meta http-equiv="Content-type" content="text/html; charset=utf-8" />
 	<title><?php $this->outputTitle(); ?></title>
 	<?php echo $this->getCssUrl() . "\n"; ?>
-	<?php echo $this->getJQuery(); ?>
-	<?php echo Html::linkedScript( 'config.js' ); ?>
+	<?php echo $this->getJQuery() . "\n"; ?>
+	<?php echo Html::linkedScript( 'config.js' ) . "\n"; ?>
 </head>
 
 <body style="background-image: none">

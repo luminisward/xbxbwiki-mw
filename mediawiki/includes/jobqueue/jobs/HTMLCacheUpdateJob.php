@@ -128,18 +128,15 @@ class HTMLCacheUpdateJob extends Job {
 		// not expected to invalidate these cache entries too often.
 		$touchTimestamp = wfTimestampNow();
 		// If page_touched is higher than this, then something else already bumped it after enqueue
-		$condTimestamp = isset( $this->params['rootJobTimestamp'] )
-			? $this->params['rootJobTimestamp']
-			: $touchTimestamp;
+		$condTimestamp = $this->params['rootJobTimestamp'] ?? $touchTimestamp;
 
 		$dbw = wfGetDB( DB_MASTER );
 		$factory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
 		$ticket = $factory->getEmptyTransactionTicket( __METHOD__ );
 		// Update page_touched (skipping pages already touched since the root job).
 		// Check $wgUpdateRowsPerQuery for sanity; batch jobs are sized by that already.
-		foreach ( array_chunk( $pageIds, $wgUpdateRowsPerQuery ) as $batch ) {
-			$factory->commitAndWaitForReplication( __METHOD__, $ticket );
-
+		$batches = array_chunk( $pageIds, $wgUpdateRowsPerQuery );
+		foreach ( $batches as $batch ) {
 			$dbw->update( 'page',
 				[ 'page_touched' => $dbw->timestamp( $touchTimestamp ) ],
 				[ 'page_id' => $batch,
@@ -148,6 +145,9 @@ class HTMLCacheUpdateJob extends Job {
 				],
 				__METHOD__
 			);
+			if ( count( $batches ) > 1 ) {
+				$factory->commitAndWaitForReplication( __METHOD__, $ticket );
+			}
 		}
 		// Get the list of affected pages (races only mean something else did the purge)
 		$titleArray = TitleArray::newFromResult( $dbw->select(

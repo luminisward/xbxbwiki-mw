@@ -264,7 +264,7 @@ class GIFMetadataExtractor {
 	 */
 	static function readGCT( $fh, $bpp ) {
 		if ( $bpp > 0 ) {
-			$max = pow( 2, $bpp );
+			$max = 2 ** $bpp;
 			for ( $i = 1; $i <= $max; ++$i ) {
 				fread( $fh, 3 );
 			}
@@ -282,6 +282,7 @@ class GIFMetadataExtractor {
 		}
 		$buf = unpack( 'C', $data )[1];
 		$bpp = ( $buf & 7 ) + 1;
+		// @phan-suppress-next-line PhanTypeInvalidLeftOperandOfIntegerOp
 		$buf >>= 7;
 
 		$have_map = $buf & 1;

@@ -5,9 +5,7 @@
 			"Kghbln"
 		]
 	},
-	"timeless-desc": "Stellt eine zeitlose und an Wikimedia erinnernde Benutzeroberfläche bereit",
-	"timeless-search-placeholder": "{{NUMBEROFARTICLES}} Seiten durchsuchen",
-	"timeless-loggedin": "Dein Benutzerkonto",
+	"timeless-desc": "Stellt eine zeitlose Benutzeroberfläche bereit",
 	"timeless-anonymous": "Anonym",
 	"timeless-loggedinas": "Angemeldet als '''$1'''",
 	"timeless-notloggedin": "Nicht angemeldet",

@@ -28,7 +28,7 @@ use Wikimedia\Rdbms\IDatabase;
 /**
  * @ingroup SpecialPage
  */
-class MediaStatisticsPage extends QueryPage {
+class SpecialMediaStatistics extends QueryPage {
 	protected $totalCount = 0, $totalBytes = 0;
 
 	/**
@@ -76,9 +76,9 @@ class MediaStatisticsPage extends QueryPage {
 			$dbr->addQuotes( '/' ),
 			'img_minor_mime',
 			$dbr->addQuotes( ';' ),
-			'COUNT(*)',
+			$dbr->buildStringCast( 'COUNT(*)' ),
 			$dbr->addQuotes( ';' ),
-			'SUM( img_size )'
+			$dbr->buildStringCast( 'SUM( img_size )' )
 		] );
 		return [
 			'tables' => [ 'image' ],
@@ -102,7 +102,7 @@ class MediaStatisticsPage extends QueryPage {
 	 *
 	 * It's important that img_media_type come first, otherwise the
 	 * tables will be fragmented.
-	 * @return Array Fields to sort by
+	 * @return array Fields to sort by
 	 */
 	function getOrderFields() {
 		return [ 'img_media_type', 'count(*)', 'img_major_mime', 'img_minor_mime' ];
@@ -143,7 +143,7 @@ class MediaStatisticsPage extends QueryPage {
 			$this->outputTableEnd();
 			// add total size of all files
 			$this->outputMediaType( 'total' );
-			$this->getOutput()->addWikiText(
+			$this->getOutput()->addWikiTextAsInterface(
 				$this->msg( 'mediastatistics-allbytes' )
 					->numParams( $this->totalSize )
 					->sizeParams( $this->totalSize )
@@ -156,8 +156,11 @@ class MediaStatisticsPage extends QueryPage {
 	 * Output closing </table>
 	 */
 	protected function outputTableEnd() {
-		$this->getOutput()->addHTML( Html::closeElement( 'table' ) );
-		$this->getOutput()->addWikiText(
+		$this->getOutput()->addHTML(
+			Html::closeElement( 'tbody' ) .
+			Html::closeElement( 'table' )
+		);
+		$this->getOutput()->addWikiTextAsInterface(
 				$this->msg( 'mediastatistics-bytespertype' )
 					->numParams( $this->totalPerType )
 					->sizeParams( $this->totalPerType )
@@ -182,7 +185,7 @@ class MediaStatisticsPage extends QueryPage {
 			[],
 			$linkRenderer->makeLink( $mimeSearch, $mime )
 		);
-		$row .= Html::element(
+		$row .= Html::rawElement(
 			'td',
 			[],
 			$this->getExtensionList( $mime )
@@ -214,7 +217,7 @@ class MediaStatisticsPage extends QueryPage {
 
 	/**
 	 * @param float $decimal A decimal percentage (ie for 12.3%, this would be 0.123)
-	 * @return String The percentage formatted so that 3 significant digits are shown.
+	 * @return string The percentage formatted so that 3 significant digits are shown.
 	 */
 	protected function makePercentPretty( $decimal ) {
 		$decimal *= 100;
@@ -245,7 +248,7 @@ class MediaStatisticsPage extends QueryPage {
 		$extArray = explode( ' ', $exts );
 		$extArray = array_unique( $extArray );
 		foreach ( $extArray as &$ext ) {
-			$ext = '.' . $ext;
+			$ext = htmlspecialchars( '.' . $ext );
 		}
 
 		return $this->getLanguage()->commaList( $extArray );
@@ -258,7 +261,10 @@ class MediaStatisticsPage extends QueryPage {
 	 * @param string $mediaType
 	 */
 	protected function outputTableStart( $mediaType ) {
-		$this->getOutput()->addHTML(
+		$out = $this->getOutput();
+		$out->addModuleStyles( 'jquery.tablesorter.styles' );
+		$out->addModules( 'jquery.tablesorter' );
+		$out->addHTML(
 			Html::openElement(
 				'table',
 				[ 'class' => [
@@ -267,15 +273,16 @@ class MediaStatisticsPage extends QueryPage {
 					'sortable',
 					'wikitable'
 				] ]
-			)
+			) .
+			Html::rawElement( 'thead', [], $this->getTableHeaderRow() ) .
+			Html::openElement( 'tbody' )
 		);
-		$this->getOutput()->addHTML( $this->getTableHeaderRow() );
 	}
 
 	/**
 	 * Get (not output) the header row for the table
 	 *
-	 * @return String the header row of the able
+	 * @return string The header row of the table
 	 */
 	protected function getTableHeaderRow() {
 		$headers = [ 'mimetype', 'extensions', 'count', 'totalbytes' ];
@@ -363,8 +370,8 @@ class MediaStatisticsPage extends QueryPage {
 		$this->totalCount = $this->totalBytes = 0;
 		foreach ( $res as $row ) {
 			$mediaStats = $this->splitFakeTitle( $row->title );
-			$this->totalCount += isset( $mediaStats[2] ) ? $mediaStats[2] : 0;
-			$this->totalBytes += isset( $mediaStats[3] ) ? $mediaStats[3] : 0;
+			$this->totalCount += $mediaStats[2] ?? 0;
+			$this->totalBytes += $mediaStats[3] ?? 0;
 		}
 		$res->seek( 0 );
 	}

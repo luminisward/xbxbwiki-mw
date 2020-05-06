@@ -21,16 +21,20 @@
  * @ingroup Pager
  */
 
+use MediaWiki\Linker\LinkRenderer;
+
 /**
  * Table-based display with a user-selectable sort order
  * @ingroup Pager
  */
 abstract class TablePager extends IndexPager {
+	/** @var string */
 	protected $mSort;
 
+	/** @var stdClass */
 	protected $mCurrentRow;
 
-	public function __construct( IContextSource $context = null ) {
+	public function __construct( IContextSource $context = null, LinkRenderer $linkRenderer = null ) {
 		if ( $context ) {
 			$this->setContext( $context );
 		}
@@ -47,7 +51,8 @@ abstract class TablePager extends IndexPager {
 			$this->mDefaultDirection = IndexPager::DIR_DESCENDING;
 		} /* Else leave it at whatever the class default is */
 
-		parent::__construct();
+		// Parent constructor needs mSort set, so we call it last
+		parent::__construct( null, $linkRenderer );
 	}
 
 	/**
@@ -110,7 +115,7 @@ abstract class TablePager extends IndexPager {
 	 * @protected
 	 * @return string
 	 */
-	function getStartBody() {
+	protected function getStartBody() {
 		$sortClass = $this->getSortHeaderClass();
 
 		$s = '';
@@ -119,7 +124,7 @@ abstract class TablePager extends IndexPager {
 		// Make table header
 		foreach ( $fields as $field => $name ) {
 			if ( strval( $name ) == '' ) {
-				$s .= Html::rawElement( 'th', [], '&#160;' ) . "\n";
+				$s .= Html::rawElement( 'th', [], "\u{00A0}" ) . "\n";
 			} elseif ( $this->isFieldSortable( $field ) ) {
 				$query = [ 'sort' => $field, 'limit' => $this->mLimit ];
 				$linkType = null;
@@ -130,12 +135,12 @@ abstract class TablePager extends IndexPager {
 					// We don't actually know in which direction other fields will be sorted by default…
 					if ( $this->mDefaultDirection == IndexPager::DIR_DESCENDING ) {
 						$linkType = 'asc';
-						$class = "$sortClass TablePager_sort-descending";
+						$class = "$sortClass mw-datatable-is-sorted mw-datatable-is-descending";
 						$query['asc'] = '1';
 						$query['desc'] = '';
 					} else {
 						$linkType = 'desc';
-						$class = "$sortClass TablePager_sort-ascending";
+						$class = "$sortClass mw-datatable-is-sorted mw-datatable-is-ascending";
 						$query['asc'] = '';
 						$query['desc'] = '1';
 					}
@@ -150,7 +155,7 @@ abstract class TablePager extends IndexPager {
 
 		$tableClass = $this->getTableClass();
 		$ret = Html::openElement( 'table', [
-			'class' => "mw-datatable $tableClass" ]
+			'class' => " $tableClass" ]
 		);
 		$ret .= Html::rawElement( 'thead', [], Html::rawElement( 'tr', [], "\n" . $s . "\n" ) );
 		$ret .= Html::openElement( 'tbody' ) . "\n";
@@ -162,7 +167,7 @@ abstract class TablePager extends IndexPager {
 	 * @protected
 	 * @return string
 	 */
-	function getEndBody() {
+	protected function getEndBody() {
 		return "</tbody></table>\n";
 	}
 
@@ -188,11 +193,11 @@ abstract class TablePager extends IndexPager {
 		$fieldNames = $this->getFieldNames();
 
 		foreach ( $fieldNames as $field => $name ) {
-			$value = isset( $row->$field ) ? $row->$field : null;
+			$value = $row->$field ?? null;
 			$formatted = strval( $this->formatValue( $field, $value ) );
 
 			if ( $formatted == '' ) {
-				$formatted = '&#160;';
+				$formatted = "\u{00A0}";
 			}
 
 			$s .= Html::rawElement( 'td', $this->getCellAttrs( $field, $value ), $formatted ) . "\n";
@@ -264,10 +269,11 @@ abstract class TablePager extends IndexPager {
 	}
 
 	/**
+	 * TablePager relies on `mw-datatable` for styling, see T214208
 	 * @return string
 	 */
 	protected function getTableClass() {
-		return 'TablePager';
+		return 'mw-datatable';
 	}
 
 	/**
@@ -298,7 +304,6 @@ abstract class TablePager extends IndexPager {
 		$types = [ 'first', 'prev', 'next', 'last' ];
 
 		$queries = $this->getPagingQueries();
-		$links = [];
 
 		$buttons = [];
 
@@ -311,6 +316,9 @@ abstract class TablePager extends IndexPager {
 				// * table_pager_prev
 				// * table_pager_next
 				// * table_pager_last
+				'classes' => [ 'TablePager-button-' . $type ],
+				'flags' => [ 'progressive' ],
+				'framed' => false,
 				'label' => $this->msg( 'table_pager_' . $type )->text(),
 				'href' => $queries[ $type ] ?
 					$title->getLinkURL( $queries[ $type ] + $this->getDefaultQuery() ) :

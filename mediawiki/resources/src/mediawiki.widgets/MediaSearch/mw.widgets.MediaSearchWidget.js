@@ -4,7 +4,7 @@
  * @copyright 2011-2016 VisualEditor Team and others; see AUTHORS.txt
  * @license The MIT License (MIT); see LICENSE.txt
  */
-( function ( $, mw ) {
+( function () {
 
 	/**
 	 * Creates an mw.widgets.MediaSearchWidget object.
@@ -431,6 +431,7 @@
 	mw.widgets.MediaSearchWidget.prototype.runLayoutQueue = function () {
 		var i, len;
 
+		// eslint-disable-next-line no-jquery/no-sizzle
 		if ( this.$element.is( ':visible' ) ) {
 			for ( i = 0, len = this.layoutQueue.length; i < len; i++ ) {
 				this.layoutQueue.pop()();
@@ -470,4 +471,4 @@
 	mw.widgets.MediaSearchWidget.prototype.getLang = function () {
 		return this.lang;
 	};
-}( jQuery, mediaWiki ) );
+}() );

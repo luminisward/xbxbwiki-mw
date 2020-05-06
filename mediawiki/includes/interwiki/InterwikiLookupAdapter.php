@@ -1,4 +1,5 @@
 <?php
+
 namespace MediaWiki\Interwiki;
 
 /**
@@ -24,7 +25,7 @@ namespace MediaWiki\Interwiki;
  * @since 1.29
  * @ingroup InterwikiLookup
  *
- * @license GNU GPL v2+
+ * @license GPL-2.0-or-later
  */
 
 use Interwiki;

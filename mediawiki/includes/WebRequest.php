@@ -27,6 +27,10 @@ use MediaWiki\MediaWikiServices;
 use MediaWiki\Session\Session;
 use MediaWiki\Session\SessionId;
 use MediaWiki\Session\SessionManager;
+use Wikimedia\AtEase\AtEase;
+
+// The point of this class is to be a wrapper around super globals
+// phpcs:disable MediaWiki.Usage.SuperGlobalsUsage.SuperGlobals
 
 /**
  * The WebRequest class encapsulates getting at data passed in the
@@ -36,7 +40,29 @@ use MediaWiki\Session\SessionManager;
  * @ingroup HTTP
  */
 class WebRequest {
-	protected $data, $headers = [];
+	/**
+	 * The parameters from $_GET, $_POST and the path router
+	 * @var array
+	 */
+	protected $data;
+
+	/**
+	 * The parameters from $_GET. The parameters from the path router are
+	 * added by interpolateTitle() during Setup.php.
+	 * @var array
+	 */
+	protected $queryAndPathParams;
+
+	/**
+	 * The parameters from $_GET only.
+	 */
+	protected $queryParams;
+
+	/**
+	 * Lazy-initialized request headers indexed by upper-case header name
+	 * @var array
+	 */
+	protected $headers = [];
 
 	/**
 	 * Flag to make WebRequest::getHeader return an array of values.
@@ -93,6 +119,8 @@ class WebRequest {
 		// POST overrides GET data
 		// We don't use $_REQUEST here to avoid interference from cookies...
 		$this->data = $_POST + $_GET;
+
+		$this->queryAndPathParams = $this->queryParams = $_GET;
 	}
 
 	/**
@@ -111,76 +139,80 @@ class WebRequest {
 	 * @return array Any query arguments found in path matches.
 	 */
 	public static function getPathInfo( $want = 'all' ) {
-		global $wgUsePathInfo;
 		// PATH_INFO is mangled due to https://bugs.php.net/bug.php?id=31892
 		// And also by Apache 2.x, double slashes are converted to single slashes.
 		// So we will use REQUEST_URI if possible.
-		$matches = [];
-		if ( !empty( $_SERVER['REQUEST_URI'] ) ) {
+		if ( isset( $_SERVER['REQUEST_URI'] ) ) {
 			// Slurp out the path portion to examine...
 			$url = $_SERVER['REQUEST_URI'];
 			if ( !preg_match( '!^https?://!', $url ) ) {
 				$url = 'http://unused' . $url;
 			}
-			Wikimedia\suppressWarnings();
+			AtEase::suppressWarnings();
 			$a = parse_url( $url );
-			Wikimedia\restoreWarnings();
-			if ( $a ) {
-				$path = isset( $a['path'] ) ? $a['path'] : '';
-
-				global $wgScript;
-				if ( $path == $wgScript && $want !== 'all' ) {
-					// Script inside a rewrite path?
-					// Abort to keep from breaking...
-					return $matches;
-				}
-
-				$router = new PathRouter;
-
-				// Raw PATH_INFO style
-				$router->add( "$wgScript/$1" );
-
-				if ( isset( $_SERVER['SCRIPT_NAME'] )
-					&& preg_match( '/\.php/', $_SERVER['SCRIPT_NAME'] )
-				) {
-					# Check for SCRIPT_NAME, we handle index.php explicitly
-					# But we do have some other .php files such as img_auth.php
-					# Don't let root article paths clober the parsing for them
-					$router->add( $_SERVER['SCRIPT_NAME'] . "/$1" );
-				}
-
-				global $wgArticlePath;
-				if ( $wgArticlePath ) {
-					$router->add( $wgArticlePath );
-				}
-
-				global $wgActionPaths;
-				if ( $wgActionPaths ) {
-					$router->add( $wgActionPaths, [ 'action' => '$key' ] );
-				}
-
-				global $wgVariantArticlePath, $wgContLang;
-				if ( $wgVariantArticlePath ) {
-					$router->add( $wgVariantArticlePath,
-						[ 'variant' => '$2' ],
-						[ '$2' => $wgContLang->getVariants() ]
-					);
-				}
-
-				Hooks::run( 'WebRequestPathInfoRouter', [ $router ] );
-
-				$matches = $router->parse( $path );
+			AtEase::restoreWarnings();
+			if ( !$a ) {
+				return [];
 			}
-		} elseif ( $wgUsePathInfo ) {
-			if ( isset( $_SERVER['ORIG_PATH_INFO'] ) && $_SERVER['ORIG_PATH_INFO'] != '' ) {
-				// Mangled PATH_INFO
-				// https://bugs.php.net/bug.php?id=31892
-				// Also reported when ini_get('cgi.fix_pathinfo')==false
-				$matches['title'] = substr( $_SERVER['ORIG_PATH_INFO'], 1 );
+			$path = $a['path'] ?? '';
 
-			} elseif ( isset( $_SERVER['PATH_INFO'] ) && $_SERVER['PATH_INFO'] != '' ) {
-				// Regular old PATH_INFO yay
-				$matches['title'] = substr( $_SERVER['PATH_INFO'], 1 );
+			global $wgScript;
+			if ( $path == $wgScript && $want !== 'all' ) {
+				// Script inside a rewrite path?
+				// Abort to keep from breaking...
+				return [];
+			}
+
+			$router = new PathRouter;
+
+			// Raw PATH_INFO style
+			$router->add( "$wgScript/$1" );
+
+			if ( isset( $_SERVER['SCRIPT_NAME'] )
+				&& strpos( $_SERVER['SCRIPT_NAME'], '.php' ) !== false
+			) {
+				// Check for SCRIPT_NAME, we handle index.php explicitly
+				// But we do have some other .php files such as img_auth.php
+				// Don't let root article paths clober the parsing for them
+				$router->add( $_SERVER['SCRIPT_NAME'] . "/$1" );
+			}
+
+			global $wgArticlePath;
+			if ( $wgArticlePath ) {
+				$router->add( $wgArticlePath );
+			}
+
+			global $wgActionPaths;
+			$articlePaths = PathRouter::getActionPaths( $wgActionPaths, $wgArticlePath );
+			if ( $articlePaths ) {
+				$router->add( $articlePaths, [ 'action' => '$key' ] );
+			}
+
+			global $wgVariantArticlePath;
+			if ( $wgVariantArticlePath ) {
+				$router->add( $wgVariantArticlePath,
+					[ 'variant' => '$2' ],
+					[ '$2' => MediaWikiServices::getInstance()->getContentLanguage()->
+					getVariants() ]
+				);
+			}
+
+			Hooks::run( 'WebRequestPathInfoRouter', [ $router ] );
+
+			$matches = $router->parse( $path );
+		} else {
+			global $wgUsePathInfo;
+			$matches = [];
+			if ( $wgUsePathInfo ) {
+				if ( !empty( $_SERVER['ORIG_PATH_INFO'] ) ) {
+					// Mangled PATH_INFO
+					// https://bugs.php.net/bug.php?id=31892
+					// Also reported when ini_get('cgi.fix_pathinfo')==false
+					$matches['title'] = substr( $_SERVER['ORIG_PATH_INFO'], 1 );
+				} elseif ( !empty( $_SERVER['PATH_INFO'] ) ) {
+					// Regular old PATH_INFO yay
+					$matches['title'] = substr( $_SERVER['PATH_INFO'], 1 );
+				}
 			}
 		}
 
@@ -271,9 +303,18 @@ class WebRequest {
 	public static function getRequestId() {
 		// This method is called from various error handlers and should be kept simple.
 
-		if ( !self::$reqId ) {
-			self::$reqId = isset( $_SERVER['UNIQUE_ID'] )
-				? $_SERVER['UNIQUE_ID'] : wfRandomString( 24 );
+		if ( self::$reqId ) {
+			return self::$reqId;
+		}
+
+		global $wgAllowExternalReqID;
+
+		self::$reqId = $_SERVER['UNIQUE_ID'] ?? wfRandomString( 24 );
+		if ( $wgAllowExternalReqID ) {
+			$id = RequestContext::getMain()->getRequest()->getHeader( 'X-Request-Id' );
+			if ( $id ) {
+				self::$reqId = $id;
+			}
 		}
 
 		return self::$reqId;
@@ -304,7 +345,7 @@ class WebRequest {
 	/**
 	 * Check for title, action, and/or variant data in the URL
 	 * and interpolate it into the GET variables.
-	 * This should only be run after $wgContLang is available,
+	 * This should only be run after the content language is available,
 	 * as we may need the list of language variants to determine
 	 * available variant URLs.
 	 */
@@ -316,7 +357,7 @@ class WebRequest {
 
 		$matches = self::getPathInfo( 'title' );
 		foreach ( $matches as $key => $val ) {
-			$this->data[$key] = $_GET[$key] = $_REQUEST[$key] = $val;
+			$this->data[$key] = $this->queryAndPathParams[$key] = $val;
 		}
 	}
 
@@ -362,9 +403,8 @@ class WebRequest {
 				$data[$key] = $this->normalizeUnicode( $val );
 			}
 		} else {
-			global $wgContLang;
-			$data = isset( $wgContLang ) ?
-				$wgContLang->normalize( $data ) :
+			$contLang = MediaWikiServices::getInstance()->getContentLanguage();
+			$data = $contLang ? $contLang->normalize( $data ) :
 				UtfNormal\Validator::cleanUp( $data );
 		}
 		return $data;
@@ -380,23 +420,28 @@ class WebRequest {
 	 */
 	private function getGPCVal( $arr, $name, $default ) {
 		# PHP is so nice to not touch input data, except sometimes:
-		# https://secure.php.net/variables.external#language.variables.external.dot-in-names
+		# https://www.php.net/variables.external#language.variables.external.dot-in-names
 		# Work around PHP *feature* to avoid *bugs* elsewhere.
 		$name = strtr( $name, '.', '_' );
-		if ( isset( $arr[$name] ) ) {
-			global $wgContLang;
-			$data = $arr[$name];
-			if ( isset( $_GET[$name] ) && !is_array( $data ) ) {
-				# Check for alternate/legacy character encoding.
-				if ( isset( $wgContLang ) ) {
-					$data = $wgContLang->checkTitleEncoding( $data );
-				}
-			}
-			$data = $this->normalizeUnicode( $data );
-			return $data;
-		} else {
+
+		if ( !isset( $arr[$name] ) ) {
 			return $default;
 		}
+
+		$data = $arr[$name];
+		# Optimisation: Skip UTF-8 normalization and legacy transcoding for simple ASCII strings.
+		$isAsciiStr = ( is_string( $data ) && preg_match( '/[^\x20-\x7E]/', $data ) === 0 );
+		if ( !$isAsciiStr ) {
+			if ( isset( $_GET[$name] ) && is_string( $data ) ) {
+				# Check for alternate/legacy character encoding.
+				$data = MediaWikiServices::getInstance()
+					->getContentLanguage()
+					->checkTitleEncoding( $data );
+			}
+			$data = $this->normalizeUnicode( $data );
+		}
+
+		return $data;
 	}
 
 	/**
@@ -455,7 +500,7 @@ class WebRequest {
 	 * @return mixed Old value if one was present, null otherwise
 	 */
 	public function setVal( $key, $value ) {
-		$ret = isset( $this->data[$key] ) ? $this->data[$key] : null;
+		$ret = $this->data[$key] ?? null;
 		$this->data[$key] = $value;
 		return $ret;
 	}
@@ -482,7 +527,7 @@ class WebRequest {
 	 * If no source and no default, returns null.
 	 *
 	 * @param string $name
-	 * @param array $default Optional default (or null)
+	 * @param array|null $default Optional default (or null)
 	 * @return array|null
 	 */
 	public function getArray( $name, $default = null ) {
@@ -501,8 +546,8 @@ class WebRequest {
 	 * If an array is returned, contents are guaranteed to be integers.
 	 *
 	 * @param string $name
-	 * @param array $default Option default (or null)
-	 * @return array Array of ints
+	 * @param array|null $default Option default (or null)
+	 * @return int[]|null
 	 */
 	public function getIntArray( $name, $default = null ) {
 		$val = $this->getArray( $name, $default );
@@ -644,14 +689,39 @@ class WebRequest {
 	}
 
 	/**
-	 * Get the values passed in the query string.
+	 * Get the values passed in the query string and the path router parameters.
 	 * No transformation is performed on the values.
 	 *
 	 * @codeCoverageIgnore
 	 * @return array
 	 */
 	public function getQueryValues() {
-		return $_GET;
+		return $this->queryAndPathParams;
+	}
+
+	/**
+	 * Get the values passed in the query string only, not including the path
+	 * router parameters. This is less suitable for self-links to index.php but
+	 * useful for other entry points. No transformation is performed on the
+	 * values.
+	 *
+	 * @since 1.34
+	 * @return array
+	 */
+	public function getQueryValuesOnly() {
+		return $this->queryParams;
+	}
+
+	/**
+	 * Get the values passed via POST.
+	 * No transformation is performed on the values.
+	 *
+	 * @since 1.32
+	 * @codeCoverageIgnore
+	 * @return array
+	 */
+	public function getPostValues() {
+		return $_POST;
 	}
 
 	/**
@@ -699,7 +769,7 @@ class WebRequest {
 	 * @return string
 	 */
 	public function getMethod() {
-		return isset( $_SERVER['REQUEST_METHOD'] ) ? $_SERVER['REQUEST_METHOD'] : 'GET';
+		return $_SERVER['REQUEST_METHOD'] ?? 'GET';
 	}
 
 	/**
@@ -762,8 +832,8 @@ class WebRequest {
 	 * Get a cookie from the $_COOKIE jar
 	 *
 	 * @param string $key The name of the cookie
-	 * @param string $prefix A prefix to use for the cookie name, if not $wgCookiePrefix
-	 * @param mixed $default What to return if the value isn't found
+	 * @param string|null $prefix A prefix to use for the cookie name, if not $wgCookiePrefix
+	 * @param mixed|null $default What to return if the value isn't found
 	 * @return mixed Cookie value or $default if the cookie not set
 	 */
 	public function getCookie( $key, $prefix = null, $default = null ) {
@@ -837,12 +907,19 @@ class WebRequest {
 	 * in HTML or other output.
 	 *
 	 * If $wgServer is protocol-relative, this will return a fully
-	 * qualified URL with the protocol that was used for this request.
+	 * qualified URL with the protocol of this request object.
 	 *
 	 * @return string
 	 */
 	public function getFullRequestURL() {
-		return wfExpandUrl( $this->getRequestURL(), PROTO_CURRENT );
+		// Pass an explicit PROTO constant instead of PROTO_CURRENT so that we
+		// do not rely on state from the global $wgRequest object (which it would,
+		// via wfGetServerUrl/wfExpandUrl/$wgRequest->protocol).
+		if ( $this->getProtocol() === 'http' ) {
+			return wfGetServerUrl( PROTO_HTTP ) . $this->getRequestURL();
+		} else {
+			return wfGetServerUrl( PROTO_HTTPS ) . $this->getRequestURL();
+		}
 	}
 
 	/**
@@ -1111,7 +1188,7 @@ HTML;
 	/**
 	 * Parse the Accept-Language header sent by the client into an array
 	 *
-	 * @return array Array( languageCode => q-value ) sorted by q-value in
+	 * @return array [ languageCode => q-value ] sorted by q-value in
 	 *   descending order then appearing time in the header in ascending order.
 	 * May contain the "language" '*', which applies to languages other than those explicitly listed.
 	 * This is aligned with rfc2616 section 14.4
@@ -1295,7 +1372,7 @@ HTML;
 	 *
 	 * This means that the client is not requesting any state changes and that database writes
 	 * are not inherently required. Ideally, no visible updates would happen at all. If they
-	 * must, then they should not be publically attributed to the end user.
+	 * must, then they should not be publicly attributed to the end user.
 	 *
 	 * In more detail:
 	 *   - Cache populations and refreshes MAY occur.
