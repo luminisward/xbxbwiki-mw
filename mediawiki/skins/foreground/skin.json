@@ -35,7 +35,7 @@
 				"assets/stylesheets/foundation.css",
 				"assets/stylesheets/foreground.css",
 				"assets/stylesheets/foreground-print.css",
-				"assets/stylesheets/custom.less"
+				"assets/stylesheets/custom.css"
 			]
 		},
 		"skins.foreground.modernizr": {
