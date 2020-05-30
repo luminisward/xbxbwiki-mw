@@ -9,7 +9,7 @@ body.page-首页.action-view #firstHeading {
   display: none;
 }
 
-#tagline {
+#tagline, #siteSub {
   display: none;
 }
 
