@@ -1,15 +1,15 @@
 <?php
 
+use MediaWiki\MediaWikiServices;
+
 class XBDBScribuntoLuaLibrary extends Scribunto_LuaLibraryBase
 {
     private $conn;
     private $tables;
     private $conn_error;
 
-    public function __construct(Scribunto_LuaEngine $engine)
+    private function connectDb()
     {
-        parent::__construct($engine);
-
         global $wgXBDBScribuntoConnection;
         $servername = $wgXBDBScribuntoConnection["servername"];
         $username   = $wgXBDBScribuntoConnection["username"];
@@ -24,6 +24,15 @@ class XBDBScribuntoLuaLibrary extends Scribunto_LuaLibraryBase
         if ($this->conn->connect_error) {
             $this->conn_error = new Exception("连接失败: " . $this->conn->connect_error);
         }
+        if ($this->conn_error) {
+            throw $this->conn_error;
+        }
+    }
+
+    public function __construct(Scribunto_LuaEngine $engine)
+    {
+        parent::__construct($engine);
+        // $this->connectDb();
     }
 
     // public function __destruct()
@@ -35,14 +44,16 @@ class XBDBScribuntoLuaLibrary extends Scribunto_LuaLibraryBase
     {
         $lib = [
             'query' => [$this, 'query'],
+            'post'  => [$this, 'post'],
         ];
         $this->getEngine()->registerInterface(__DIR__ . '/' . 'mw.xbdb.lua', $lib, []);
     }
 
     public function query($sql, $schema)
     {
-        if ($this->conn_error) {
-            throw $this->conn_error;
+
+        if (is_null($this->conn)) {
+            $this->connectDb();
         }
 
         $this->conn->exec("SET search_path TO $schema");
@@ -60,4 +71,18 @@ class XBDBScribuntoLuaLibrary extends Scribunto_LuaLibraryBase
 
         return [$stocks];
     }
+
+    public function post($entrypoint, $postData)
+    {
+        global $wgXBDBScribuntoPostEntrypoints;
+        if (!in_array($entrypoint, $wgXBDBScribuntoPostEntrypoints)) {
+            throw new Exception($entrypoint . ' not in $wgXBDBScribuntoPostEntrypoints');
+        }
+        $response = MediaWikiServices::getInstance()->getHttpRequestFactory()->post($entrypoint, [
+            'postData' => $postData,
+        ]);
+        return [json_decode($response, true)];
+
+    }
+
 }
