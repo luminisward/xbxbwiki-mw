@@ -45,6 +45,7 @@ class XBDBScribuntoLuaLibrary extends Scribunto_LuaLibraryBase
         $lib = [
             'query' => [$this, 'query'],
             'post'  => [$this, 'post'],
+            'env'  => [$this, 'env'],
         ];
         $this->getEngine()->registerInterface(__DIR__ . '/' . 'mw.xbdb.lua', $lib, []);
     }
@@ -83,6 +84,12 @@ class XBDBScribuntoLuaLibrary extends Scribunto_LuaLibraryBase
         ]);
         return [json_decode($response, true)];
 
+    }
+
+    public function env()
+    {
+        global $environment;
+        return [$environment];
     }
 
 }

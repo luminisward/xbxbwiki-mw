@@ -28,4 +28,8 @@ function xbdb.post(url, data)
   return php.post(url, data)
 end
 
+function xbdb.env()
+  return php.env()
+end
+
 return xbdb
