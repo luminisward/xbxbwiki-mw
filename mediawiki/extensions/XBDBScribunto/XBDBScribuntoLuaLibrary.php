@@ -82,7 +82,13 @@ class XBDBScribuntoLuaLibrary extends Scribunto_LuaLibraryBase
         $response = MediaWikiServices::getInstance()->getHttpRequestFactory()->post($entrypoint, [
             'postData' => $postData,
         ]);
-        return [json_decode($response, true)];
+
+        $stocks = json_decode($response, true);
+
+        array_unshift($stocks, '');
+        unset($stocks[0]);
+
+        return [$stocks];
 
     }
 
