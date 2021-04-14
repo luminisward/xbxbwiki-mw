@@ -171,8 +171,15 @@ h1#firstHeading {
       border-bottom: 2px solid #0ce3ac;
       height: 33px;
       line-height: 33px;
+      overflow: auto;
+      white-space: nowrap;
+
+      &::-webkit-scrollbar{ 
+        height: 0;
+      }
+
       &::before {
-        float: left;
+        position: absolute;
         content: "";
         margin-left: -25px;
         width: 20px;
@@ -191,6 +198,12 @@ h1#firstHeading {
       line-height: 2em;
       padding-left: 0.5em;
       margin: 0.7em 0;
+      white-space: nowrap;
+
+      &::-webkit-scrollbar{ 
+        height: 0;
+      }
+
     }
 
     .floatnone {
