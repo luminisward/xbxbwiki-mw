@@ -5,6 +5,8 @@ services:
     image: mysql:5.7
     volumes:
       - "./mysql/data:/var/lib/mysql"
+      - "./mysql/conf.d/log.cnf:/etc/mysql/mysql.conf.d/log.cnf"
+      - "./mysql/log:/var/log/mysql"
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --init-connect='SET NAMES utf8mb4'
     environment:
       - MYSQL_ROOT_PASSWORD=MjqVXTUhDgp4xsakiwT5
