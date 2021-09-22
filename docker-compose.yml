@@ -30,6 +30,11 @@ services:
       - "./mediawiki:/var/www/html"
       - "./xbxb/LocalSettings.php:/var/www/html/LocalSettings.php"
       - "./xbxb/images:/var/www/html/images"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
     # Xdebug
     # extra_hosts:
     #   docker_host: 192.168.66.12
