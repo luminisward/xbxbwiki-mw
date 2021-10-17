@@ -1,0 +1,25 @@
+User-agent: *
+
+Disallow: /index.php?title=MediaWiki
+Disallow: /index.php?title=Special
+Disallow: /index.php?title=Template
+Disallow: /index.php?title=User
+Disallow: /index.php?title=JSON
+Disallow: /skins/
+Disallow: /Mediawiki:
+Disallow: /Special:
+Disallow: /Template:
+Disallow: /User:
+Disallow: /JSON:
+Disallow: /特殊:
+Disallow: /用户:
+Disallow: /模板:
+Disallow: /*?*action=
+Disallow: /*?*feed=
+Disallow: /*?*oldid=
+Disallow: /*?*printable=
+Disallow: /*?*variant=
+Disallow: /*?*useskin=
+Disallow: /*?*uselang=
+Disallow: /index.php?diff=
+Disallow: /index.php?oldid=
