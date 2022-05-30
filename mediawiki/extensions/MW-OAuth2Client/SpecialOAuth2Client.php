@@ -184,12 +184,12 @@ class SpecialOAuth2Client extends SpecialPage {
 		$user->setEmail($email);
 		$user->load();
 		if ( !( $user instanceof User && $user->getId() ) ) {
-			$user->addToDatabase();
+			//$user->addToDatabase();
 			// MediaWiki recommends below code instead of addToDatabase to create user but it seems to fail.
-			// $authManager = MediaWiki\Auth\AuthManager::singleton();
-			// $authManager->autoCreateUser( $user, MediaWiki\Auth\AuthManager::AUTOCREATE_SOURCE_SESSION );
+			$authManager = MediaWiki\Auth\AuthManager::singleton();
+			$authManager->autoCreateUser( $user, MediaWiki\Auth\AuthManager::AUTOCREATE_SOURCE_SESSION );
 		}
-    $user->confirmEmail();
+		$user->confirmEmail();
 		$user->setToken();
 
 		// Setup the session
