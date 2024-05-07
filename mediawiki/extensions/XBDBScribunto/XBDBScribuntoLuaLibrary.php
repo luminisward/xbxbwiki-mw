@@ -73,13 +73,10 @@ class XBDBScribuntoLuaLibrary extends Scribunto_LuaLibraryBase
         return [$stocks];
     }
 
-    public function post($entrypoint, $postData)
+    public function getBdatData($postData)
     {
         global $wgXBDBScribuntoPostEntrypoints;
-        if (!in_array($entrypoint, $wgXBDBScribuntoPostEntrypoints)) {
-            throw new Exception($entrypoint . ' not in $wgXBDBScribuntoPostEntrypoints');
-        }
-        $response = MediaWikiServices::getInstance()->getHttpRequestFactory()->post($entrypoint, [
+        $response = MediaWikiServices::getInstance()->getHttpRequestFactory()->post($wgXBDBScribuntoPostEntrypoints, [
             'postData' => $postData,
         ]);
 
