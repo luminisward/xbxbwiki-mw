@@ -25,7 +25,7 @@ function xbdb.query(sql,schema)
 end
 
 function xbdb.getBdatData(data)
-  return php.getBdatData(data)
+  return php.post(data)
 end
 
 function xbdb.env()
